@@ -1,0 +1,382 @@
+/// IPC Named Pipe Server + JSON-RPC 2.0 Router
+///
+/// Listens to `\\.\pipe\keymaster-pro-ipc`, accepts JSON-RPC 2.0 requests
+/// from GUI and routes them to handlers.
+///
+/// Protocol: Newline-delimited JSON (one JSON line + \n per message).
+
+use tokio::net::windows::named_pipe::{ServerOptions, NamedPipeServer};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tracing::{info, warn};
+
+use crate::daemon::state::DaemonStateRef;
+use crate::shared::constants;
+
+use super::ipc_types::*;
+
+/// Start the IPC server.
+///
+/// Creates named pipe and serves connections in a loop.
+pub async fn start_ipc_server(state: DaemonStateRef) -> Result<(), String> {
+    let pipe_path = constants::IPC_PIPE_NAME;
+    info!("IPC сервер запускается на {}", pipe_path);
+
+    loop {
+        // Create new pipe instance
+        let server = match ServerOptions::new()
+            .first_pipe_instance(false)
+            .max_instances(16)
+            .out_buffer_size(65536)
+            .in_buffer_size(65536)
+            .create(pipe_path)
+        {
+            Ok(s) => s,
+            Err(e) => {
+                warn!("Failed to create Named Pipe: {}. Retrying in 100ms...", e);
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                continue;
+            }
+        };
+
+        // Wait for client connection
+        info!("IPC: waiting for client connection...");
+        if let Err(e) = server.connect().await {
+            warn!("Connection error: {}. Retrying in 50ms...", e);
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            continue;
+        }
+        info!("IPC: client connected");
+
+        // Handle client in a separate task
+        let state = state.clone();
+        tokio::spawn(async move {
+            if let Err(e) = handle_client(server, state).await {
+                warn!("IPC: client handling error: {}", e);
+            }
+        });
+    }
+}
+
+/// Handle client connection.
+///
+/// Reads JSON-RPC requests line by line and sends responses.
+async fn handle_client(pipe: NamedPipeServer, state: DaemonStateRef) -> Result<(), String> {
+    let (reader, mut writer) = tokio::io::split(pipe);
+    let mut lines = BufReader::new(reader).lines();
+
+    while let Some(line) = lines.next_line().await
+        .map_err(|e| format!("Read error: {}", e))?
+    {
+        if line.is_empty() {
+            continue;
+        }
+
+        // Parse JSON-RPC request
+        let response = match serde_json::from_str::<JsonRpcRequest>(&line) {
+            Ok(req) => route_request(req, &state).await,
+            Err(e) => {
+                warn!("IPC: invalid JSON-RPC: {}", e);
+                JsonRpcResponse::error(
+                    PARSE_ERROR,
+                    format!("Parse error: {}", e),
+                    serde_json::Value::Null,
+                )
+            }
+        };
+
+        // Serialize and send response
+        let mut response_bytes = serde_json::to_string(&response)
+            .map_err(|e| format!("Serialization error: {}", e))?;
+        response_bytes.push('\n');
+
+        writer.write_all(response_bytes.as_bytes()).await
+            .map_err(|e| format!("Send error: {}", e))?;
+        writer.flush().await
+            .map_err(|e| format!("Flush error: {}", e))?;
+    }
+
+    Ok(())
+}
+
+/// Route JSON-RPC request to handler
+async fn route_request(req: JsonRpcRequest, state: &DaemonStateRef) -> JsonRpcResponse {
+    let id = req.id.unwrap_or(serde_json::Value::Null);
+
+    info!("IPC → {} (id={})", req.method, id);
+
+    let result = match req.method.as_str() {
+        // === System ===
+        "ping" => Ok(serde_json::json!({ "pong": true })),
+        "get_status" => handle_get_status(state).await,
+        "shutdown" => handle_shutdown(state).await,
+
+        // === Profiles ===
+        "get_active_profile" => handle_get_active_profile(state).await,
+        "set_active_profile" => handle_set_active_profile(state, req.params).await,
+        "list_profiles" => handle_list_profiles().await,
+
+        // === Config ===
+        "get_config" => handle_get_config(state).await,
+        "update_config" => handle_update_config(state, req.params).await,
+
+        // === Forward to router ===
+        _ => {
+            match crate::daemon::router::dispatch(req.method.as_str(), req.params, state).await {
+                Ok(val) => Ok(val),
+                Err(err) => {
+                    warn!("IPC Router error for {}: {}", req.method, err);
+                    Err(JsonRpcError {
+                        code: INTERNAL_ERROR,
+                        message: err,
+                        data: None,
+                    })
+                }
+            }
+        }
+    };
+
+    match result {
+        Ok(value) => JsonRpcResponse::success(value, id),
+        Err(err) => JsonRpcResponse::error(err.code, err.message, id),
+    }
+}
+
+fn filetime_to_u64(ft: &windows::Win32::Foundation::FILETIME) -> u64 {
+    ((ft.dwHighDateTime as u64) << 32) | (ft.dwLowDateTime as u64)
+}
+
+fn get_current_cpu_usage_percent(state: &DaemonStateRef) -> f64 {
+    use windows::Win32::Foundation::FILETIME;
+    use windows::Win32::System::Threading::{GetCurrentProcess, GetProcessTimes, GetSystemTimes};
+
+    let mut creation = FILETIME::default();
+    let mut exit = FILETIME::default();
+    let mut kernel = FILETIME::default();
+    let mut user = FILETIME::default();
+
+    unsafe {
+        if GetProcessTimes(GetCurrentProcess(), &mut creation, &mut exit, &mut kernel, &mut user).is_err() {
+            return 0.0;
+        }
+        let mut sys_idle = FILETIME::default();
+        let mut sys_kernel = FILETIME::default();
+        let mut sys_user = FILETIME::default();
+        if GetSystemTimes(Some(&mut sys_idle), Some(&mut sys_kernel), Some(&mut sys_user)).is_err() {
+            return 0.0;
+        }
+
+        let proc_t = filetime_to_u64(&kernel) + filetime_to_u64(&user);
+        let sys_t = filetime_to_u64(&sys_kernel) + filetime_to_u64(&sys_user);
+
+        let now = std::time::Instant::now();
+
+        if let Ok(s) = state.read() {
+            if let Ok(mut last_lock) = s.cpu_tracking.lock() {
+                if let Some((last_proc, last_sys, last_time)) = *last_lock {
+                    let proc_diff = proc_t.saturating_sub(last_proc);
+                    let sys_diff = sys_t.saturating_sub(last_sys);
+                    let time_diff = now.duration_since(last_time).as_secs_f64();
+
+                    *last_lock = Some((proc_t, sys_t, now));
+
+                    if sys_diff > 0 && time_diff > 0.0 {
+                        let usage = (proc_diff as f64 / sys_diff as f64) * 100.0;
+                        return (usage * 100.0).round() / 100.0;
+                    }
+                } else {
+                    *last_lock = Some((proc_t, sys_t, now));
+                }
+            }
+        }
+    }
+    0.0
+}
+
+fn get_current_ram_usage_mb() -> f64 {
+    use windows::Win32::System::Threading::GetCurrentProcess;
+    use windows::Win32::System::ProcessStatus::{GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS};
+
+    let mut counters = PROCESS_MEMORY_COUNTERS::default();
+    unsafe {
+        if GetProcessMemoryInfo(
+            GetCurrentProcess(),
+            &mut counters,
+            std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32,
+        ).is_ok() {
+            let bytes = counters.WorkingSetSize;
+            let mb = bytes as f64 / 1024.0 / 1024.0;
+            return (mb * 10.0).round() / 10.0;
+        }
+    }
+    0.0
+}
+
+// === Command Handlers ===
+
+/// Get current daemon status
+async fn handle_get_status(state: &DaemonStateRef) -> Result<serde_json::Value, JsonRpcError> {
+    let s = state.read().map_err(|_| JsonRpcError {
+        code: INTERNAL_ERROR,
+        message: "Failed to read state".into(),
+        data: None,
+    })?;
+
+    let cpu_usage = get_current_cpu_usage_percent(state);
+    let ram_usage = get_current_ram_usage_mb();
+
+    Ok(serde_json::json!({
+        "running": s.running,
+        "hooks_installed": s.hooks_installed,
+        "kb_hook_enabled": s.kb_hook_enabled,
+        "mouse_hook_enabled": s.mouse_hook_enabled,
+        "active_profile_id": s.active_profile_id,
+        "active_layers": s.active_layers,
+        "cpu_usage": cpu_usage,
+        "memory_usage_mb": ram_usage,
+        "keystrokes_processed": s.keystrokes_processed.load(std::sync::atomic::Ordering::Relaxed),
+        "last_latency_us": s.last_latency_us.load(std::sync::atomic::Ordering::Relaxed),
+    }))
+}
+
+/// Shutdown daemon
+async fn handle_shutdown(state: &DaemonStateRef) -> Result<serde_json::Value, JsonRpcError> {
+    info!("IPC: shutdown command received");
+
+    let mut s = state.write().map_err(|_| JsonRpcError {
+        code: INTERNAL_ERROR,
+        message: "Failed to write state".into(),
+        data: None,
+    })?;
+    s.running = false;
+
+    // Send WM_QUIT to exit message loop
+    crate::daemon::runner::request_shutdown();
+
+    Ok(serde_json::json!({ "success": true, "message": "Daemon shutting down" }))
+}
+
+/// Get active profile ID
+async fn handle_get_active_profile(state: &DaemonStateRef) -> Result<serde_json::Value, JsonRpcError> {
+    let s = state.read().map_err(|_| JsonRpcError {
+        code: INTERNAL_ERROR,
+        message: "Failed to read state".into(),
+        data: None,
+    })?;
+
+    Ok(serde_json::json!({
+        "profile_id": s.active_profile_id
+    }))
+}
+
+/// Set active profile ID
+async fn handle_set_active_profile(
+    state: &DaemonStateRef,
+    params: Option<serde_json::Value>,
+) -> Result<serde_json::Value, JsonRpcError> {
+    let params = params.ok_or(JsonRpcError {
+        code: INVALID_PARAMS,
+        message: "Missing params".into(),
+        data: None,
+    })?;
+
+    let profile_id = params.get("profile_id")
+        .and_then(|v| v.as_str())
+        .ok_or(JsonRpcError {
+            code: INVALID_PARAMS,
+            message: "Missing 'profile_id'".into(),
+            data: None,
+        })?;
+
+    let mut s = state.write().map_err(|_| JsonRpcError {
+        code: INTERNAL_ERROR,
+        message: "Failed to write state".into(),
+        data: None,
+    })?;
+    s.active_profile_id = profile_id.to_string();
+
+    info!("IPC: active profile -> {}", profile_id);
+
+    Ok(serde_json::json!({ "success": true, "profile_id": profile_id }))
+}
+
+/// List profiles (stub)
+async fn handle_list_profiles() -> Result<serde_json::Value, JsonRpcError> {
+    // TODO: Load from persistence
+    Ok(serde_json::json!({
+        "profiles": ["default"]
+    }))
+}
+
+/// Get daemon configuration
+async fn handle_get_config(_state: &DaemonStateRef) -> Result<serde_json::Value, JsonRpcError> {
+    match crate::shared::config::load_config() {
+        Ok(config) => Ok(serde_json::to_value(config).unwrap_or(serde_json::Value::Null)),
+        Err(e) => Err(JsonRpcError {
+            code: INTERNAL_ERROR,
+            message: format!("Failed to load config: {}", e),
+            data: None,
+        })
+    }
+}
+
+/// Update daemon configuration
+async fn handle_update_config(state: &DaemonStateRef, params: Option<serde_json::Value>) -> Result<serde_json::Value, JsonRpcError> {
+    let params = params.ok_or_else(|| JsonRpcError {
+        code: INVALID_PARAMS,
+        message: "Missing parameters".to_string(),
+        data: None,
+    })?;
+
+    // Load current config
+    let mut config = crate::shared::config::load_config().map_err(|e| JsonRpcError {
+        code: INTERNAL_ERROR,
+        message: format!("Failed to load config: {}", e),
+        data: None,
+    })?;
+
+    // Apply updates
+    if let Some(obj) = params.as_object() {
+        if let Some(lang) = obj.get("language").and_then(|v| v.as_str()) {
+            config.language = lang.to_string();
+        }
+        if let Some(theme) = obj.get("theme").and_then(|v| v.as_str()) {
+            config.theme = theme.to_string();
+        }
+        if let Some(autostart) = obj.get("autostart").and_then(|v| v.as_bool()) {
+            config.autostart = autostart;
+        }
+        if let Some(minimize) = obj.get("minimizeToTray").and_then(|v| v.as_bool()) {
+            config.minimize_to_tray = minimize;
+        }
+        if let Some(kb) = obj.get("kbHookEnabled").and_then(|v| v.as_bool()) {
+            config.kb_hook_enabled = kb;
+        }
+        if let Some(mouse) = obj.get("mouseHookEnabled").and_then(|v| v.as_bool()) {
+            config.mouse_hook_enabled = mouse;
+        }
+        if let Some(debug) = obj.get("debugMode").and_then(|v| v.as_bool()) {
+            config.debug_mode = debug;
+        }
+        if let Some(active_id) = obj.get("activeProfileId").and_then(|v| v.as_str()) {
+            config.active_profile_id = active_id.to_string();
+        }
+        if let Some(scale) = obj.get("scale").and_then(|v| v.as_f64()) {
+            config.scale = scale;
+        }
+    }
+
+    // Save config
+    crate::shared::config::save_config(&config).map_err(|e| JsonRpcError {
+        code: INTERNAL_ERROR,
+        message: format!("Failed to save config: {}", e),
+        data: None,
+    })?;
+
+    // Update daemon state
+    if let Ok(mut s) = state.write() {
+        s.kb_hook_enabled = config.kb_hook_enabled;
+        s.mouse_hook_enabled = config.mouse_hook_enabled;
+    }
+
+    Ok(serde_json::json!({ "success": true }))
+}

@@ -1,0 +1,52 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+dist-ssr/
+
+# Rust / Cargo
+src-tauri/target/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# OS files
+Thumbs.db
+Desktop.ini
+
+# Tauri
+src-tauri/gen/
+
+# AI assistant context (private)
+memory-bank/
+.clinerules/
+
+# Internal planning documents
+docs/
+implementation_plan.md
+
+# Design mockups (internal)
+option_a_layout.png
+option_b_layout.png
+
+# Misc artifacts
+-p/

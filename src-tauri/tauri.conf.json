@@ -1,0 +1,57 @@
+{
+  "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-config-schema/schema.json",
+  "productName": "KeyMaster Pro",
+  "version": "0.1.0",
+  "identifier": "com.keymaster.pro",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://127.0.0.1:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "KeyMaster Pro",
+        "width": 1000,
+        "height": 700,
+        "minWidth": 800,
+        "minHeight": 500,
+        "resizable": true,
+        "fullscreen": false,
+        "url": "index.html"
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "nsis": {
+        "installMode": "both",
+        "languages": ["English", "Russian"],
+        "displayLanguageSelector": true
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "active": true,
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQwOEZDQjgwNDhBQ0FFRTYKUldUbXJxeElnTXVQUVBRRTBaZmZxalBUVlJBSDgwb1dkV3V5S3R1VVlHeGd1WXZLamdTd0NkYlUK",
+      "endpoints": [
+        "https://github.com/KeyMaster-Pro/keymaster-pro/releases/latest/download/latest.json"
+      ]
+    }
+  }
+}

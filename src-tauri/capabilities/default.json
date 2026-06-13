@@ -1,0 +1,17 @@
+{
+  "identifier": "default",
+  "description": "Capability for the main window",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "dialog:default",
+    "fs:default",
+    "global-shortcut:default",
+    "log:default",
+    "notification:default",
+    "opener:default",
+    "shell:default",
+    "store:default",
+    "window-state:default"
+  ]
+}

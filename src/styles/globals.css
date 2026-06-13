@@ -1,0 +1,259 @@
+@import "tailwindcss";
+
+@theme {
+  --color-app-bg: var(--color-background);
+  --color-app-surface: var(--color-surface);
+  --color-app-surface-hover: var(--color-surface-hover);
+  --color-app-border: var(--color-border);
+  --color-app-text: var(--color-text);
+  --color-app-text-muted: var(--color-text-muted);
+  --color-app-muted: var(--color-text-muted);
+  --color-app-primary: var(--color-primary);
+  --color-app-primary-hover: var(--color-primary-hover);
+  --color-app-accent: var(--color-accent);
+  --color-app-danger: var(--color-danger);
+  --color-app-danger-hover: var(--color-danger-hover);
+  --color-app-success: var(--color-success);
+  --color-app-warning: var(--color-warning);
+}
+
+html {
+  font-size: calc(16px * var(--ui-scale, 0.85));
+}
+
+/* CSS variables для темной темы (по умолчанию) */
+:root {
+  --bg-canvas: #0d1117;
+  --bg-subtle: #161b22;
+  --bg-inset: #090d13;
+  --fg-default: #e6edf3;
+  --fg-muted: #7d8590;
+  --border-default: #30363d;
+  --border-muted: #21262d;
+  --border-subtle: #161b22;
+  
+  --accent-color: #1f6feb;
+  --accent-hover: #388bfd;
+  --accent-subtle: rgba(56, 139, 253, 0.15);
+  
+  --success-color: #238636;
+  --success-subtle: rgba(46, 160, 67, 0.15);
+  
+  --kbd-bg: #21262d;
+  --kbd-border: #30363d;
+  --kbd-shadow-color: #000000;
+  
+  --active-row-bg: rgba(31, 111, 235, 0.1);
+  --title-bar-bg: #161b22;
+
+  --table-font-size: 12px;
+  --table-row-padding: 8px;
+
+  /* Mapped standard colors */
+  --color-background: var(--bg-canvas);
+  --color-surface: var(--bg-subtle);
+  --color-surface-hover: #21262d;
+  --color-border: var(--border-default);
+  --color-text: var(--fg-default);
+  --color-text-muted: var(--fg-muted);
+  --color-primary: var(--accent-color);
+  --color-primary-hover: var(--accent-hover);
+  --color-accent: #0ea5e9;
+  --color-danger: #f85149;
+  --color-danger-hover: #da3633;
+  --color-success: var(--success-color);
+  --color-warning: #f0883e;
+
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Inter", sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  color: var(--color-text);
+  background-color: var(--color-background);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* CSS variables для светлой темы */
+:root.light {
+  --bg-canvas: #ffffff;
+  --bg-subtle: #f6f8fa;
+  --bg-inset: #eaeef2;
+  --fg-default: #1f2328;
+  --fg-muted: #656d76;
+  --border-default: #d0d7de;
+  --border-muted: #d8dee4;
+  --border-subtle: #eaeef2;
+  
+  --accent-color: #0969da;
+  --accent-hover: #0550ae;
+  --accent-subtle: #ddf4ff;
+  
+  --success-color: #1a7f37;
+  --success-subtle: #dafbe1;
+  
+  --kbd-bg: #f6f8fa;
+  --kbd-border: #d0d7de;
+  --kbd-shadow-color: #cbd5e1;
+  
+  --active-row-bg: #f2f9ff;
+  --title-bar-bg: #1f2328;
+
+  /* Mapped standard colors */
+  --color-background: var(--bg-canvas);
+  --color-surface: var(--bg-subtle);
+  --color-surface-hover: #f1f5f9;
+  --color-border: var(--border-default);
+  --color-text: var(--fg-default);
+  --color-text-muted: var(--fg-muted);
+  --color-primary: var(--accent-color);
+  --color-primary-hover: var(--accent-hover);
+  --color-accent: #0969da;
+  --color-danger: #cf222e;
+  --color-danger-hover: #a01823;
+  --color-success: var(--success-color);
+  --color-warning: #9a6700;
+}
+
+/* Базовые стили */
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  overflow: hidden;
+  background-color: var(--color-background);
+}
+
+#root {
+  width: 100%;
+  height: 100vh;
+}
+
+/* Scrollbar стилизация */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-background);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-muted);
+}
+
+/* Эффект свечения */
+.glow-primary {
+  box-shadow: 0 0 15px rgba(31, 111, 235, 0.15);
+}
+:root.light .glow-primary {
+  box-shadow: 0 4px 12px rgba(9, 105, 218, 0.1);
+}
+
+.glow-success {
+  box-shadow: 0 0 15px rgba(35, 134, 54, 0.2);
+}
+
+.glow-danger {
+  box-shadow: 0 0 15px rgba(248, 81, 73, 0.2);
+}
+
+/* Кастомный Keycap (Стиль клавиш) */
+.keycap, kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.2rem 0.5rem;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: var(--table-font-size, 11px);
+  font-weight: 600;
+  border-radius: 4px;
+  user-select: none;
+  transition: all 0.1s ease;
+  
+  background-color: var(--kbd-bg);
+  border: 1px solid var(--kbd-border);
+  border-bottom: 1.5px solid var(--kbd-shadow-color);
+  color: var(--fg-default);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.1);
+}
+
+/* Динамическое наследование шрифтов и отступов в таблицах */
+table {
+  font-size: var(--table-font-size, 12px) !important;
+}
+
+table td, 
+table td *, 
+table th, 
+table th * {
+  font-size: inherit !important;
+}
+
+table td {
+  padding-top: var(--table-row-padding, 8px) !important;
+  padding-bottom: var(--table-row-padding, 8px) !important;
+}
+
+.keycap:active {
+  border-bottom-width: 1px;
+  transform: translateY(1px);
+}
+
+/* Пульсирующий индикатор */
+@keyframes pulse-dot {
+  0% {
+    transform: scale(0.9);
+    opacity: 0.6;
+  }
+  50% {
+    transform: scale(1.1);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(0.9);
+    opacity: 0.6;
+  }
+}
+
+.pulse-success {
+  animation: pulse-dot 2s infinite ease-in-out;
+  box-shadow: 0 0 8px var(--color-success);
+}
+
+.pulse-danger {
+  animation: pulse-dot 2s infinite ease-in-out;
+  box-shadow: 0 0 8px var(--color-danger);
+}
+
+/* Кастомные анимации переходов */
+.fade-in-up {
+  animation: fadeInUp 0.25s ease-out forwards;
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Адаптивные инпуты и кнопки */
+input, select, textarea {
+  background-color: var(--color-surface);
+  color: var(--color-text);
+  border-color: var(--color-border);
+}
+input::placeholder, textarea::placeholder {
+  color: var(--color-text-muted);
+}
