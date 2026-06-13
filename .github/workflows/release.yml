@@ -60,6 +60,6 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: 'KeyMaster Pro v__VERSION__'
           releaseBody: 'KeyMaster Pro release v__VERSION__. See changes in CHANGELOG.md.'
-          releaseDraft: true
+          releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
