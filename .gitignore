@@ -41,8 +41,10 @@ memory-bank/
 .clinerules/
 .tauri/
 
-# Internal planning documents
-docs/
+# Internal planning documents (keep docs/winget/ tracked)
+docs/planning/
+docs/research/
+docs/tg-posts.md
 implementation_plan.md
 
 # Design mockups (internal)
