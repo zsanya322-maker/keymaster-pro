@@ -12,6 +12,7 @@
     "opener:default",
     "shell:default",
     "store:default",
-    "window-state:default"
+    "window-state:default",
+    "updater:default"
   ]
 }

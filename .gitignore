@@ -39,6 +39,7 @@ src-tauri/gen/
 # AI assistant context (private)
 memory-bank/
 .clinerules/
+.tauri/
 
 # Internal planning documents
 docs/

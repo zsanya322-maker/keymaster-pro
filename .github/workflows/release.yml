@@ -56,10 +56,16 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Ключи для подписи обновлений (генерируются через `tauri signer generate`)
+          # Добавьте эти секреты в GitHub repo settings → Secrets and variables → Actions
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'KeyMaster Pro v__VERSION__'
           releaseBody: 'KeyMaster Pro release v__VERSION__. See changes in CHANGELOG.md.'
           releaseDraft: false
           prerelease: false
+          # tauri-action автоматически генерирует latest.json при наличии signing key
+          # и publishes it as a release asset для auto-updater
           args: ${{ matrix.args }}

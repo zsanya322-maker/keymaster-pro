@@ -48,9 +48,9 @@
   "plugins": {
     "updater": {
       "active": true,
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQwOEZDQjgwNDhBQ0FFRTYKUldUbXJxeElnTXVQUVBRRTBaZmZxalBUVlJBSDgwb1dkV3V5S3R1VVlHeGd1WXZLamdTd0NkYlUK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEExNUQ3NTM2RTAzRUI4RQpSV1NPNndOdVU5Y1ZDamw2UGNZS29PeUNHV2NQcDFNRWFhRkxtWS9la1ZjV3dveVh6S3hwYVBUeQo=",
       "endpoints": [
-        "https://github.com/KeyMaster-Pro/keymaster-pro/releases/latest/download/latest.json"
+        "https://github.com/zsanya322-maker/keymaster-pro/releases/latest/download/latest.json"
       ]
     }
   }
