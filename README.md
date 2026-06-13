@@ -7,7 +7,7 @@
 **A modern keyboard automation & remapping utility for Windows**
 
 [![License: FCL](https://img.shields.io/badge/License-FCL-blue.svg)](LICENSE)
-[![Platform: Windows](https://img.shields.io/badge/Platform-Windows%2010%2F11-0078D4.svg)](https://github.com/USERNAME/keymaster-pro)
+[![Platform: Windows](https://img.shields.io/badge/Platform-Windows%2010%2F11-0078D4.svg)](https://github.com/zsanya322-maker/keymaster-pro)
 [![Built with Tauri](https://img.shields.io/badge/Built%20with-Tauri%20v2-FFC131.svg)](https://v2.tauri.app)
 [![Rust](https://img.shields.io/badge/Rust-edition%202021-CE422B.svg)](https://www.rust-lang.org)
 [![React](https://img.shields.io/badge/React-19-61DAFB.svg)](https://react.dev)
@@ -59,7 +59,7 @@ Built with **Rust + Tauri v2 + React 19**, it runs at the OS level using `SetWin
 
 ### Option A: Installer (recommended for most users)
 
-➡️ Go to [**Releases**](https://github.com/USERNAME/keymaster-pro/releases) and download `KeyMaster-Pro-Setup-x.x.x.exe`
+➡️ Go to [**Releases**](https://github.com/zsanya322-maker/keymaster-pro/releases) and download `KeyMaster-Pro-Setup-x.x.x.exe`
 
 - No dependencies required — just download and run
 - WebView2 Runtime is pre-installed on Windows 10/11 (auto-downloaded if missing)
@@ -84,7 +84,7 @@ Soon — a portable `.zip` version is planned for a future release.
 
 ```bash
 # Clone
-git clone https://github.com/USERNAME/keymaster-pro.git
+git clone https://github.com/zsanya322-maker/keymaster-pro.git
 cd keymaster-pro
 
 # Install frontend dependencies
@@ -150,15 +150,15 @@ Contributions are welcome! Here's how you can help:
 4. Push: `git push origin feature/amazing-feature`
 5. Open a Pull Request
 
-Found a bug? [Open an issue](https://github.com/USERNAME/keymaster-pro/issues).
+Found a bug? [Open an issue](https://github.com/zsanya322-maker/keymaster-pro/issues).
 
 ---
 
 ## 💬 Community
 
 - 📱 **Telegram:** [@KeyM_Pro](https://t.me/KeyM_Pro)
-- 🐛 **Bug reports:** [GitHub Issues](https://github.com/USERNAME/keymaster-pro/issues)
-- 💬 **Discussions:** [GitHub Discussions](https://github.com/USERNAME/keymaster-pro/discussions)
+- 🐛 **Bug reports:** [GitHub Issues](https://github.com/zsanya322-maker/keymaster-pro/issues)
+- 💬 **Discussions:** [GitHub Discussions](https://github.com/zsanya322-maker/keymaster-pro/discussions)
 
 ---
 

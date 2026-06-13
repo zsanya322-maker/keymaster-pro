@@ -7,7 +7,7 @@
 **Современная утилита автоматизации клавиатуры для Windows**
 
 [![Лицензия: FCL](https://img.shields.io/badge/Лицензия-FCL-blue.svg)](LICENSE)
-[![Платформа: Windows](https://img.shields.io/badge/Платформа-Windows%2010%2F11-0078D4.svg)](https://github.com/USERNAME/keymaster-pro)
+[![Платформа: Windows](https://img.shields.io/badge/Платформа-Windows%2010%2F11-0078D4.svg)](https://github.com/zsanya322-maker/keymaster-pro)
 [![Сборка: Tauri](https://img.shields.io/badge/Сборка-Tauri%20v2-FFC131.svg)](https://v2.tauri.app)
 [![Rust](https://img.shields.io/badge/Rust-edition%202021-CE422B.svg)](https://www.rust-lang.org)
 [![React](https://img.shields.io/badge/React-19-61DAFB.svg)](https://react.dev)
@@ -59,7 +59,7 @@
 
 ### Вариант A: Установщик (рекомендуется для большинства)
 
-➡️ Перейдите в [**Releases**](https://github.com/USERNAME/keymaster-pro/releases) и скачайте `KeyMaster-Pro-Setup-x.x.x.exe`
+➡️ Перейдите в [**Releases**](https://github.com/zsanya322-maker/keymaster-pro/releases) и скачайте `KeyMaster-Pro-Setup-x.x.x.exe`
 
 - **Не нужны** зависимости — просто скачайте и запустите
 - WebView2 Runtime предустановлен на Windows 10/11 (автоскачивание при отсутствии)
@@ -84,7 +84,7 @@
 
 ```bash
 # Клонировать репозиторий
-git clone https://github.com/USERNAME/keymaster-pro.git
+git clone https://github.com/zsanya322-maker/keymaster-pro.git
 cd keymaster-pro
 
 # Установить зависимости фронтенда
@@ -150,15 +150,15 @@ pnpm tauri build
 4. Запушьте: `git push origin feature/amazing-feature`
 5. Откройте Pull Request
 
-Нашли баг? [Откройте issue](https://github.com/USERNAME/keymaster-pro/issues).
+Нашли баг? [Откройте issue](https://github.com/zsanya322-maker/keymaster-pro/issues).
 
 ---
 
 ## 💬 Сообщество
 
 - 📱 **Telegram:** [@KeyM_Pro](https://t.me/KeyM_Pro)
-- 🐛 **Баг-репорты:** [GitHub Issues](https://github.com/USERNAME/keymaster-pro/issues)
-- 💬 **Обсуждения:** [GitHub Discussions](https://github.com/USERNAME/keymaster-pro/discussions)
+- 🐛 **Баг-репорты:** [GitHub Issues](https://github.com/zsanya322-maker/keymaster-pro/issues)
+- 💬 **Обсуждения:** [GitHub Discussions](https://github.com/zsanya322-maker/keymaster-pro/discussions)
 
 ---
 
