@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-config-schema/schema.json",
   "productName": "KeyMaster Pro",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "identifier": "com.keymaster.pro",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -48,7 +48,7 @@
   "plugins": {
     "updater": {
       "active": true,
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEExNUQ3NTM2RTAzRUI4RQpSV1NPNndOdVU5Y1ZDamw2UGNZS29PeUNHV2NQcDFNRWFhRkxtWS9la1ZjV3dveVh6S3hwYVBUeQo=",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEUxNUVENDVBOEY5MTNCMDIKUldRQ081R1BXdFJlNFV5SjNyaDBIRVJEWHJMVnpJY2JyM2Q2Z1FKK0N5amFYZS9rQ0Z0WHdYV28K",
       "endpoints": [
         "https://github.com/zsanya322-maker/keymaster-pro/releases/latest/download/latest.json"
       ]
