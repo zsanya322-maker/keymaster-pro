@@ -66,6 +66,41 @@ jobs:
           releaseBody: 'KeyMaster Pro release v__VERSION__. See changes in CHANGELOG.md.'
           releaseDraft: false
           prerelease: false
-          # tauri-action автоматически генерирует latest.json при наличии signing key
-          # и publishes it as a release asset для auto-updater
+          # tauri-action automatically uploads updater json, but since it's failing
           args: ${{ matrix.args }}
+
+      - name: Generate and upload latest.json (Windows fallback)
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $version = "${{ github.ref_name }}".Substring(1)
+          $repo = "${{ github.repository }}"
+          $releaseTag = "${{ github.ref_name }}"
+          
+          $zipPath = "src-tauri/target/release/bundle/nsis/KeyMaster-Pro_${version}_x64-setup.nsis.zip"
+          $sigPath = "${zipPath}.sig"
+          
+          if (-Not (Test-Path $zipPath) -or -Not (Test-Path $sigPath)) {
+            Write-Error "Missing zip or sig file at $zipPath"
+            exit 1
+          }
+          
+          $signature = (Get-Content -Raw $sigPath).Trim()
+          
+          $latestJson = @{
+            version = $version
+            notes = "Release $version"
+            pub_date = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+            platforms = @{
+              "windows-x86_64" = @{
+                signature = $signature
+                url = "https://github.com/$repo/releases/download/$releaseTag/KeyMaster-Pro_${version}_x64-setup.nsis.zip"
+              }
+            }
+          }
+          
+          $latestJson | ConvertTo-Json -Depth 10 | Set-Content "latest.json"
+          
+          gh release upload $releaseTag $zipPath $sigPath latest.json --clobber
