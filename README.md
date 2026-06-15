@@ -28,6 +28,27 @@ Built with **Rust + Tauri v2 + React 19**, it runs at the OS level using `SetWin
 
 ---
 
+## ⚖️ How it compares
+
+KeyMaster Pro is the only Windows tool that combines **GUI-driven** key remapping, mouse remapping, macros, layers, text expansion, and per-app profiles in a single app.
+
+| Feature | KeyMaster Pro | PowerToys KBM | AutoHotkey | kanata | SharpKeys | Espanso |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|
+| GUI (no code) | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ |
+| Key remapping | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ |
+| Mouse remapping | ✅ | ❌ | ✅ | ⚠️ | ❌ | ❌ |
+| Macro recorder | ✅ | ❌ | ✅ | ⚠️ | ❌ | ❌ |
+| Text expansions | ✅ | ❌ | ✅ | ❌ | ❌ | ✅ |
+| Layers (QMK-style) | ✅ | ❌ | ⚠️ | ✅ | ❌ | ❌ |
+| Per-app profiles | ✅ | ❌ | ⚠️ | ⚠️ | ❌ | ❌ |
+| Modern UI (Tauri/React) | ✅ | ✅ | ❌ | ❌ | ⚠️ | ⚠️ |
+| Price | Free | Free | Free | Free | Free | Free → $4/mo |
+
+> [!NOTE]
+> PowerToys users have requested per-app remapping ([#6756](https://github.com/microsoft/PowerToys/issues/6756)), mouse remapping ([#1475](https://github.com/microsoft/PowerToys/issues/1475)), and text expansion ([#5074](https://github.com/microsoft/PowerToys/issues/5074)) for **years** — KeyMaster Pro ships with all three today.
+
+---
+
 ## 📸 Screenshot
 
 <div align="center">
@@ -40,14 +61,45 @@ Built with **Rust + Tauri v2 + React 19**, it runs at the OS level using `SetWin
 
 ## ✨ Features
 
+### 🎹 Key Remapping
+<!-- TODO: record a 5-10s gif showing a key remap in action and save to .github/assets/remap.gif -->
+![Key Remapping](.github/assets/remap.gif)
+
+Remap any key or shortcut to another key, action, or program launch.
+
+### 🖱️ Mouse Remapping
+<!-- TODO: record a 5-10s gif showing a mouse button remap and save to .github/assets/mouse.gif -->
+![Mouse Remapping](.github/assets/mouse.gif)
+
+Rebind mouse buttons and wheel actions — a feature PowerToys users have [requested for 6 years](https://github.com/microsoft/PowerToys/issues/1475).
+
+### 🔥 Layers
+<!-- TODO: record a 5-10s gif showing a layer toggle changing key behavior and save to .github/assets/layers.gif -->
+![Layers](.github/assets/layers.gif)
+
+Context-aware remapping — like QMK layers for your keyboard.
+
+### ⚡ Macro Recorder
+<!-- TODO: record a 5-10s gif recording and replaying a macro and save to .github/assets/macro.gif -->
+![Macro Recorder](.github/assets/macro.gif)
+
+Record key presses and mouse clicks with delays, replay them anytime.
+
+### 📝 Text Expansions
+<!-- TODO: record a 5-10s gif typing an abbreviation that expands and save to .github/assets/text-expansion.gif -->
+![Text Expansions](.github/assets/text-expansion.gif)
+
+Type abbreviations that expand into full text snippets — a free alternative to TextExpander ($4/mo).
+
+### 🔄 Per-App Profiles
+<!-- TODO: record a 5-10s gif switching apps and showing the profile auto-switch and save to .github/assets/profiles.gif -->
+![Per-App Profiles](.github/assets/profiles.gif)
+
+Automatic profile switching based on the active window.
+
+### Plus
 | Feature | Description |
 |---------|-------------|
-| 🎹 **Key Remapping** | Remap any key or shortcut to another key, action, or program launch |
-| 🖱️ **Mouse Remapping** | Rebind mouse buttons and wheel actions |
-| 🔥 **Layers** | Context-aware remapping — like QMK layers for your keyboard |
-| ⚡ **Macro Recorder** | Record key presses and mouse clicks with delays, replay them anytime |
-| 📝 **Text Expansions** | Type abbreviations that expand into full text snippets |
-| 🔄 **Per-App Profiles** | Automatic profile switching based on the active window |
 | 🚀 **Daemon Architecture** | Lightweight background daemon + GUI (two-process design) |
 | 📊 **Real-time Stats** | CPU, RAM, latency, and keystroke counter in the status bar |
 | 🎨 **Modern UI** | Clean interface with Radix UI + TailwindCSS |
