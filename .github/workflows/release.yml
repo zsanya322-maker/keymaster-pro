@@ -66,6 +66,7 @@ jobs:
           releaseBody: 'KeyMaster Pro release v__VERSION__. See changes in CHANGELOG.md.'
           releaseDraft: false
           prerelease: false
+          updaterJsonPreferNsis: true
           # tauri-action automatically uploads updater json, but since it's failing
           args: ${{ matrix.args }}
 
@@ -79,13 +80,20 @@ jobs:
           $repo = "${{ github.repository }}"
           $releaseTag = "${{ github.ref_name }}"
           
-          $zipPath = "src-tauri/target/release/bundle/nsis/KeyMaster-Pro_${version}_x64-setup.nsis.zip"
-          $sigPath = "${zipPath}.sig"
+          # Find the actual zip and sig files
+          $nsisdir = "src-tauri/target/release/bundle/nsis"
+          $zipFile = Get-ChildItem -Path $nsisdir -Filter "*.nsis.zip" | Select-Object -First 1
+          $sigFile = Get-ChildItem -Path $nsisdir -Filter "*.nsis.zip.sig" | Select-Object -First 1
           
-          if (-Not (Test-Path $zipPath) -or -Not (Test-Path $sigPath)) {
-            Write-Error "Missing zip or sig file at $zipPath"
+          if (-Not $zipFile -or -Not $sigFile) {
+            Write-Error "Missing zip or sig file in $nsisdir"
+            Get-ChildItem -Path $nsisdir
             exit 1
           }
+          
+          $zipPath = $zipFile.FullName
+          $sigPath = $sigFile.FullName
+          $zipName = $zipFile.Name
           
           $signature = (Get-Content -Raw $sigPath).Trim()
           
@@ -96,7 +104,7 @@ jobs:
             platforms = @{
               "windows-x86_64" = @{
                 signature = $signature
-                url = "https://github.com/$repo/releases/download/$releaseTag/KeyMaster-Pro_${version}_x64-setup.nsis.zip"
+                url = "https://github.com/$repo/releases/download/$releaseTag/$zipName"
               }
             }
           }
