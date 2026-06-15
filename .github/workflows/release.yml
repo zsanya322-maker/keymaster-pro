@@ -67,48 +67,4 @@ jobs:
           releaseDraft: false
           prerelease: false
           updaterJsonPreferNsis: true
-          # tauri-action automatically uploads updater json, but since it's failing
           args: ${{ matrix.args }}
-
-      - name: Generate and upload latest.json (Windows fallback)
-        if: matrix.platform == 'windows-latest'
-        shell: pwsh
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          $version = "${{ github.ref_name }}".Substring(1)
-          $repo = "${{ github.repository }}"
-          $releaseTag = "${{ github.ref_name }}"
-          
-          # Find the actual zip and sig files
-          $nsisdir = "src-tauri/target/release/bundle/nsis"
-          $zipFile = Get-ChildItem -Path $nsisdir -Filter "*.nsis.zip" | Select-Object -First 1
-          $sigFile = Get-ChildItem -Path $nsisdir -Filter "*.nsis.zip.sig" | Select-Object -First 1
-          
-          if (-Not $zipFile -or -Not $sigFile) {
-            Write-Error "Missing zip or sig file in $nsisdir"
-            Get-ChildItem -Path $nsisdir
-            exit 1
-          }
-          
-          $zipPath = $zipFile.FullName
-          $sigPath = $sigFile.FullName
-          $zipName = $zipFile.Name
-          
-          $signature = (Get-Content -Raw $sigPath).Trim()
-          
-          $latestJson = @{
-            version = $version
-            notes = "Release $version"
-            pub_date = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
-            platforms = @{
-              "windows-x86_64" = @{
-                signature = $signature
-                url = "https://github.com/$repo/releases/download/$releaseTag/$zipName"
-              }
-            }
-          }
-          
-          $latestJson | ConvertTo-Json -Depth 10 | Set-Content "latest.json"
-          
-          gh release upload $releaseTag $zipPath $sigPath latest.json --clobber
