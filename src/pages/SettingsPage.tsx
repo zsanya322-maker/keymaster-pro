@@ -195,6 +195,22 @@ export function SettingsPage() {
 
               <div className="flex items-center justify-between p-4 bg-app-surface-hover/30 border border-app-border/60 rounded-xl">
                 <div>
+                  <h4 className="text-sm font-bold text-app-text">{t('settings.restore_mouse', 'Возвращать мышь после макроса')}</h4>
+                  <p className="text-xs text-app-muted mt-0.5">{t('settings.restore_mouse_desc', 'После выполнения макроса курсор возвращается туда, где был до его запуска')}</p>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={!!config.restoreMouseAfterMacro}
+                    onChange={() => handleToggle('restoreMouseAfterMacro')}
+                    className="sr-only peer"
+                  />
+                  <div className="w-9 h-5 bg-app-border rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-app-muted after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-app-primary peer-checked:after:bg-white" />
+                </label>
+              </div>
+
+              <div className="flex items-center justify-between p-4 bg-app-surface-hover/30 border border-app-border/60 rounded-xl">
+                <div>
                   <h4 className="text-sm font-bold text-app-text">{t('settings.close_to_tray')}</h4>
                   <p className="text-xs text-app-muted mt-0.5">{t('settings.close_to_tray_desc')}</p>
                 </div>

@@ -363,6 +363,9 @@ async fn handle_update_config(state: &DaemonStateRef, params: Option<serde_json:
         if let Some(scale) = obj.get("scale").and_then(|v| v.as_f64()) {
             config.scale = scale;
         }
+        if let Some(restore) = obj.get("restoreMouseAfterMacro").and_then(|v| v.as_bool()) {
+            config.restore_mouse_after_macro = restore;
+        }
     }
 
     // Save config
@@ -376,6 +379,7 @@ async fn handle_update_config(state: &DaemonStateRef, params: Option<serde_json:
     if let Ok(mut s) = state.write() {
         s.kb_hook_enabled = config.kb_hook_enabled;
         s.mouse_hook_enabled = config.mouse_hook_enabled;
+        s.restore_mouse_after_macro = config.restore_mouse_after_macro;
     }
 
     Ok(serde_json::json!({ "success": true }))

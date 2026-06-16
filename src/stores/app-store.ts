@@ -48,6 +48,7 @@ const defaultConfig: AppConfig = {
   scale: 0.85,
   fontSize: 12,
   rowPadding: 8,
+  restoreMouseAfterMacro: true,
 }
 
 export const useAppStore = create<AppState>((set) => ({

@@ -352,10 +352,15 @@ pub async fn dispatch(method: &str, params: Option<Value>, state: &DaemonStateRe
         "macro.start_recording" => {
             let macro_id = params.as_ref().and_then(|v| v.get("macroId")).and_then(|i| i.as_str()).ok_or("Missing macroId")?.to_string();
             let mut s = state.write().map_err(|_| "Failed to lock state")?;
+            // Seed the buffer with the macro's existing steps so recording appends instead of resetting
+            let existing_steps = s.active_profile.as_ref()
+                .and_then(|p| p.macros.iter().find(|m| m.id == macro_id))
+                .map(|m| m.steps.clone())
+                .unwrap_or_default();
             s.recording_macro_id = Some(macro_id);
             s.record_start_time = Some(std::time::Instant::now());
             s.record_last_event_time = Some(std::time::Instant::now());
-            s.recorded_steps = Vec::new();
+            s.recorded_steps = existing_steps;
             Ok(json!({ "success": true }))
         }
         "macro.stop_recording" => {

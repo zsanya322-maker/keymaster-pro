@@ -29,6 +29,8 @@ export const MacrosPage: React.FC = () => {
   };
 
   const [isRecording, setIsRecording] = useState(false);
+  // Which macro is currently being recorded into (from backend). May differ from selectedMacroId.
+  const [recordingMacroId, setRecordingMacroId] = useState<string | null>(null);
   const [isTriggerModalOpen, setIsTriggerModalOpen] = useState(false);
   const [tempTriggerKey, setTempTriggerKey] = useState('');
   const [tempTriggerType, setTempTriggerType] = useState<'single' | 'double_press' | 'long_press'>('single');
@@ -122,13 +124,20 @@ export const MacrosPage: React.FC = () => {
         const res: any = await invoke('ipc_call', { method: 'macro.get_recording_status', params: {} });
         if (res) {
           setIsRecording(res.isRecording);
-          
-          if (res.isRecording && res.steps && selectedMacroId) {
-            useMacroStore.setState((state) => ({
-              macros: state.macros.map((m) => (m.id === selectedMacroId ? { ...m, steps: res.steps } : m))
-            }));
+
+          if (res.isRecording && res.recordingMacroId) {
+            // Live steps belong to the macro being recorded, not necessarily the selected one.
+            const recId = res.recordingMacroId;
+            setRecordingMacroId(recId);
+            if (res.steps) {
+              useMacroStore.setState((state) => ({
+                macros: state.macros.map((m) => (m.id === recId ? { ...m, steps: res.steps } : m))
+              }));
+            }
+          } else {
+            setRecordingMacroId(null);
           }
-          
+
           // If backend recording stopped and we were recording, reload macros to get the recorded steps!
           if (!res.isRecording && isRecording) {
             if (activeProfileId) {
@@ -142,7 +151,7 @@ export const MacrosPage: React.FC = () => {
     }, 300);
 
     return () => clearInterval(interval);
-  }, [isRecording, selectedMacroId, activeProfileId, loadMacros]);
+  }, [isRecording, activeProfileId, loadMacros]);
 
   // Capture temp trigger key inside modal
   useEffect(() => {
@@ -387,6 +396,7 @@ export const MacrosPage: React.FC = () => {
           <div className="overflow-y-auto flex-1 p-2 space-y-1.5">
             {activeMacros.map((macro) => {
               const isSelected = selectedMacroId === macro.id;
+              const isRecordingThis = recordingMacroId === macro.id;
               return (
                 <div
                   key={macro.id}
@@ -400,8 +410,14 @@ export const MacrosPage: React.FC = () => {
                       : 'border-app-border hover:border-app-border hover:bg-app-surface-hover/40 bg-app-bg/20'
                   }`}
                 >
-                  <div className={`font-semibold text-xs text-app-text`}>
-                    {macro.name}
+                  <div className={`font-semibold text-xs text-app-text flex items-center gap-1.5`}>
+                    {isRecordingThis && (
+                      <span
+                        className="inline-block w-2 h-2 rounded-full bg-app-danger animate-pulse shrink-0"
+                        title={t('macros.recording_active_warning')}
+                      />
+                    )}
+                    <span className="truncate">{macro.name}</span>
                   </div>
                   <div className="flex justify-between text-[10px] text-app-muted mt-1 font-medium">
                     <span>{t('macros.trigger')}: {getTriggerDescription(macro)}</span>

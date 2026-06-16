@@ -584,23 +584,28 @@ fn toggle_recording(state_ref: &DaemonStateRef) -> bool {
         info!("Macro recording stopped for macro: {}", macro_id);
         true
     } else if let Some(sel_id) = state.selected_macro_id.clone() {
-        // Start recording
+        // Start recording — preserve existing steps so F12 appends rather than resets
+        let existing_steps = state.active_profile.as_ref()
+            .and_then(|p| p.macros.iter().find(|m| m.id == sel_id))
+            .map(|m| m.steps.clone())
+            .unwrap_or_default();
         state.recording_macro_id = Some(sel_id.clone());
         state.record_start_time = Some(std::time::Instant::now());
         state.record_last_event_time = Some(std::time::Instant::now());
-        state.recorded_steps = Vec::new();
-        info!("Macro recording started for macro: {}", sel_id);
+        state.recorded_steps = existing_steps;
+        info!("Macro recording (continued) for macro: {}", sel_id);
         true
     } else {
         // Try to find the first macro in active profile if none is selected
         if let Some(ref prof) = state.active_profile {
             if let Some(first_mac) = prof.macros.first() {
                 let first_id = first_mac.id.clone();
+                let existing_steps = first_mac.steps.clone();
                 state.recording_macro_id = Some(first_id.clone());
                 state.record_start_time = Some(std::time::Instant::now());
                 state.record_last_event_time = Some(std::time::Instant::now());
-                state.recorded_steps = Vec::new();
-                info!("Macro recording started for first macro in profile: {}", first_id);
+                state.recorded_steps = existing_steps;
+                info!("Macro recording (continued) for first macro in profile: {}", first_id);
                 return true;
             }
         }

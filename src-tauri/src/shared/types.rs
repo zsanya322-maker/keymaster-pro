@@ -93,6 +93,7 @@ pub struct AppConfig {
     pub debug_mode: bool,
     pub active_profile_id: String,
     pub scale: f64,
+    pub restore_mouse_after_macro: bool,
 }
 
 impl Default for AppConfig {
@@ -107,6 +108,7 @@ impl Default for AppConfig {
             debug_mode: false,
             active_profile_id: "1".to_string(),
             scale: 0.85,
+            restore_mouse_after_macro: true,
         }
     }
 }

@@ -39,6 +39,8 @@
     "general_title": "General Settings",
     "auto_start": "Start with Windows",
     "auto_start_desc": "Automatically launch KeyMaster Pro when starting the computer.",
+    "restore_mouse": "Restore mouse after macro",
+    "restore_mouse_desc": "After a macro finishes, the cursor returns to where it was before the macro ran.",
     "start_minimized": "Start minimized",
     "close_to_tray": "Minimize to tray on close",
     "close_to_tray_desc": "Hide window to system tray instead of exiting when closing the application.",

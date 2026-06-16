@@ -107,4 +107,5 @@ export interface AppConfig {
   scale: number
   fontSize?: number
   rowPadding?: number
+  restoreMouseAfterMacro?: boolean
 }

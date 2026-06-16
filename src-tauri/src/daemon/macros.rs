@@ -90,13 +90,34 @@ fn activate_process_window(target_process: &str) {
 #[cfg(not(target_os = "windows"))]
 fn activate_process_window(_target_process: &str) {}
 
+/// Capture the current mouse cursor position (for restoring it after playback).
+#[cfg(target_os = "windows")]
+fn get_cursor_pos() -> Option<(i32, i32)> {
+    use windows::Win32::Foundation::POINT;
+    use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
+    let mut pt = POINT { x: 0, y: 0 };
+    unsafe {
+        if GetCursorPos(&mut pt).is_ok() {
+            Some((pt.x, pt.y))
+        } else {
+            None
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn get_cursor_pos() -> Option<(i32, i32)> {
+    None
+}
+
 /// Асинхронный движок воспроизведения макроса
 pub async fn play_macro(macro_id: &str, state: &DaemonStateRef) -> Result<(), String> {
-    // Find macro in active profile
-    let m = {
+    // Find macro in active profile + read the mouse-restore setting up front
+    let (m, restore_mouse) = {
         let s = state.read().map_err(|_| "Failed to lock state")?;
-        s.active_profile.as_ref()
-            .and_then(|p| p.macros.iter().find(|m| m.id == macro_id).cloned())
+        let m = s.active_profile.as_ref()
+            .and_then(|p| p.macros.iter().find(|m| m.id == macro_id).cloned());
+        (m, s.restore_mouse_after_macro)
     };
 
     if let Some(m) = m {
@@ -104,6 +125,9 @@ pub async fn play_macro(macro_id: &str, state: &DaemonStateRef) -> Result<(), St
 
         // Run macro execution in separate task to avoid blocking the daemon
         tokio::spawn(async move {
+            // Snapshot cursor position before any playback (even before target-app switch)
+            let saved_cursor = get_cursor_pos();
+
             if let Some(ref target) = m.target_app {
                 if !target.is_empty() {
                     info!("Activating target process before playback: {}", target);
@@ -180,6 +204,18 @@ pub async fn play_macro(macro_id: &str, state: &DaemonStateRef) -> Result<(), St
             crate::daemon::hooks::synth_key(0x12, 0, false); // VK_MENU (Alt)
             crate::daemon::hooks::synth_key(0x10, 0, false); // VK_SHIFT
             crate::daemon::hooks::synth_key(0x5B, 0, false); // VK_LWIN
+
+            // Restore cursor to where it was before the macro ran (so the mouse doesn't
+            // stay on whatever the last mouse_move/click step left it on).
+            if restore_mouse {
+                if let Some((x, y)) = saved_cursor {
+                    #[cfg(target_os = "windows")]
+                    unsafe {
+                        let _ = windows::Win32::UI::WindowsAndMessaging::SetCursorPos(x, y);
+                    }
+                    info!("🖱 Курсор восстановлен в позицию ({}, {})", x, y);
+                }
+            }
 
             info!("⏹ Макрос {} завершен", m.name);
         });

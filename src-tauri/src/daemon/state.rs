@@ -44,6 +44,8 @@ pub struct DaemonState {
     pub keystrokes_processed: std::sync::atomic::AtomicUsize,
     /// Last keyboard/mouse hook processing latency in microseconds
     pub last_latency_us: std::sync::atomic::AtomicU64,
+    /// Return the cursor to its pre-macro position after playback finishes
+    pub restore_mouse_after_macro: bool,
 }
 
 impl DaemonState {
@@ -65,6 +67,7 @@ impl DaemonState {
             cpu_tracking: std::sync::Mutex::new(None),
             keystrokes_processed: std::sync::atomic::AtomicUsize::new(0),
             last_latency_us: std::sync::atomic::AtomicU64::new(0),
+            restore_mouse_after_macro: config.restore_mouse_after_macro,
         }
     }
 
@@ -92,6 +95,7 @@ impl Default for DaemonState {
             cpu_tracking: std::sync::Mutex::new(None),
             keystrokes_processed: std::sync::atomic::AtomicUsize::new(0),
             last_latency_us: std::sync::atomic::AtomicU64::new(0),
+            restore_mouse_after_macro: true,
         }
     }
 }
