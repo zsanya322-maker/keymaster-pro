@@ -2,17 +2,10 @@ import { useState, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useAppStore } from '../stores/app-store'
 import { useProfileStore } from '../store/profileStore'
-import { useRemapStore } from '../store/remapStore'
-import { useMouseRemapStore } from '../store/mouseRemapStore'
-import { useMacroStore } from '../store/macroStore'
-import { useTextExpansionStore } from '../store/textExpansionStore'
 import { useKeyMasterStore } from '../store/keyMasterStore'
 import { invoke } from '../lib/ipc'
 import {
   Keyboard,
-  MousePointer,
-  PlaySquare,
-  Type,
   Cpu,
   HardDrive,
   Shield,
@@ -23,16 +16,19 @@ import {
   XCircle,
   Info,
   AlertTriangle,
-  X
+  X,
+  Github,
+  MessageCircle,
+  Settings,
+  Layers
 } from 'lucide-react'
 
 // Import pages directly
-import { RemappingPage } from '../pages/RemappingPage'
-import { MouseRemappingPage } from '../pages/MouseRemappingPage'
-import { MacrosPage } from '../pages/MacrosPage'
-import { TextExpansionsPage } from '../pages/TextExpansionsPage'
+import { RulesPage } from '../pages/RulesPage'
 import { SettingsPage } from '../pages/SettingsPage'
-import { LayersPage } from '../pages/LayersPage'
+import { LayersPanel } from '../components/LayersPanel'
+import { UpdateBanner } from '../components/UpdateBanner'
+import { OnboardingWizard } from '../components/OnboardingWizard'
 
 interface DaemonStatus {
   connected: boolean;
@@ -48,20 +44,16 @@ function App() {
   const { config, daemonConnected, setDaemonConnected, loadConfig, sidebarOpen, toggleSidebar } = useAppStore()
   const { activeCategory, setActiveCategory, daemonActive, toggleDaemon, setSelectedProfileId } = useKeyMasterStore()
   
-  const { profiles, activeProfileId, loadProfiles, setActiveProfile } = useProfileStore()
+  const { profiles, activeProfileId, loadProfiles, activateProfile } = useProfileStore()
   const activeProfile = profiles.find(p => p.id === activeProfileId)
   const activeProfileName = activeProfile ? activeProfile.name : 'Default'
-
-  const remapRules = useRemapStore((state) => state.rules)
-  const mouseRules = useMouseRemapStore((state) => state.rules)
-  const expansions = useTextExpansionStore((state) => state.expansions)
-  const macros = useMacroStore((state) => state.macros)
 
   const theme = config.theme
   const scale = config.scale || 0.85
 
   const [activeMenu, setActiveMenu] = useState<string | null>(null)
   const [isHovered, setIsHovered] = useState(false)
+  const [isInitialized, setIsInitialized] = useState(false)
   
   const diagnostics = useAppStore(state => state.diagnostics)
 
@@ -127,15 +119,20 @@ function App() {
 
 
 
-  // Load config on daemon connect
+  // Load config on startup and when daemon connects
   useEffect(() => {
-    if (daemonConnected) {
-      loadConfig()
+    const init = async () => {
+      await loadConfig()
+      setIsInitialized(true)
     }
+    init()
   }, [daemonConnected, loadConfig])
 
   // Daemon connection polling
   useEffect(() => {
+    let retryCount = 0;
+    const maxRetries = 3;
+
     async function checkDaemon() {
       try {
         const status = await invoke<DaemonStatus>('daemon_status')
@@ -154,11 +151,17 @@ function App() {
             })
           }
         } else {
-          setDaemonConnected(false)
-          await invoke('spawn_daemon')
+          throw new Error('Not connected');
         }
       } catch (e) {
         setDaemonConnected(false)
+        if (retryCount < maxRetries) {
+          retryCount++;
+          try {
+            await invoke('spawn_daemon')
+          } catch (err) {}
+          setTimeout(checkDaemon, 2000);
+        }
       }
     }
 
@@ -276,12 +279,14 @@ function App() {
 
   const handleClearMappings = () => {
     if (confirm('Are you sure you want to clear all mappings for the active profile?')) {
-      window.dispatchEvent(new CustomEvent('keymaster-clear-mappings'))
+      if (activeProfile) {
+        useProfileStore.getState().saveProfile({ ...activeProfile, rules: [] });
+      }
     }
   }
 
   const selectProfile = (id: string) => {
-    setActiveProfile(id)
+    activateProfile(id)
     setSelectedProfileId(id)
   }
 
@@ -318,11 +323,28 @@ function App() {
 
   // Sidebar link configuration (Settings removed, accessible from top MenuBar)
   const sidebarLinks = [
-    { id: 'keyboard' as const, label: t('nav.remapping', 'Keyboard'), icon: Keyboard, count: remapRules.filter(r => r.profileId === activeProfileId).length },
-    { id: 'mouse' as const, label: t('nav.mouse_remapping', 'Mouse'), icon: MousePointer, count: mouseRules.filter(r => r.profileId === activeProfileId).length },
-    { id: 'macros' as const, label: t('nav.macros', 'Macros'), icon: PlaySquare, count: macros.filter(m => m.profileId === activeProfileId).length },
-    { id: 'autotext' as const, label: t('nav.text_expansions', 'Auto-text'), icon: Type, count: expansions.filter(e => e.profileId === activeProfileId).length },
+    { id: 'rules' as const, label: t('nav.rules', 'Rules Engine'), icon: Keyboard, count: activeProfile?.rules.length || 0 },
+    { id: 'layers' as const, label: t('nav.layers', 'Layers Meta'), icon: Layers, count: activeProfile?.layers.length || 0 },
+    { id: 'settings' as const, label: t('nav.settings', 'Settings'), icon: Settings, count: 0 },
   ]
+
+  // Fix activeCategory if it points to removed pages
+  useEffect(() => {
+    if (!['rules', 'layers', 'settings'].includes(activeCategory)) {
+      setActiveCategory('rules')
+    }
+  }, [activeCategory, setActiveCategory])
+
+  if (!isInitialized) {
+    return (
+      <div className="flex h-screen w-screen items-center justify-center bg-app-bg text-app-text">
+        <div className="flex flex-col items-center gap-4">
+          <Shield size={48} className="text-app-primary animate-pulse" />
+          <p className="text-sm font-bold text-app-muted">Initializing KeyMaster Pro...</p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div 
@@ -477,7 +499,7 @@ function App() {
                   </div>
 
                   {/* Badge count */}
-                  {link.count > 0 && (
+                  {link.count !== undefined && link.count > 0 && (
                     <span className="flex items-center justify-center min-w-4 h-4 px-1 rounded-full bg-app-primary text-[9px] font-bold text-white shadow-sm font-mono shrink-0">
                       {link.count}
                     </span>
@@ -502,32 +524,29 @@ function App() {
                 Daemon {daemonActive && daemonConnected ? 'ON' : 'OFF'}
               </span>
             </button>
-            <span className="text-[9px] text-app-muted/60 mt-1 font-mono tracking-tighter text-center">
-              Lat: {daemonActive && daemonConnected ? '0.12ms' : 'N/A'}
-            </span>
+            <div className="flex items-center justify-between w-full mt-2 px-1">
+              <span className="text-[9px] text-app-muted/60 font-mono tracking-tighter">
+                Lat: {daemonActive && daemonConnected ? '0.12ms' : 'N/A'}
+              </span>
+              <div className="flex gap-2 text-app-muted/60">
+                <a href="https://t.me/keymasterpro" target="_blank" rel="noreferrer" className="hover:text-app-text transition-colors">
+                  <MessageCircle size={12} />
+                </a>
+                <a href="https://github.com/zsanya322-maker/keymaster-pro" target="_blank" rel="noreferrer" className="hover:text-app-text transition-colors">
+                  <Github size={12} />
+                </a>
+              </div>
+            </div>
           </div>
         </aside>
 
         {/* Main Workspace Area */}
         <main className="flex-1 overflow-hidden relative p-4 bg-app-bg/25">
-          {activeCategory === 'keyboard' || activeCategory === 'mouse' ? (
-            <div className="flex flex-col lg:flex-row gap-4 h-full">
-              {/* Table section */}
-              <div className="flex-1 min-w-0 bg-app-surface/30 border border-app-border rounded-xl p-3 overflow-y-auto flex flex-col">
-                {activeCategory === 'keyboard' ? <RemappingPage /> : <MouseRemappingPage />}
-              </div>
-              {/* Layers Sidebar section */}
-              <div className="w-full lg:w-80 shrink-0 border border-app-border bg-app-surface/40 backdrop-blur-md rounded-xl p-3 overflow-y-auto">
-                <LayersPage />
-              </div>
-            </div>
-          ) : (
-            <div className="h-full bg-app-surface/30 border border-app-border rounded-xl p-4 overflow-y-auto">
-              {activeCategory === 'macros' && <MacrosPage />}
-              {activeCategory === 'autotext' && <TextExpansionsPage />}
-              {activeCategory === 'settings' && <SettingsPage />}
-            </div>
-          )}
+          <div className="h-full bg-app-surface/30 border border-app-border rounded-xl p-4 overflow-y-auto">
+            {activeCategory === 'rules' && <RulesPage />}
+            {activeCategory === 'layers' && <LayersPanel />}
+            {activeCategory === 'settings' && <SettingsPage />}
+          </div>
         </main>
       </div>
 
@@ -609,6 +628,9 @@ function App() {
           )
         })}
       </div>
+
+      <UpdateBanner />
+      <OnboardingWizard />
 
     </div>
   )

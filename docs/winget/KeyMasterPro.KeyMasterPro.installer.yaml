@@ -1,13 +1,11 @@
-# Created using winget CLI
 # yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.6.0.schema.json
-
 PackageIdentifier: KeyMasterPro.KeyMasterPro
-PackageVersion: 0.1.0
+PackageVersion: 0.2.0
 InstallerType: nullsoft
 Installers:
   - Architecture: x64
-    InstallerUrl: https://github.com/zsanya322-maker/keymaster-pro/releases/download/v0.1.0/KeyMaster.Pro_0.1.0_x64-setup.exe
-    InstallerSha256: 5D0E8CC6F9DB34E0F081153DE7DAFBA0E384AA8EE89D2339F3764251A3BCF798
+    InstallerUrl: https://github.com/zsanya322-maker/keymaster-pro/releases/download/v0.2.0/KeyMaster-Pro_0.2.0_x64-setup.exe
+    InstallerSha256: 6F3F1B785F76A869A57BE24E89F54338EAEC51B02AB2109ACC0B60F7E97CBDF2
     InstallerSwitches:
       Silent: /S
       SilentWithProgress: /S

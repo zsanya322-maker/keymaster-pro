@@ -1,17 +1,30 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAppStore } from '../stores/app-store';
 import { invoke } from '../lib/ipc';
-import { Terminal, Shield, Settings, RefreshCw, Download, User } from 'lucide-react';
+import { Terminal, Shield, Settings, RefreshCw, Download, FolderOpen } from 'lucide-react';
 import { check } from '@tauri-apps/plugin-updater';
-import { ProfilesPage } from './ProfilesPage';
 import { triggerToast } from '../lib/toast';
+import { enable, disable } from '@tauri-apps/plugin-autostart';
 
 export function SettingsPage() {
   const { t, i18n } = useTranslation();
   const { config, setConfig, daemonConnected, setDaemonConnected } = useAppStore();
   const [activeTab, setActiveTab] = useState<'general' | 'profiles' | 'daemon' | 'logs'>('general');
   const [restartingIPC, setRestartingIPC] = useState(false);
+  const [isElevated, setIsElevated] = useState(false);
+
+  useEffect(() => {
+    const checkElevation = async () => {
+      try {
+        const res = await invoke<boolean>('is_elevated');
+        setIsElevated(res);
+      } catch (e) {
+        console.error('Failed to check elevation', e);
+      }
+    };
+    checkElevation();
+  }, []);
 
   // States for Auto-updater
   const [updateStatus, setUpdateStatus] = useState<string>('');
@@ -92,8 +105,23 @@ export function SettingsPage() {
     '[12:02:41] [DEBUG] Keypressed: VK_LSHIFT (0x10) UP [Global Rule Pass]'
   ]);
 
-  const handleToggle = (key: keyof typeof config) => {
-    setConfig({ [key]: !config[key] });
+  const handleToggle = async (key: keyof typeof config) => {
+    const newValue = !config[key];
+    setConfig({ [key]: newValue });
+
+    if (key === 'autostart') {
+      try {
+        if (newValue) {
+          await enable();
+          triggerToast(t('settings.autostart_enabled', 'Автозапуск включен'), 'success');
+        } else {
+          await disable();
+          triggerToast(t('settings.autostart_disabled', 'Автозапуск выключен'), 'success');
+        }
+      } catch (e: any) {
+        triggerToast(`Failed to configure autostart: ${e}`, 'error');
+      }
+    }
   };
 
   const handleRestartIPC = async () => {
@@ -117,6 +145,14 @@ export function SettingsPage() {
     setLogs([`[${new Date().toLocaleTimeString()}] [INFO] ${t('settings.logs_cleared')}`]);
   };
 
+  const handleOpenLogsFolder = async () => {
+    try {
+      await invoke('ipc_call', { method: 'open_log_folder' });
+    } catch (e: any) {
+      triggerToast(`Failed to open logs: ${e}`, 'error');
+    }
+  };
+
   const changeLanguage = (lang: 'ru' | 'en') => {
     i18n.changeLanguage(lang);
     setConfig({ language: lang });
@@ -136,16 +172,7 @@ export function SettingsPage() {
         >
           <Settings size={14} /> {t('settings.nav_general')}
         </button>
-        <button
-          onClick={() => setActiveTab('profiles')}
-          className={`flex items-center gap-3 px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all ${
-            activeTab === 'profiles'
-              ? 'bg-app-primary/10 text-app-primary border-l-2 border-app-primary'
-              : 'text-app-muted hover:text-app-text hover:bg-app-surface-hover/40'
-          }`}
-        >
-          <User size={14} /> {t('profiles.title')}
-        </button>
+
         <button
           onClick={() => setActiveTab('daemon')}
           className={`flex items-center gap-3 px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all ${
@@ -207,6 +234,27 @@ export function SettingsPage() {
                   />
                   <div className="w-9 h-5 bg-app-border rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-app-muted after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-app-primary peer-checked:after:bg-white" />
                 </label>
+              </div>
+
+              <div className="p-4 bg-app-surface-hover/30 border border-app-border/60 rounded-xl space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h4 className="text-sm font-bold text-app-text">Tap-Hold Timeout</h4>
+                    <p className="text-xs text-app-muted mt-0.5">Delay before a tap is considered a hold (Kanata-style)</p>
+                  </div>
+                  <span className="text-sm font-mono text-app-primary bg-app-primary/10 px-2 py-1 rounded">
+                    {config.tapHoldTimeoutMs || 200} ms
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min="50"
+                  max="1000"
+                  step="50"
+                  value={config.tapHoldTimeoutMs || 200}
+                  onChange={(e) => setConfig({ tapHoldTimeoutMs: parseInt(e.target.value) })}
+                  className="w-full accent-app-primary cursor-pointer"
+                />
               </div>
 
               <div className="flex items-center justify-between p-4 bg-app-surface-hover/30 border border-app-border/60 rounded-xl">
@@ -458,12 +506,7 @@ export function SettingsPage() {
           </div>
         )}
 
-        {/* TAB 2: PROFILES */}
-        {activeTab === 'profiles' && (
-          <div className="h-full">
-            <ProfilesPage />
-          </div>
-        )}
+
 
         {/* TAB 3: DAEMON & IPC */}
         {activeTab === 'daemon' && (
@@ -483,6 +526,69 @@ export function SettingsPage() {
                 }`}>
                   {daemonConnected ? t('status.connected') : t('status.disconnected')}
                 </span>
+              </div>
+
+              <div className="p-4 bg-app-surface-hover/30 border border-app-border/60 rounded-xl flex items-center justify-between">
+                <div>
+                  <h4 className="text-sm font-bold text-app-text">{t('settings.daemon_elevation', 'Права Администратора (UAC)')}</h4>
+                  <p className="text-xs text-app-muted mt-0.5">
+                    {isElevated 
+                      ? t('settings.daemon_elevation_active_desc', 'Приложение запущено от имени Администратора. Доступен полный перехват во всех окнах.')
+                      : t('settings.daemon_elevation_inactive_desc', 'Запустите приложение от имени Администратора для работы горячих клавиш в защищенных или запущенных от админа играх/программах.')
+                    }
+                  </p>
+                </div>
+                {isElevated ? (
+                  <div className="flex items-center gap-2">
+                    <span className="px-3 py-1 rounded-xl text-xs font-bold border border-app-success/20 bg-app-success/10 text-app-success uppercase tracking-wider">
+                      {t('settings.daemon_elevation_admin', 'Администратор')}
+                    </span>
+                    <button
+                      onClick={async () => {
+                        try {
+                          await invoke('spawn_daemon');
+                          triggerToast('Daemon start requested', 'success');
+                        } catch (e: any) {
+                          triggerToast(`Failed to start daemon: ${e}`, 'error');
+                        }
+                      }}
+                      className="flex items-center gap-2 px-3 py-2 text-xs font-bold bg-app-primary text-white rounded-lg hover:bg-app-primary/80 transition-colors cursor-pointer"
+                    >
+                      <RefreshCw size={12} />
+                      Restart Daemon
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={async () => {
+                        try {
+                          await invoke('spawn_daemon');
+                          triggerToast('Daemon start requested', 'success');
+                        } catch (e: any) {
+                          triggerToast(`Failed to start daemon: ${e}`, 'error');
+                        }
+                      }}
+                      className="flex items-center gap-2 px-3 py-2 text-xs font-bold bg-app-primary text-white rounded-lg hover:bg-app-primary/80 transition-colors cursor-pointer"
+                    >
+                      <RefreshCw size={12} />
+                      Restart Daemon
+                    </button>
+                    <button
+                      onClick={async () => {
+                        try {
+                          await invoke('restart_as_admin');
+                        } catch (e: any) {
+                          triggerToast(`Failed to restart as admin: ${e}`, 'error');
+                        }
+                      }}
+                      className="flex items-center gap-2 px-3 py-2 text-xs font-bold bg-app-primary text-white rounded-lg hover:bg-app-primary/80 transition-colors cursor-pointer"
+                    >
+                      <Shield size={12} />
+                      {t('settings.daemon_elevation_restart', 'Запустить от Администратора')}
+                    </button>
+                  </div>
+                )}
               </div>
 
               <div className="p-4 bg-app-surface-hover/30 border border-app-border/60 rounded-xl space-y-4">
@@ -542,12 +648,21 @@ export function SettingsPage() {
                   {t('settings.logs_desc')}
                 </p>
               </div>
-              <button
-                onClick={handleClearLogs}
-                className="text-xs bg-app-surface-hover hover:bg-app-border border border-app-border text-app-muted hover:text-app-text px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
-              >
-                {t('settings.logs_clear')}
-              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={handleOpenLogsFolder}
+                  className="flex items-center gap-2 text-xs bg-app-primary/10 hover:bg-app-primary/20 border border-app-primary/30 text-app-primary px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
+                >
+                  <FolderOpen size={14} />
+                  {t('settings.logs_open_folder', 'Открыть папку')}
+                </button>
+                <button
+                  onClick={handleClearLogs}
+                  className="text-xs bg-app-surface-hover hover:bg-app-border border border-app-border text-app-muted hover:text-app-text px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
+                >
+                  {t('settings.logs_clear')}
+                </button>
+              </div>
             </div>
 
             <div className="flex-1 bg-app-bg border border-app-border rounded-xl p-4 font-mono text-[11px] leading-relaxed text-app-success overflow-y-auto max-h-[300px]">

@@ -47,8 +47,24 @@ pub fn load_profile(id: &str) -> Result<Profile, String> {
     let data = fs::read_to_string(&path)
         .map_err(|e| format!("Ошибка чтения {}: {}", path.display(), e))?;
 
-    serde_json::from_str(&data)
-        .map_err(|e| format!("Ошибка парсинга {}: {}", path.display(), e))
+    match serde_json::from_str::<Profile>(&data) {
+        Ok(profile) => Ok(profile),
+        Err(e) => {
+            warn!("Ошибка парсинга {}: {}. Попытка сброса профиля (миграция).", path.display(), e);
+            // Если парсинг не удался (скорее всего старый формат), создаем пустой новый профиль
+            let new_profile = Profile {
+                id: id.to_string(),
+                name: format!("{} (Сброшен)", id),
+                is_default: false,
+                linked_apps: vec![],
+                rules: vec![],
+                layers: vec![],
+            };
+            // Сохраним его, чтобы починить файл
+            let _ = save_profile(&new_profile);
+            Ok(new_profile)
+        }
+    }
 }
 
 /// Сохранить профиль в JSON файл (с бэкапом)

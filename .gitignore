@@ -44,7 +44,7 @@ memory-bank/
 # Internal planning documents (keep docs/winget/ tracked)
 docs/planning/
 docs/research/
-docs/tg-posts.md
+docs
 implementation_plan.md
 
 # Design mockups (internal)

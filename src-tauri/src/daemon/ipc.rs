@@ -71,28 +71,64 @@ async fn handle_client(pipe: NamedPipeServer, state: DaemonStateRef) -> Result<(
             continue;
         }
 
-        // Parse JSON-RPC request
-        let response = match serde_json::from_str::<JsonRpcRequest>(&line) {
-            Ok(req) => route_request(req, &state).await,
+        let parsed = serde_json::from_str::<JsonRpcRequest>(&line);
+        match parsed {
+            Ok(req) => {
+                if req.method == "subscribe_events" {
+                    let id = req.id.unwrap_or(serde_json::Value::Null);
+                    let response = JsonRpcResponse::success(serde_json::json!({ "subscribed": true }), id);
+                    let mut response_bytes = serde_json::to_string(&response)
+                        .map_err(|e| format!("Serialization error: {}", e))?;
+                    response_bytes.push('\n');
+                    writer.write_all(response_bytes.as_bytes()).await
+                        .map_err(|e| format!("Send error: {}", e))?;
+                    writer.flush().await
+                        .map_err(|e| format!("Flush error: {}", e))?;
+
+                    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+                    {
+                        let mut listeners = crate::gui::events::EVENT_LISTENERS.lock().unwrap();
+                        listeners.push(tx);
+                    }
+
+                    while let Some(event_msg) = rx.recv().await {
+                        if let Err(e) = writer.write_all(event_msg.as_bytes()).await {
+                            warn!("IPC Event write error: {}", e);
+                            break;
+                        }
+                        if let Err(e) = writer.flush().await {
+                            warn!("IPC Event flush error: {}", e);
+                            break;
+                        }
+                    }
+                    return Ok(());
+                } else {
+                    let response = route_request(req, &state).await;
+                    let mut response_bytes = serde_json::to_string(&response)
+                        .map_err(|e| format!("Serialization error: {}", e))?;
+                    response_bytes.push('\n');
+                    writer.write_all(response_bytes.as_bytes()).await
+                        .map_err(|e| format!("Send error: {}", e))?;
+                    writer.flush().await
+                        .map_err(|e| format!("Flush error: {}", e))?;
+                }
+            }
             Err(e) => {
                 warn!("IPC: invalid JSON-RPC: {}", e);
-                JsonRpcResponse::error(
+                let response = JsonRpcResponse::error(
                     PARSE_ERROR,
                     format!("Parse error: {}", e),
                     serde_json::Value::Null,
-                )
+                );
+                let mut response_bytes = serde_json::to_string(&response)
+                    .map_err(|e| format!("Serialization error: {}", e))?;
+                response_bytes.push('\n');
+                writer.write_all(response_bytes.as_bytes()).await
+                    .map_err(|e| format!("Send error: {}", e))?;
+                writer.flush().await
+                    .map_err(|e| format!("Flush error: {}", e))?;
             }
-        };
-
-        // Serialize and send response
-        let mut response_bytes = serde_json::to_string(&response)
-            .map_err(|e| format!("Serialization error: {}", e))?;
-        response_bytes.push('\n');
-
-        writer.write_all(response_bytes.as_bytes()).await
-            .map_err(|e| format!("Send error: {}", e))?;
-        writer.flush().await
-            .map_err(|e| format!("Flush error: {}", e))?;
+        }
     }
 
     Ok(())
@@ -103,6 +139,7 @@ async fn route_request(req: JsonRpcRequest, state: &DaemonStateRef) -> JsonRpcRe
     let id = req.id.unwrap_or(serde_json::Value::Null);
 
     info!("IPC → {} (id={})", req.method, id);
+    info!("IPC method: {}", req.method);
 
     let result = match req.method.as_str() {
         // === System ===
@@ -299,12 +336,18 @@ async fn handle_set_active_profile(
     Ok(serde_json::json!({ "success": true, "profile_id": profile_id }))
 }
 
-/// List profiles (stub)
+/// List profiles
 async fn handle_list_profiles() -> Result<serde_json::Value, JsonRpcError> {
-    // TODO: Load from persistence
-    Ok(serde_json::json!({
-        "profiles": ["default"]
-    }))
+    match crate::shared::persistence::list_profiles() {
+        Ok(profiles) => Ok(serde_json::json!({
+            "profiles": profiles
+        })),
+        Err(e) => Err(JsonRpcError {
+            code: INTERNAL_ERROR,
+            message: format!("Failed to list profiles: {}", e),
+            data: None,
+        })
+    }
 }
 
 /// Get daemon configuration
@@ -333,6 +376,8 @@ async fn handle_update_config(state: &DaemonStateRef, params: Option<serde_json:
         message: format!("Failed to load config: {}", e),
         data: None,
     })?;
+
+    let old_timeout = config.tap_hold_timeout_ms;
 
     // Apply updates
     if let Some(obj) = params.as_object() {
@@ -366,6 +411,18 @@ async fn handle_update_config(state: &DaemonStateRef, params: Option<serde_json:
         if let Some(restore) = obj.get("restoreMouseAfterMacro").and_then(|v| v.as_bool()) {
             config.restore_mouse_after_macro = restore;
         }
+        if let Some(onboarding) = obj.get("onboardingComplete").and_then(|v| v.as_bool()) {
+            config.onboarding_complete = onboarding;
+        }
+        if let Some(timeout) = obj.get("tapHoldTimeoutMs").and_then(|v| v.as_u64()) {
+            config.tap_hold_timeout_ms = timeout;
+        }
+        if let Some(font_size) = obj.get("fontSize").and_then(|v| v.as_u64()) {
+            config.font_size = font_size as u32;
+        }
+        if let Some(row_padding) = obj.get("rowPadding").and_then(|v| v.as_u64()) {
+            config.row_padding = row_padding as u32;
+        }
     }
 
     // Save config
@@ -380,6 +437,18 @@ async fn handle_update_config(state: &DaemonStateRef, params: Option<serde_json:
         s.kb_hook_enabled = config.kb_hook_enabled;
         s.mouse_hook_enabled = config.mouse_hook_enabled;
         s.restore_mouse_after_macro = config.restore_mouse_after_macro;
+        
+        // If tap_hold_timeout_ms changed, recompile schema
+        if config.tap_hold_timeout_ms != old_timeout {
+            if let Some(ref prof) = s.active_profile {
+                let frontend_config = crate::schemas::frontend::FrontendConfig {
+                    rules: prof.rules.clone(),
+                    layers: prof.layers.clone(),
+                    tap_hold_timeout_ms: config.tap_hold_timeout_ms,
+                };
+                s.engine_schema = crate::daemon::compiler::compile_schema(&frontend_config);
+            }
+        }
     }
 
     Ok(serde_json::json!({ "success": true }))

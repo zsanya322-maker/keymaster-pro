@@ -4,6 +4,12 @@ use tracing::{info, warn};
 
 use crate::daemon::state::DaemonStateRef;
 
+fn current_tap_hold_timeout() -> u64 {
+    crate::shared::config::load_config()
+        .map(|c| c.tap_hold_timeout_ms)
+        .unwrap_or(200)
+}
+
 /// Helper function to load, modify, save, and update the active profile in DaemonState
 fn modify_profile<F>(profile_id: &str, state: &DaemonStateRef, f: F) -> Result<(), String>
 where
@@ -14,22 +20,16 @@ where
     crate::shared::persistence::save_profile(&profile)?;
     if let Ok(mut s) = state.write() {
         if s.active_profile_id == profile_id {
+            // Compile new engine schema
+            let frontend_config = crate::schemas::frontend::FrontendConfig {
+                rules: profile.rules.clone(),
+                layers: profile.layers.clone(),
+                tap_hold_timeout_ms: current_tap_hold_timeout(),
+            };
+            s.engine_schema = crate::daemon::compiler::compile_schema(&frontend_config);
             s.active_profile = Some(profile);
         }
     }
-    Ok(())
-}
-
-fn save_recorded_macro(macro_id: &str, steps: Vec<crate::shared::types::MacroStep>, state: &DaemonStateRef) -> Result<(), String> {
-    let active_id = {
-        let s = state.read().map_err(|_| "Failed to lock state")?;
-        s.active_profile_id.clone()
-    };
-    modify_profile(&active_id, state, |prof| {
-        if let Some(m) = prof.macros.iter_mut().find(|mac| mac.id == macro_id) {
-            m.steps = steps;
-        }
-    })?;
     Ok(())
 }
 
@@ -40,7 +40,19 @@ pub async fn dispatch(method: &str, params: Option<Value>, state: &DaemonStateRe
     match method {
         // Profiles
         "profile.list" => {
-            let ids = crate::shared::persistence::list_profiles()?;
+            let mut ids = crate::shared::persistence::list_profiles()?;
+            if ids.is_empty() {
+                let default_prof = crate::shared::types::Profile {
+                    id: "1".to_string(),
+                    name: "Default".to_string(),
+                    is_default: true,
+                    linked_apps: vec![],
+                    rules: vec![],
+                    layers: vec![],
+                };
+                let _ = crate::shared::persistence::save_profile(&default_prof);
+                ids.push("1".to_string());
+            }
             let mut list = Vec::new();
             for id in ids {
                 if let Ok(prof) = crate::shared::persistence::load_profile(&id) {
@@ -59,9 +71,14 @@ pub async fn dispatch(method: &str, params: Option<Value>, state: &DaemonStateRe
             {
                 let mut s = state.write().map_err(|_| "Failed to lock state")?;
                 s.active_profile_id = id.to_string();
+                let frontend_config = crate::schemas::frontend::FrontendConfig {
+                    rules: profile.rules.clone(),
+                    layers: profile.layers.clone(),
+                    tap_hold_timeout_ms: current_tap_hold_timeout(),
+                };
+                s.engine_schema = crate::daemon::compiler::compile_schema(&frontend_config);
                 s.active_profile = Some(profile);
             }
-            // Save active ID in config.json
             if let Ok(mut config) = crate::shared::config::load_config() {
                 config.active_profile_id = id.to_string();
                 let _ = crate::shared::config::save_config(&config);
@@ -86,11 +103,8 @@ pub async fn dispatch(method: &str, params: Option<Value>, state: &DaemonStateRe
                         name: input.name.clone(),
                         is_default: input.is_default,
                         linked_apps: input.linked_apps.clone().unwrap_or_default(),
-                        remaps: vec![],
-                        mouse_remaps: vec![],
+                        rules: vec![],
                         layers: vec![],
-                        macros: vec![],
-                        text_expansions: vec![],
                     }
                 });
                 
@@ -105,6 +119,12 @@ pub async fn dispatch(method: &str, params: Option<Value>, state: &DaemonStateRe
                 {
                     let mut s = state.write().map_err(|_| "Failed to lock state")?;
                     if s.active_profile_id == prof.id {
+                        let frontend_config = crate::schemas::frontend::FrontendConfig {
+                            rules: prof.rules.clone(),
+                            layers: prof.layers.clone(),
+                            tap_hold_timeout_ms: current_tap_hold_timeout(),
+                        };
+                        s.engine_schema = crate::daemon::compiler::compile_schema(&frontend_config);
                         s.active_profile = Some(prof);
                     }
                 }
@@ -113,20 +133,41 @@ pub async fn dispatch(method: &str, params: Option<Value>, state: &DaemonStateRe
                 Err("Missing parameters".into())
             }
         }
-        "profile.update" => {
+        "profile.save" => {
             if let Some(p) = params {
-                let id = p.get("id").and_then(|v| v.as_str()).ok_or("Missing profile id")?.to_string();
-                modify_profile(&id, state, |prof| {
-                    if let Some(name) = p.get("name").and_then(|v| v.as_str()) {
-                        prof.name = name.to_string();
-                    }
-                    if let Some(is_default) = p.get("isDefault").and_then(|v| v.as_bool()) {
-                        prof.is_default = is_default;
-                    }
-                    if let Some(linked_apps) = p.get("linkedApps").and_then(|v| v.as_array()) {
-                        prof.linked_apps = linked_apps.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect();
-                    }
-                })?;
+                let prof: crate::shared::types::Profile = serde_json::from_value(p).map_err(|e| e.to_string())?;
+                crate::shared::persistence::save_profile(&prof)?;
+                
+                let mut s = state.write().map_err(|_| "Failed to lock state")?;
+                if s.active_profile_id == prof.id {
+                    let frontend_config = crate::schemas::frontend::FrontendConfig {
+                        rules: prof.rules.clone(),
+                        layers: prof.layers.clone(),
+                        tap_hold_timeout_ms: current_tap_hold_timeout(),
+                    };
+                    s.engine_schema = crate::daemon::compiler::compile_schema(&frontend_config);
+                    s.active_profile = Some(prof);
+                }
+                Ok(json!({ "success": true }))
+            } else {
+                Err("Missing parameters".into())
+            }
+        }
+        "profile.import" => {
+            if let Some(p) = params {
+                let prof: crate::shared::types::Profile = serde_json::from_value(p).map_err(|e| e.to_string())?;
+                crate::shared::persistence::save_profile(&prof)?;
+                
+                let mut s = state.write().map_err(|_| "Failed to lock state")?;
+                if s.active_profile_id == prof.id {
+                    let frontend_config = crate::schemas::frontend::FrontendConfig {
+                        rules: prof.rules.clone(),
+                        layers: prof.layers.clone(),
+                        tap_hold_timeout_ms: current_tap_hold_timeout(),
+                    };
+                    s.engine_schema = crate::daemon::compiler::compile_schema(&frontend_config);
+                    s.active_profile = Some(prof);
+                }
                 Ok(json!({ "success": true }))
             } else {
                 Err("Missing parameters".into())
@@ -137,132 +178,49 @@ pub async fn dispatch(method: &str, params: Option<Value>, state: &DaemonStateRe
             crate::shared::persistence::delete_profile(id)?;
             Ok(json!({ "success": true }))
         }
-        "profile.import" => {
+        "apply_onboarding_example" => {
             if let Some(p) = params {
-                let prof: crate::shared::types::Profile = serde_json::from_value(p).map_err(|e| e.to_string())?;
-                crate::shared::persistence::save_profile(&prof)?;
-                Ok(json!({ "success": true }))
-            } else {
-                Err("Missing parameters".into())
-            }
-        }
-
-        // Keyboard Remapping
-        "remap.list" => {
-            let profile_id = params.as_ref().and_then(|v| v.get("profileId")).and_then(|i| i.as_str()).unwrap_or("1");
-            let prof = crate::shared::persistence::load_profile(profile_id)?;
-            Ok(json!({ "rules": prof.remaps }))
-        }
-        "remap.add" => {
-            if let Some(p) = params {
-                let rule: crate::shared::types::RemapRule = serde_json::from_value(p).map_err(|e| e.to_string())?;
-                let profile_id = rule.profile_id.clone();
-                modify_profile(&profile_id, state, |prof| {
-                    prof.remaps.retain(|r| r.id != rule.id);
-                    prof.remaps.push(rule);
-                })?;
-                Ok(json!({ "success": true }))
-            } else {
-                Err("Missing parameters".into())
-            }
-        }
-        "remap.remove" => {
-            let id = params.as_ref().and_then(|v| v.get("id")).and_then(|i| i.as_str()).unwrap_or("");
-            let active_id = {
-                let s = state.read().map_err(|_| "Failed to lock state")?;
-                s.active_profile_id.clone()
-            };
-            modify_profile(&active_id, state, |prof| {
-                prof.remaps.retain(|r| r.id != id);
-            })?;
-            Ok(json!({ "success": true }))
-        }
-
-        // Mouse Remapping
-        "remap.mouse.list" => {
-            let profile_id = params.as_ref().and_then(|v| v.get("profileId")).and_then(|i| i.as_str()).unwrap_or("1");
-            let prof = crate::shared::persistence::load_profile(profile_id)?;
-            Ok(json!({ "rules": prof.mouse_remaps }))
-        }
-        "remap.mouse.add" => {
-            if let Some(p) = params {
-                let rule: crate::shared::types::MouseRemapRule = serde_json::from_value(p).map_err(|e| e.to_string())?;
-                let profile_id = rule.profile_id.clone();
-                modify_profile(&profile_id, state, |prof| {
-                    prof.mouse_remaps.retain(|r| r.id != rule.id);
-                    prof.mouse_remaps.push(rule);
-                })?;
-                Ok(json!({ "success": true }))
-            } else {
-                Err("Missing parameters".into())
-            }
-        }
-        "remap.mouse.remove" => {
-            let id = params.as_ref().and_then(|v| v.get("id")).and_then(|i| i.as_str()).unwrap_or("");
-            let active_id = {
-                let s = state.read().map_err(|_| "Failed to lock state")?;
-                s.active_profile_id.clone()
-            };
-            modify_profile(&active_id, state, |prof| {
-                prof.mouse_remaps.retain(|r| r.id != id);
-            })?;
-            Ok(json!({ "success": true }))
-        }
-
-        // Layers
-        "layer.list" => {
-            let profile_id = params.as_ref().and_then(|v| v.get("profileId")).and_then(|i| i.as_str()).unwrap_or("1");
-            let prof = crate::shared::persistence::load_profile(profile_id)?;
-            Ok(json!({ "layers": prof.layers }))
-        }
-        "layer.create" => {
-            if let Some(p) = params {
-                let layer: crate::shared::types::Layer = serde_json::from_value(p).map_err(|e| e.to_string())?;
-                let profile_id = layer.profile_id.clone();
-                modify_profile(&profile_id, state, |prof| {
-                    prof.layers.retain(|l| l.id != layer.id);
-                    prof.layers.push(layer);
-                })?;
-                Ok(json!({ "success": true }))
-            } else {
-                Err("Missing parameters".into())
-            }
-        }
-        "layer.delete" => {
-            let id = params.as_ref().and_then(|v| v.get("id")).and_then(|i| i.as_str()).unwrap_or("");
-            let active_id = {
-                let s = state.read().map_err(|_| "Failed to lock state")?;
-                s.active_profile_id.clone()
-            };
-            modify_profile(&active_id, state, |prof| {
-                prof.layers.retain(|l| l.id != id);
-            })?;
-            Ok(json!({ "success": true }))
-        }
-        "layer.update" => {
-            if let Some(p) = params {
-                let id = p.get("id").and_then(|v| v.as_str()).ok_or("Missing layer id")?.to_string();
+                let example_type = p.get("type").and_then(|v| v.as_str()).unwrap_or("");
                 let active_id = {
                     let s = state.read().map_err(|_| "Failed to lock state")?;
                     s.active_profile_id.clone()
                 };
+                
                 modify_profile(&active_id, state, |prof| {
-                    if let Some(layer) = prof.layers.iter_mut().find(|l| l.id == id) {
-                        if let Some(updates) = p.get("updates") {
-                            if let Some(name) = updates.get("name").and_then(|v| v.as_str()) {
-                                layer.name = name.to_string();
-                            }
-                            if let Some(priority) = updates.get("priority").and_then(|v| v.as_i64()) {
-                                layer.priority = priority as i32;
-                            }
-                            if let Some(trigger_type) = updates.get("triggerType").and_then(|v| v.as_str()) {
-                                layer.trigger_type = trigger_type.to_string();
-                            }
-                            if let Some(trigger_value) = updates.get("triggerValue").and_then(|v| v.as_str()) {
-                                layer.trigger_value = trigger_value.to_string();
-                            }
-                        }
-                    }
+                    use crate::schemas::frontend::{FrontendRule, FrontendTrigger, FrontendAction, MacroAction, MacroStep};
+                    let new_rule = match example_type {
+                        "remap" => FrontendRule {
+                            id: uuid::Uuid::new_v4().to_string(),
+                            trigger: FrontendTrigger::KeyDown { code: 20 }, // VK_CAPITAL (Caps Lock)
+                            actions: vec![FrontendAction::RemapKey { code: 8 }], // VK_BACK (Backspace)
+                            hold_actions: None,
+                            conditions: vec![],
+                            priority: 10,
+                        },
+                        "expansion" => FrontendRule {
+                            id: uuid::Uuid::new_v4().to_string(),
+                            trigger: FrontendTrigger::TypedText { sequence: "@@".to_string() },
+                            actions: vec![FrontendAction::TypeText { text: "user@example.com".to_string() }],
+                            hold_actions: None,
+                            conditions: vec![],
+                            priority: 10,
+                        },
+                        "macro" => FrontendRule {
+                            id: uuid::Uuid::new_v4().to_string(),
+                            trigger: FrontendTrigger::KeyDown { code: 123 }, // F12
+                            actions: vec![FrontendAction::RunMacro { steps: vec![
+                                MacroStep { action: MacroAction::KeyDown { code: 72 }, delay_ms: 50 }, // H
+                                MacroStep { action: MacroAction::KeyUp { code: 72 }, delay_ms: 50 },
+                                MacroStep { action: MacroAction::KeyDown { code: 69 }, delay_ms: 50 }, // E
+                                MacroStep { action: MacroAction::KeyUp { code: 69 }, delay_ms: 50 },
+                            ]}],
+                            hold_actions: None,
+                            conditions: vec![],
+                            priority: 10,
+                        },
+                        _ => return,
+                    };
+                    prof.rules.push(new_rule);
                 })?;
                 Ok(json!({ "success": true }))
             } else {
@@ -270,181 +228,36 @@ pub async fn dispatch(method: &str, params: Option<Value>, state: &DaemonStateRe
             }
         }
 
-        // Macros
-        "macro.list" => {
-            let profile_id = params.as_ref().and_then(|v| v.get("profileId")).and_then(|i| i.as_str()).unwrap_or("1");
-            let prof = crate::shared::persistence::load_profile(profile_id)?;
-            Ok(json!({ "macros": prof.macros }))
-        }
-        "macro.create" => {
-            if let Some(p) = params {
-                let m: crate::shared::types::Macro = serde_json::from_value(p).map_err(|e| e.to_string())?;
-                let profile_id = m.profile_id.clone();
-                modify_profile(&profile_id, state, |prof| {
-                    prof.macros.retain(|mac| mac.id != m.id);
-                    prof.macros.push(m);
-                })?;
-                Ok(json!({ "success": true }))
-            } else {
-                Err("Missing parameters".into())
-            }
-        }
-        "macro.delete" => {
-            let id = params.as_ref().and_then(|v| v.get("id")).and_then(|i| i.as_str()).unwrap_or("");
-            let active_id = {
-                let s = state.read().map_err(|_| "Failed to lock state")?;
-                s.active_profile_id.clone()
-            };
-            modify_profile(&active_id, state, |prof| {
-                prof.macros.retain(|m| m.id != id);
-            })?;
-            Ok(json!({ "success": true }))
-        }
-        "macro.update" => {
-            if let Some(p) = params {
-                let id = p.get("id").and_then(|v| v.as_str()).ok_or("Missing macro id")?.to_string();
-                let active_id = {
-                    let s = state.read().map_err(|_| "Failed to lock state")?;
-                    s.active_profile_id.clone()
-                };
-                modify_profile(&active_id, state, |prof| {
-                    if let Some(m) = prof.macros.iter_mut().find(|mac| mac.id == id) {
-                        if let Some(updates) = p.get("updates") {
-                            if let Some(name) = updates.get("name").and_then(|v| v.as_str()) {
-                                m.name = name.to_string();
-                            }
-                            if let Some(trigger_key) = updates.get("triggerKey").and_then(|v| v.as_str()) {
-                                m.trigger_key = trigger_key.to_string();
-                            }
-                            if let Some(steps_val) = updates.get("steps") {
-                                if let Ok(steps) = serde_json::from_value(steps_val.clone()) {
-                                    m.steps = steps;
-                                }
-                            }
-                            if let Some(trigger_type_val) = updates.get("triggerType") {
-                                m.trigger_type = trigger_type_val.as_str().map(|s| s.to_string());
-                            }
-                            if let Some(trigger_time_val) = updates.get("triggerTime") {
-                                m.trigger_time = trigger_time_val.as_u64().map(|v| v as u32);
-                            }
-                            if let Some(trigger_layout_val) = updates.get("triggerLayout") {
-                                m.trigger_layout = trigger_layout_val.as_str().map(|s| s.to_string());
-                            }
-                        }
-                    }
-                })?;
-                Ok(json!({ "success": true }))
-            } else {
-                Err("Missing parameters".into())
-            }
-        }
-        "macro.play" => {
-            let id = params.as_ref().and_then(|v| v.get("id")).and_then(|i| i.as_str()).unwrap_or("");
-            crate::daemon::macros::play_macro(id, state).await?;
-            Ok(json!({ "success": true }))
-        }
-        "macro.select_for_recording" => {
-            let macro_id = params.as_ref().and_then(|v| v.get("macroId")).and_then(|i| i.as_str()).map(|s| s.to_string());
-            let mut s = state.write().map_err(|_| "Failed to lock state")?;
-            s.selected_macro_id = macro_id;
-            Ok(json!({ "success": true }))
-        }
+        // Macro recording
         "macro.start_recording" => {
-            let macro_id = params.as_ref().and_then(|v| v.get("macroId")).and_then(|i| i.as_str()).ok_or("Missing macroId")?.to_string();
-            let mut s = state.write().map_err(|_| "Failed to lock state")?;
-            // Seed the buffer with the macro's existing steps so recording appends instead of resetting
-            let existing_steps = s.active_profile.as_ref()
-                .and_then(|p| p.macros.iter().find(|m| m.id == macro_id))
-                .map(|m| m.steps.clone())
-                .unwrap_or_default();
-            s.recording_macro_id = Some(macro_id);
-            s.record_start_time = Some(std::time::Instant::now());
-            s.record_last_event_time = Some(std::time::Instant::now());
-            s.recorded_steps = existing_steps;
+            let s = state.read().map_err(|_| "Failed to lock state")?;
+            s.is_recording.store(true, std::sync::atomic::Ordering::Relaxed);
+            if let Ok(mut steps) = s.recorded_steps.lock() {
+                steps.clear();
+            }
+            if let Ok(mut last_time) = s.last_record_time.lock() {
+                *last_time = None;
+            }
             Ok(json!({ "success": true }))
         }
         "macro.stop_recording" => {
-            let (macro_id, steps) = {
-                let mut s = state.write().map_err(|_| "Failed to lock state")?;
-                let m_id = s.recording_macro_id.take().ok_or("Not recording")?;
-                s.record_start_time = None;
-                s.record_last_event_time = None;
-                let steps = std::mem::take(&mut s.recorded_steps);
-                (m_id, steps)
+            let steps = {
+                let s = state.read().map_err(|_| "Failed to lock state")?;
+                s.is_recording.store(false, std::sync::atomic::Ordering::Relaxed);
+                let steps_guard = s.recorded_steps.lock().map_err(|_| "Failed to lock recorded steps")?;
+                steps_guard.clone()
             };
-            save_recorded_macro(&macro_id, steps, state)?;
-            Ok(json!({ "success": true }))
+            let val = serde_json::to_value(&steps).map_err(|e| e.to_string())?;
+            Ok(json!({ "steps": val }))
         }
         "macro.get_recording_status" => {
             let s = state.read().map_err(|_| "Failed to lock state")?;
+            let is_recording = s.is_recording.load(std::sync::atomic::Ordering::Relaxed);
+            let count = s.recorded_steps.lock().map(|g| g.len()).unwrap_or(0);
             Ok(json!({
-                "isRecording": s.recording_macro_id.is_some(),
-                "recordingMacroId": s.recording_macro_id,
-                "stepCount": s.recorded_steps.len(),
-                "selectedMacroId": s.selected_macro_id,
-                "steps": s.recorded_steps
+                "isRecording": is_recording,
+                "stepsCount": count
             }))
-        }
-        "macro.capture_active_window" => {
-            let delay_sec = params.as_ref()
-                .and_then(|v| v.get("delay"))
-                .and_then(|v| v.as_u64())
-                .unwrap_or(3);
-            
-            tokio::time::sleep(std::time::Duration::from_secs(delay_sec)).await;
-            
-            let (process, title) = crate::daemon::engine::get_active_window_info();
-            Ok(json!({
-                "process": process,
-                "title": title
-            }))
-        }
-
-        // Text Expansions
-        "text_expansion.list" => {
-            let profile_id = params.as_ref().and_then(|v| v.get("profileId")).and_then(|i| i.as_str()).unwrap_or("1");
-            let prof = crate::shared::persistence::load_profile(profile_id)?;
-            Ok(json!({ "expansions": prof.text_expansions }))
-        }
-        "text_expansion.create" => {
-            if let Some(p) = params {
-                let te: crate::shared::types::TextExpansion = serde_json::from_value(p).map_err(|e| e.to_string())?;
-                let profile_id = te.profile_id.clone();
-                modify_profile(&profile_id, state, |prof| {
-                    prof.text_expansions.retain(|t| t.id != te.id);
-                    prof.text_expansions.push(te);
-                })?;
-                Ok(json!({ "success": true }))
-            } else {
-                Err("Missing parameters".into())
-            }
-        }
-        "text_expansion.delete" => {
-            let id = params.as_ref().and_then(|v| v.get("id")).and_then(|i| i.as_str()).unwrap_or("");
-            let active_id = {
-                let s = state.read().map_err(|_| "Failed to lock state")?;
-                s.active_profile_id.clone()
-            };
-            modify_profile(&active_id, state, |prof| {
-                prof.text_expansions.retain(|t| t.id != id);
-            })?;
-            Ok(json!({ "success": true }))
-        }
-        "text_expansion.update" => {
-            if let Some(p) = params {
-                let te: crate::shared::types::TextExpansion = serde_json::from_value(p).map_err(|e| e.to_string())?;
-                let profile_id = te.profile_id.clone();
-                modify_profile(&profile_id, state, |prof| {
-                    if let Some(t) = prof.text_expansions.iter_mut().find(|x| x.id == te.id) {
-                        *t = te;
-                    } else {
-                        prof.text_expansions.push(te);
-                    }
-                })?;
-                Ok(json!({ "success": true }))
-            } else {
-                Err("Missing parameters".into())
-            }
         }
 
         // System / Other
@@ -457,6 +270,40 @@ pub async fn dispatch(method: &str, params: Option<Value>, state: &DaemonStateRe
                 "status": "running",
                 "active_profile_id": active_id
             }))
+        }
+        "get_config" => {
+            let config = crate::shared::config::load_config()?;
+            Ok(serde_json::to_value(config).unwrap())
+        }
+        "update_config" => {
+            if let Some(p) = params {
+                let mut config = crate::shared::config::load_config()?;
+                if let Some(onboarding_complete) = p.get("onboardingComplete").and_then(|v| v.as_bool()) {
+                    config.onboarding_complete = onboarding_complete;
+                }
+                if let Some(timeout) = p.get("tapHoldTimeoutMs").and_then(|v| v.as_u64()) {
+                    config.tap_hold_timeout_ms = timeout;
+                }
+                if let Some(active_id) = p.get("activeProfileId").and_then(|v| v.as_str()) {
+                    config.active_profile_id = active_id.to_string();
+                }
+                crate::shared::config::save_config(&config)?;
+                Ok(json!({ "success": true }))
+            } else {
+                Err("Missing parameters".into())
+            }
+        }
+        "open_log_folder" => {
+            let log_dir = crate::shared::persistence::app_data_dir()?.join("logs");
+            std::fs::create_dir_all(&log_dir).map_err(|e| e.to_string())?;
+            #[cfg(target_os = "windows")]
+            {
+                std::process::Command::new("explorer")
+                    .arg(log_dir)
+                    .spawn()
+                    .map_err(|e| e.to_string())?;
+            }
+            Ok(json!({ "success": true }))
         }
         "shutdown" => {
             warn!("Shutdown command received by Daemon!");

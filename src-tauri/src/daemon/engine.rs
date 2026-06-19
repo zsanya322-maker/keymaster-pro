@@ -1,360 +1,234 @@
 use std::collections::HashMap;
 use std::sync::{Mutex, LazyLock};
-use std::time::{Instant, Duration};
-use tracing::info;
-
+use std::time::Instant;
 use crate::daemon::state::DaemonStateRef;
+use crate::schemas::engine::{EngineCondition, EngineAction, SimulatorCommand};
+use crate::shared::calculate_hash;
 
 /// Тип результата обработки события
 #[derive(Debug)]
 pub enum EventAction {
     PassThrough,
     Block,
-    Replace { actions: Vec<SynthAction> },
 }
 
-/// Синтезированное действие (SendInput)
-#[derive(Debug, Clone)]
-pub enum SynthAction {
-    KeyPress { vk: u8, scan: u16 },
-    KeyRelease { vk: u8, scan: u16 },
-    MouseClick { button: u8, x: i32, y: i32 },
-    MouseMove { x: i32, y: i32 },
-    Scroll { delta: i32 },
-    Delay { ms: u64 },
-    UnicodeString { text: String },
+pub struct PendingTapHold {
+    pub vk_code: u8,
+    pub tap_actions: Vec<EngineAction>,
+    pub hold_actions: Vec<EngineAction>,
+    pub down_time: Instant,
+    pub timeout_ms: u32,
+    pub is_held: bool,
 }
 
-// Отслеживание времени кликов для Long Press и Double Press
-struct KeyPressInfo {
-    down_time: Instant,
-    last_up_time: Option<Instant>,
-}
+pub static PENDING_TAP_HOLDS: LazyLock<Mutex<HashMap<u8, PendingTapHold>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
-static KEY_STATES: LazyLock<Mutex<HashMap<u8, KeyPressInfo>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
-
-fn extract_combo(action_str: &str) -> &str {
-    if let Some(start) = action_str.find('(') {
-        if let Some(end) = action_str.rfind(')') {
-            if end > start {
-                return &action_str[start + 1..end];
-            }
-        }
-    }
-    action_str
-}
-
-pub fn key_name_to_vk(key: &str) -> Option<u8> {
-    let key_lower = key.to_lowercase();
-    match key_lower.as_str() {
-        "caps lock" | "capslock" => Some(0x14), // VK_CAPITAL
-        "escape" | "esc" => Some(0x1B), // VK_ESCAPE
-        "space" => Some(0x20), // VK_SPACE
-        "enter" | "return" => Some(0x0D), // VK_RETURN
-        "backspace" => Some(0x08), // VK_BACK
-        "tab" => Some(0x09), // VK_TAB
-        "delete" | "del" => Some(0x2E), // VK_DELETE
-        "insert" | "ins" => Some(0x2D), // VK_INSERT
-        "page up" | "pageup" | "pgup" => Some(0x21), // VK_PRIOR
-        "page down" | "pagedown" | "pgdn" => Some(0x22), // VK_NEXT
-        "end" => Some(0x23), // VK_END
-        "home" => Some(0x24), // VK_HOME
-        "left" => Some(0x25), // VK_LEFT
-        "up" => Some(0x26), // VK_UP
-        "right" => Some(0x27), // VK_RIGHT
-        "down" => Some(0x28), // VK_DOWN
-        "mute" => Some(0xAD), // VK_VOLUME_MUTE
-        "volumedown" | "volume down" => Some(0xAE), // VK_VOLUME_DOWN
-        "volumeup" | "volume up" => Some(0xAF), // VK_VOLUME_UP
-        "lalt" | "alt" => Some(0x12), // VK_MENU
-        "ralt" => Some(0xA5), // VK_RMENU
-        "lctrl" | "ctrl" | "control" => Some(0x11), // VK_CONTROL
-        "rctrl" => Some(0xA3), // VK_RCONTROL
-        "lshift" | "shift" => Some(0x10), // VK_SHIFT
-        "rshift" => Some(0xA1), // VK_RSHIFT
-        "lwin" | "win" | "super" => Some(0x5B), // VK_LWIN
-        "rwin" => Some(0x5C), // VK_RWIN
-        "f1" => Some(0x70),
-        "f2" => Some(0x71),
-        "f3" => Some(0x72),
-        "f4" => Some(0x73),
-        "f5" => Some(0x74),
-        "f6" => Some(0x75),
-        "f7" => Some(0x76),
-        "f8" => Some(0x77),
-        "f9" => Some(0x78),
-        "f10" => Some(0x79),
-        "f11" => Some(0x7A),
-        "f12" => Some(0x7B),
-        s if s.starts_with("vk_") || s.starts_with("vk") => {
-            let num_str = if s.starts_with("vk_") { &s[3..] } else { &s[2..] };
-            num_str.parse::<u8>().ok()
-        }
-        s if s.len() == 1 => {
-            let c = s.chars().next()?;
-            if c >= 'a' && c <= 'z' {
-                Some(c as u8 - b'a' + 0x41)
-            } else if c >= 'A' && c <= 'Z' {
-                Some(c as u8 - b'A' + 0x41)
-            } else if c >= '0' && c <= '9' {
-                Some(c as u8)
-            } else {
-                None
-            }
-        }
-        _ => None,
-    }
-}
-
-pub fn mouse_name_to_button(btn: &str) -> Option<u8> {
-    let btn_lower = btn.to_lowercase();
-    match btn_lower.as_str() {
-        "left" | "leftbutton" | "left button" => Some(0),
-        "right" | "rightbutton" | "right button" => Some(1),
-        "middle" | "middlebutton" | "middle button" => Some(2),
-        "xbutton1" | "xbutton 1" | "xbutton 1 (back)" | "back" => Some(3),
-        "xbutton2" | "xbutton 2" | "xbutton 2 (forward)" | "forward" => Some(4),
-        _ => None,
-    }
-}
-
-fn handle_special_action(action_str: &str, state: Option<&DaemonStateRef>) -> EventAction {
-    let trimmed = action_str.trim();
-    
-    // macro(id) or macro:id
-    if trimmed.starts_with("macro:") || (trimmed.starts_with("macro(") && trimmed.ends_with(')')) {
-        let macro_id = if trimmed.starts_with("macro:") {
-            trimmed[6..].to_string()
-        } else {
-            trimmed[6..trimmed.len() - 1].to_string()
-        };
-        if let Some(state_ref) = state {
-            let state_clone = state_ref.clone();
-            crate::daemon::runner::spawn_on_runtime(async move {
-                let _ = crate::daemon::macros::play_macro(&macro_id, &state_clone).await;
-            });
-        }
-        return EventAction::Block;
-    }
-    
-    // paste(text)
-    if trimmed.starts_with("paste(") && trimmed.ends_with(')') {
-        let mut text = &trimmed[6..trimmed.len() - 1];
-        if (text.starts_with('"') && text.ends_with('"')) || (text.starts_with('\'') && text.ends_with('\'')) {
-            text = &text[1..text.len() - 1];
-        }
-        return EventAction::Replace {
-            actions: vec![SynthAction::UnicodeString { text: text.to_string() }]
-        };
-    }
-    
-    // launch(path)
-    if trimmed.starts_with("launch(") && trimmed.ends_with(')') {
-        let path = &trimmed[7..trimmed.len() - 1];
-        #[cfg(target_os = "windows")]
-        unsafe {
-            use windows::core::HSTRING;
-            use windows::Win32::UI::Shell::ShellExecuteW;
-            use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
-            let op = HSTRING::from("open");
-            let file = HSTRING::from(path);
-            let _ = ShellExecuteW(None, &op, &file, None, None, SW_SHOWNORMAL);
-        }
-        return EventAction::Block;
-    }
-
-    let action_clean = extract_combo(action_str).trim();
-    let action_lower = action_clean.to_lowercase();
-    
-    match action_lower.as_str() {
-        "volume_up" | "volume up" => {
-            EventAction::Replace {
-                actions: vec![
-                    SynthAction::KeyPress { vk: 0xAF, scan: 0 },
-                    SynthAction::KeyRelease { vk: 0xAF, scan: 0 },
-                ]
-            }
-        }
-        "volume_down" | "volume down" => {
-            EventAction::Replace {
-                actions: vec![
-                    SynthAction::KeyPress { vk: 0xAE, scan: 0 },
-                    SynthAction::KeyRelease { vk: 0xAE, scan: 0 },
-                ]
-            }
-        }
-        "volume_mute" | "volume mute" | "mute" => {
-            EventAction::Replace {
-                actions: vec![
-                    SynthAction::KeyPress { vk: 0xAD, scan: 0 },
-                    SynthAction::KeyRelease { vk: 0xAD, scan: 0 },
-                ]
-            }
-        }
-        "monitor_off" | "monitor off" => {
-            #[cfg(target_os = "windows")]
-            unsafe {
-                use windows::Win32::UI::WindowsAndMessaging::{SendMessageW, HWND_BROADCAST, WM_SYSCOMMAND};
-                use windows::Win32::Foundation::{WPARAM, LPARAM};
-                const SC_MONITORPOWER: usize = 0xF170;
-                let _ = SendMessageW(HWND_BROADCAST, WM_SYSCOMMAND, Some(WPARAM(SC_MONITORPOWER)), Some(LPARAM(2)));
-            }
-            EventAction::Block
-        }
-        "screensaver" | "screen saver" => {
-            #[cfg(target_os = "windows")]
-            unsafe {
-                use windows::Win32::UI::WindowsAndMessaging::{SendMessageW, HWND_BROADCAST, WM_SYSCOMMAND};
-                use windows::Win32::Foundation::{WPARAM, LPARAM};
-                const SC_SCREENSAVE: usize = 0xF140;
-                let _ = SendMessageW(HWND_BROADCAST, WM_SYSCOMMAND, Some(WPARAM(SC_SCREENSAVE)), Some(LPARAM(0)));
-            }
-            EventAction::Block
-        }
-        "close_window" | "close window" => {
-            #[cfg(target_os = "windows")]
-            unsafe {
-                use windows::Win32::UI::WindowsAndMessaging::{SendMessageW, GetForegroundWindow, WM_CLOSE};
-                use windows::Win32::Foundation::{WPARAM, LPARAM};
-                let hwnd = GetForegroundWindow();
-                if !hwnd.is_invalid() {
-                    let _ = SendMessageW(hwnd, WM_CLOSE, Some(WPARAM(0)), Some(LPARAM(0)));
+fn check_conditions(conditions: &[EngineCondition], ctx: &crate::context::AppContext) -> bool {
+    for cond in conditions {
+        match cond {
+            EngineCondition::WindowFocused { process_hash } => {
+                let current_hash = calculate_hash(&ctx.active_process);
+                if *process_hash != current_hash {
+                    return false;
                 }
             }
-            EventAction::Block
-        }
-        "minimize_window" | "minimize window" => {
-            #[cfg(target_os = "windows")]
-            unsafe {
-                use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, GetForegroundWindow, SW_MINIMIZE};
-                let hwnd = GetForegroundWindow();
-                if !hwnd.is_invalid() {
-                    let _ = ShowWindow(hwnd, SW_MINIMIZE);
+            EngineCondition::LayerActive { layer_id_hash } => {
+                if !ctx.active_layers.contains(layer_id_hash) {
+                    return false;
                 }
             }
-            EventAction::Block
-        }
-        "maximize_window" | "maximize window" => {
-            #[cfg(target_os = "windows")]
-            unsafe {
-                use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, GetForegroundWindow, SW_MAXIMIZE};
-                let hwnd = GetForegroundWindow();
-                if !hwnd.is_invalid() {
-                    let _ = ShowWindow(hwnd, SW_MAXIMIZE);
-                }
-            }
-            EventAction::Block
-        }
-        "window_left" | "window left" => {
-            #[cfg(target_os = "windows")]
-            snap_window_left();
-            EventAction::Block
-        }
-        "window_right" | "window right" => {
-            #[cfg(target_os = "windows")]
-            snap_window_right();
-            EventAction::Block
-        }
-        "window_center" | "window center" => {
-            #[cfg(target_os = "windows")]
-            center_window();
-            EventAction::Block
-        }
-        "media_play" | "media play" | "media_play_pause" => {
-            EventAction::Replace {
-                actions: vec![
-                    SynthAction::KeyPress { vk: 0xB3, scan: 0 },
-                    SynthAction::KeyRelease { vk: 0xB3, scan: 0 },
-                ]
+            EngineCondition::VirtualDesktop { .. } => {
+                // Not implemented yet
             }
         }
-        "media_next" | "media next" => {
-            EventAction::Replace {
-                actions: vec![
-                    SynthAction::KeyPress { vk: 0xB0, scan: 0 },
-                    SynthAction::KeyRelease { vk: 0xB0, scan: 0 },
-                ]
-            }
-        }
-        "media_prev" | "media prev" => {
-            EventAction::Replace {
-                actions: vec![
-                    SynthAction::KeyPress { vk: 0xB1, scan: 0 },
-                    SynthAction::KeyRelease { vk: 0xB1, scan: 0 },
-                ]
-            }
-        }
-        "sleep" => {
-            #[cfg(target_os = "windows")]
-            unsafe {
-                use windows::core::w;
-                use windows::Win32::UI::Shell::ShellExecuteW;
-                use windows::Win32::UI::WindowsAndMessaging::SW_HIDE;
-                let _ = ShellExecuteW(
-                    None,
-                    w!("open"),
-                    w!("rundll32.exe"),
-                    w!("powrprof.dll,SetSuspendState 0,1,0"),
-                    None,
-                    SW_HIDE,
-                );
-            }
-            EventAction::Block
-        }
-        _ => {
-            // Launch Action fallback
-            if action_clean.starts_with("http://") || action_clean.starts_with("https://") || action_clean.contains(":\\") || action_clean.starts_with("/") {
-                #[cfg(target_os = "windows")]
-                unsafe {
-                    use windows::core::HSTRING;
-                    use windows::Win32::UI::Shell::ShellExecuteW;
-                    use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
-                    
-                    let op = HSTRING::from("open");
-                    let file = HSTRING::from(action_clean);
-                    let _ = ShellExecuteW(
-                        None,
-                        &op,
-                        &file,
-                        None,
-                        None,
-                        SW_SHOWNORMAL,
-                    );
-                }
-                return EventAction::Block;
-            }
-            
-            // Single key or key combination
-            if let Some(dest_vk) = key_name_to_vk(action_clean) {
-                return EventAction::Replace {
-                    actions: vec![
-                        SynthAction::KeyPress { vk: dest_vk, scan: 0 },
-                        SynthAction::KeyRelease { vk: dest_vk, scan: 0 },
-                    ]
-                };
-            }
-            
-            if action_clean.contains('+') {
-                let parts: Vec<&str> = action_clean.split('+').map(|s| s.trim()).collect();
-                let mut vks = Vec::new();
-                for part in parts {
-                    if let Some(vk) = key_name_to_vk(part) {
-                        vks.push(vk);
+    }
+    true
+}
+
+fn notify_layer_change(state: Option<&DaemonStateRef>, layer_id_hash: u64, active: bool) {
+    if let Some(state_ref) = state {
+        if let Ok(s) = state_ref.read() {
+            if let Some(ref prof) = s.active_profile {
+                for layer in &prof.layers {
+                    if crate::shared::calculate_hash(&layer.id) == layer_id_hash {
+                        let event = if active {
+                            crate::gui::events::DaemonEvent::LayerActivated {
+                                layer_id: layer.id.clone(),
+                                layer_name: layer.name.clone(),
+                            }
+                        } else {
+                            crate::gui::events::DaemonEvent::LayerDeactivated {
+                                layer_id: layer.id.clone(),
+                            }
+                        };
+                        crate::gui::events::broadcast_event(event);
+                        break;
                     }
                 }
-                if !vks.is_empty() {
-                    let mut actions = Vec::new();
-                    for &vk in &vks {
-                        actions.push(SynthAction::KeyPress { vk, scan: 0 });
-                    }
-                    for &vk in vks.iter().rev() {
-                        actions.push(SynthAction::KeyRelease { vk, scan: 0 });
-                    }
-                    return EventAction::Replace { actions };
+            }
+        }
+    }
+}
+
+fn execute_actions(
+    actions: &[EngineAction], 
+    simulator: &crate::simulator::SimulatorSender, 
+    ctx_arc: &std::sync::Arc<std::sync::RwLock<crate::context::AppContext>>, 
+    is_down: bool,
+    state: Option<&DaemonStateRef>,
+) -> EventAction {
+    for action in actions {
+        match action {
+            EngineAction::RemapKey { code } => {
+                if is_down { let _ = simulator.send(SimulatorCommand::PressKey(*code)); }
+                else { let _ = simulator.send(SimulatorCommand::ReleaseKey(*code)); }
+            }
+            EngineAction::RemapMouse { code } => {
+                if is_down { let _ = simulator.send(SimulatorCommand::MousePress(*code)); }
+                else { let _ = simulator.send(SimulatorCommand::MouseRelease(*code)); }
+            }
+            EngineAction::TypeText { text } => {
+                if is_down { let _ = simulator.send(SimulatorCommand::TypeString(text.clone())); }
+            }
+            EngineAction::MacroCommands { commands } => {
+                if is_down {
+                    for cmd in commands { let _ = simulator.send(cmd.clone()); }
                 }
             }
-            
-            EventAction::PassThrough
+            EngineAction::ToggleLayer { layer_id_hash } => {
+                if is_down {
+                    let mut became_active = false;
+                    let mut state_changed = false;
+                    if let Ok(mut wctx) = ctx_arc.write() {
+                        state_changed = true;
+                        if wctx.active_layers.contains(layer_id_hash) {
+                            wctx.active_layers.remove(layer_id_hash);
+                            became_active = false;
+                        } else {
+                            wctx.active_layers.insert(*layer_id_hash);
+                            became_active = true;
+                        }
+                    }
+                    if state_changed {
+                        notify_layer_change(state, *layer_id_hash, became_active);
+                    }
+                }
+            }
+            EngineAction::HoldLayerPush { layer_id_hash } => {
+                let mut state_changed = false;
+                if is_down {
+                    if let Ok(mut wctx) = ctx_arc.write() {
+                        if !wctx.active_layers.contains(layer_id_hash) {
+                            wctx.active_layers.insert(*layer_id_hash);
+                            state_changed = true;
+                        }
+                    }
+                    if state_changed {
+                        notify_layer_change(state, *layer_id_hash, true);
+                    }
+                } else {
+                    if let Ok(mut wctx) = ctx_arc.write() {
+                        if wctx.active_layers.contains(layer_id_hash) {
+                            wctx.active_layers.remove(layer_id_hash);
+                            state_changed = true;
+                        }
+                    }
+                    if state_changed {
+                        notify_layer_change(state, *layer_id_hash, false);
+                    }
+                }
+            }
+            EngineAction::HoldLayerPop { layer_id_hash } => {
+                if !is_down {
+                    let mut state_changed = false;
+                    if let Ok(mut wctx) = ctx_arc.write() {
+                        if wctx.active_layers.contains(layer_id_hash) {
+                            wctx.active_layers.remove(layer_id_hash);
+                            state_changed = true;
+                        }
+                    }
+                    if state_changed {
+                        notify_layer_change(state, *layer_id_hash, false);
+                    }
+                }
+            }
+            EngineAction::SystemVolume { action } => {
+                if is_down {
+                    let vk = match action.as_str() {
+                        "mute" => 0xAD, // VK_VOLUME_MUTE
+                        "down" => 0xAE, // VK_VOLUME_DOWN
+                        "up" => 0xAF,   // VK_VOLUME_UP
+                        _ => 0,
+                    };
+                    if vk != 0 {
+                        let _ = simulator.send(SimulatorCommand::PressKey(vk));
+                        let _ = simulator.send(SimulatorCommand::ReleaseKey(vk));
+                    }
+                }
+            }
+            EngineAction::MediaKey { key } => {
+                if is_down {
+                    let vk = match key.as_str() {
+                        "play_pause" => 0xB3, // VK_MEDIA_PLAY_PAUSE
+                        "next" => 0xB0,       // VK_MEDIA_NEXT_TRACK
+                        "prev" => 0xB1,       // VK_MEDIA_PREV_TRACK
+                        "stop" => 0xB2,       // VK_MEDIA_STOP
+                        _ => 0,
+                    };
+                    if vk != 0 {
+                        let _ = simulator.send(SimulatorCommand::PressKey(vk));
+                        let _ = simulator.send(SimulatorCommand::ReleaseKey(vk));
+                    }
+                }
+            }
+            EngineAction::WindowAction { action } => {
+                if is_down {
+                    crate::simulator::system::execute_window_action(action);
+                }
+            }
+            EngineAction::LaunchApp { path } => {
+                if is_down {
+                    crate::simulator::system::launch_app(path);
+                }
+            }
+            EngineAction::Sleep => {
+                if is_down {
+                    crate::simulator::system::sleep_pc();
+                }
+            }
+            EngineAction::MonitorOff => {
+                if is_down {
+                    crate::simulator::system::monitor_off();
+                }
+            }
+        }
+    }
+    EventAction::Block
+}
+
+
+pub fn tick_tap_holds(state: Option<&DaemonStateRef>) {
+    let now = Instant::now();
+    let mut to_trigger_hold = Vec::new();
+    
+    if let Ok(mut pending) = PENDING_TAP_HOLDS.lock() {
+        for (_vk, info) in pending.iter_mut() {
+            if !info.is_held && now.duration_since(info.down_time).as_millis() as u32 >= info.timeout_ms {
+                info.is_held = true;
+                to_trigger_hold.push(info.hold_actions.clone());
+            }
+        }
+    }
+
+    if let Some(state_ref) = state {
+        if let Ok(s) = state_ref.read() {
+            if let Some(simulator) = &s.simulator {
+                if let Some(ctx_state) = crate::trackers::context_tracker::get_context() {
+                    for actions in to_trigger_hold {
+                        execute_actions(&actions, simulator, &ctx_state, true, Some(state_ref));
+                    }
+                }
+            }
         }
     }
 }
@@ -371,264 +245,171 @@ pub fn process_keyboard_event(
         None => return EventAction::PassThrough,
     };
 
-    // Проверяем, включены ли хуки клавиатуры в состоянии
-    {
-        if let Ok(s) = state_ref.read() {
-            if !s.kb_hook_enabled {
-                return EventAction::PassThrough;
-            }
-        }
-    }
-
-    // Get active profile
-    let active_profile = {
-        let s = match state_ref.read() {
-            Ok(s) => s,
-            Err(_) => return EventAction::PassThrough,
-        };
-        s.active_profile.clone()
+    let s = match state_ref.read() {
+        Ok(s) => s,
+        Err(_) => return EventAction::PassThrough,
     };
 
-    let profile = match active_profile {
-        Some(p) => p,
+    if !s.kb_hook_enabled {
+        return EventAction::PassThrough;
+    }
+
+    let simulator = match &s.simulator {
+        Some(sim) => sim,
         None => return EventAction::PassThrough,
     };
 
-    // Get active process name and window title
-    let (active_process, window_title) = get_active_window_info();
-    
-    tracing::debug!("process_keyboard_event: vk={}, is_down={}, process='{}', title='{}'", vk_code, is_key_down, active_process, window_title);
-    
-    // Determine active layers
-    let mut active_layers = Vec::new();
-    
-    for layer in &profile.layers {
-        if is_layer_active(layer, &active_process, &window_title) {
-            active_layers.push(layer.id.clone());
-        }
-    }
-    
-    // Sort layers by priority (highest first)
-    let mut layers_sorted = profile.layers.clone();
-    layers_sorted.retain(|l| active_layers.contains(&l.id));
-    layers_sorted.sort_by(|a, b| b.priority.cmp(&a.priority));
-    
-    // Create ordered search list for layers
-    let mut layer_search_order: Vec<Option<String>> = layers_sorted.iter().map(|l| Some(l.id.clone())).collect();
-    layer_search_order.push(None); // Base layer (None) is checked last
-    layer_search_order.push(Some("".to_string())); // Or empty string
-    layer_search_order.push(Some("base".to_string())); // Or "base"
+    let engine_schema = &s.engine_schema;
 
-    // Check macro triggers in active layers or globally
-    for mac in &profile.macros {
-        // Проверяем ограничение раскладки клавиатуры
-        if let Some(ref layout_req) = mac.trigger_layout {
-            if layout_req != "any" && !layout_req.is_empty() {
-                let current_lang = get_active_layout_lang();
-                if current_lang != *layout_req {
-                    continue; // раскладка не совпадает
+    let ctx_arc = match crate::trackers::context_tracker::get_context() {
+        Some(c) => c,
+        None => return EventAction::PassThrough,
+    };
+
+    // Text expansion matching
+    if is_key_down {
+        let is_modifier = matches!(vk_code, 0x11 | 0x12 | 0x5B | 0x5C | 0xA2 | 0xA3 | 0xA4 | 0xA5);
+        if is_modifier {
+            if let Ok(mut buf) = s.typed_buffer.lock() {
+                buf.clear();
+            }
+        } else if vk_code == 0x08 { // Backspace
+            if let Ok(mut buf) = s.typed_buffer.lock() {
+                buf.pop();
+            }
+        } else {
+            let shift = is_shift_pressed();
+            if let Some(c) = vk_to_char(vk_code, shift) {
+                let mut matched_rule = None;
+                let mut matched_sequence = String::new();
+                
+                if let Ok(mut buf) = s.typed_buffer.lock() {
+                    buf.push(c);
+                    // Keep buffer under reasonable size
+                    let buf_len = buf.len();
+                    if buf_len > 30 {
+                        buf.drain(0..buf_len - 30);
+                    }
+                    
+                    // Search for match in text_expansion_map
+                    let ctx = ctx_arc.read().unwrap();
+                    for (seq, rules) in &engine_schema.text_expansion_map {
+                        if buf.ends_with(seq) {
+                            for rule in rules {
+                                if check_conditions(&rule.conditions, &ctx) {
+                                    matched_rule = Some(rule.clone());
+                                    matched_sequence = seq.clone();
+                                    break;
+                                }
+                            }
+                        }
+                        if matched_rule.is_some() {
+                            break;
+                        }
+                    }
+                    
+                    // If matched, clear buffer
+                    if matched_rule.is_some() {
+                        buf.clear();
+                    }
+                }
+                
+                if let Some(rule) = matched_rule {
+                    // Send backspaces to delete typed letters (excluding the blocked one)
+                    let backspaces = matched_sequence.chars().count() - 1;
+                    for _ in 0..backspaces {
+                        let _ = simulator.send(SimulatorCommand::PressKey(0x08));
+                        let _ = simulator.send(SimulatorCommand::ReleaseKey(0x08));
+                    }
+                    
+                    // Execute expansion actions
+                    execute_actions(&rule.actions, simulator, &ctx_arc, true, state);
+                    execute_actions(&rule.actions, simulator, &ctx_arc, false, state);
+                    
+                    return EventAction::Block;
+                }
+            } else {
+                // Non-printable character typed (e.g. Enter, Escape, Arrow key) -> clear buffer
+                if let Ok(mut buf) = s.typed_buffer.lock() {
+                    buf.clear();
                 }
             }
         }
+    }
 
-        if check_combo_match(&mac.trigger_key, vk_code) {
-            let trigger_type = mac.trigger_type.as_deref().unwrap_or("single");
-            let trigger_time = mac.trigger_time.unwrap_or(if trigger_type == "long_press" { 450 } else { 300 });
+    // Check Tap-Hold resolution FIRST
+    if is_key_down {
+        let mut early_trigger = Vec::new();
+        if let Ok(mut pending) = PENDING_TAP_HOLDS.lock() {
+            if !pending.contains_key(&vk_code) {
+                // Another key pressed while holds are pending! Resolve all holds immediately.
+                for (_, info) in pending.iter_mut() {
+                    if !info.is_held {
+                        info.is_held = true;
+                        early_trigger.push(info.hold_actions.clone());
+                    }
+                }
+            }
+        }
+        for actions in early_trigger {
+            execute_actions(&actions, simulator, &ctx_arc, true, state);
+        }
 
-            match trigger_type {
-                "single" | "combo" => {
-                    if is_key_down {
-                        info!("Клавиатурный триггер совпал с макросом '{}' (триггер: {})", mac.name, mac.trigger_key);
-                        let macro_id = mac.id.clone();
-                        let state_clone = state_ref.clone();
-                        crate::daemon::runner::spawn_on_runtime(async move {
-                            let _ = crate::daemon::macros::play_macro(&macro_id, &state_clone).await;
+        // Now check if this new key down matches a TapHold rule
+        let tap_rules_opt = engine_schema.tap_hold_map.get(&vk_code);
+        if let Some(rules) = tap_rules_opt {
+            let ctx = ctx_arc.read().unwrap();
+            for rule in rules {
+                if check_conditions(&rule.conditions, &ctx) {
+                    if let Ok(mut pending) = PENDING_TAP_HOLDS.lock() {
+                        pending.insert(vk_code, PendingTapHold {
+                            vk_code,
+                            tap_actions: rule.tap_actions.clone(),
+                            hold_actions: rule.hold_actions.clone(),
+                            down_time: Instant::now(),
+                            timeout_ms: rule.timeout_ms,
+                            is_held: false,
                         });
                     }
                     return EventAction::Block;
                 }
-                "double_press" => {
-                    if is_key_down {
-                        let mut is_double = false;
-                        if let Ok(states) = KEY_STATES.lock() {
-                            if let Some(entry) = states.get(&vk_code) {
-                                if let Some(up_time) = entry.last_up_time {
-                                    if up_time.elapsed() < Duration::from_millis(trigger_time as u64) {
-                                        is_double = true;
-                                    }
-                                }
-                            }
-                        }
-                        if is_double {
-                            info!("Двойное нажатие совпало с макросом '{}' (триггер: {})", mac.name, mac.trigger_key);
-                            let macro_id = mac.id.clone();
-                            let state_clone = state_ref.clone();
-                            crate::daemon::runner::spawn_on_runtime(async move {
-                                let _ = crate::daemon::macros::play_macro(&macro_id, &state_clone).await;
-                            });
-                            return EventAction::Block;
-                        }
-                    }
-                }
-                "long_press" => {
-                    if is_key_down {
-                        let start_time = Instant::now();
-                        let macro_id = mac.id.clone();
-                        let state_clone = state_ref.clone();
-                        let key_code_val = vk_code;
-                        
-                        if let Ok(mut states) = KEY_STATES.lock() {
-                            let entry = states.entry(vk_code).or_insert_with(|| KeyPressInfo {
-                                down_time: start_time,
-                                last_up_time: None,
-                            });
-                            entry.down_time = start_time;
-                            entry.last_up_time = None;
-                        }
-
-                        let macro_name = mac.name.clone();
-                        let trigger_key = mac.trigger_key.clone();
-
-                        crate::daemon::runner::spawn_on_runtime(async move {
-                            tokio::time::sleep(std::time::Duration::from_millis(trigger_time as u64)).await;
-                            
-                            let mut still_held = false;
-                            if let Ok(states) = KEY_STATES.lock() {
-                                if let Some(entry) = states.get(&key_code_val) {
-                                    if entry.down_time == start_time && entry.last_up_time.is_none() {
-                                        still_held = true;
-                                    }
-                                }
-                            }
-
-                            if still_held {
-                                info!("Удержание совпало с макросом '{}' (триггер: {})", macro_name, trigger_key);
-                                let _ = crate::daemon::macros::play_macro(&macro_id, &state_clone).await;
-                            }
-                        });
-                        
-                        return EventAction::Block;
-                    } else {
-                        // KeyUp
-                        let mut was_short_press = false;
-                        if let Ok(mut states) = KEY_STATES.lock() {
-                            if let Some(entry) = states.get_mut(&vk_code) {
-                                let elapsed = entry.down_time.elapsed();
-                                if elapsed < Duration::from_millis(trigger_time as u64) {
-                                    was_short_press = true;
-                                }
-                                entry.last_up_time = Some(Instant::now());
-                            }
-                        }
-
-                        if was_short_press {
-                            crate::daemon::runner::spawn_on_runtime(async move {
-                                crate::daemon::hooks::synth_key(vk_code, 0, true);
-                                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-                                crate::daemon::hooks::synth_key(vk_code, 0, false);
-                            });
-                        }
-                        
-                        return EventAction::Block;
-                    }
-                }
-                _ => {}
             }
+        }
+
+    } else {
+        // KeyUp
+        let mut tap_actions = None;
+        let mut hold_actions = None;
+        
+        if let Ok(mut pending) = PENDING_TAP_HOLDS.lock() {
+            if let Some(info) = pending.remove(&vk_code) {
+                if info.is_held {
+                    hold_actions = Some(info.hold_actions);
+                } else {
+                    tap_actions = Some(info.tap_actions);
+                }
+            }
+        }
+        
+        if let Some(actions) = tap_actions {
+            // TAP! Execute press and release immediately
+            execute_actions(&actions, simulator, &ctx_arc, true, state);
+            execute_actions(&actions, simulator, &ctx_arc, false, state);
+            return EventAction::Block;
+        } else if let Some(actions) = hold_actions {
+            // Release the hold actions
+            execute_actions(&actions, simulator, &ctx_arc, false, state);
+            return EventAction::Block;
         }
     }
 
-    // Check text expansions
-    if let Some((trigger_len, raw_replacement)) = crate::daemon::text_expansions::process_key_with_expansions(
-        vk_code,
-        _scan_code,
-        is_key_down,
-        &profile.text_expansions,
-    ) {
-        info!("Text expansion triggered (trigger length: {})", trigger_len);
-        crate::daemon::runner::spawn_on_runtime(async move {
-            crate::daemon::text_expansions::execute_expansion(trigger_len, raw_replacement).await;
-        });
-        return EventAction::Block;
-    }
-
-    // Handle Double Press / Long Press timings
-    let mut is_double = false;
-    let mut is_long = false;
-    {
-        if let Ok(mut times) = KEY_STATES.lock() {
-            let entry = times.entry(vk_code).or_insert_with(|| KeyPressInfo {
-                down_time: Instant::now(),
-                last_up_time: None,
-            });
-            
-            if is_key_down {
-                if let Some(up_time) = entry.last_up_time {
-                    if up_time.elapsed() < Duration::from_millis(300) {
-                        is_double = true;
-                    }
-                }
-                entry.down_time = Instant::now();
-            } else {
-                if entry.down_time.elapsed() > Duration::from_millis(400) {
-                    is_long = true;
-                }
-                entry.last_up_time = Some(Instant::now());
-            }
-        }
-    }
-
-    if is_double {
-        info!("Двойной клик на vk={}", vk_code);
-    }
-    if is_long {
-        info!("Длинный клик на vk={}", vk_code);
-    }
-
-    // Check keyboard remaps by layer priority
-    for search_layer_id in &layer_search_order {
-        for rule in &profile.remaps {
-            if matches_layer(search_layer_id, &rule.layer_id) {
-                if check_combo_match(&rule.original_key, vk_code) {
-                    info!("Ремаппинг сработал [Слой: {:?}]: {} -> {}", rule.layer_id, rule.original_key, rule.mapped_key);
-                    
-                    // Проверяем, является ли это специальным действием
-                    let is_special = rule.mapped_key.contains('(') || 
-                                     rule.mapped_key.to_lowercase().contains("volume") ||
-                                     rule.mapped_key.to_lowercase().contains("mute") ||
-                                     rule.mapped_key.to_lowercase().contains("monitor") ||
-                                     rule.mapped_key.to_lowercase().contains("sleep") ||
-                                     rule.mapped_key.to_lowercase().contains("window") ||
-                                     rule.mapped_key.to_lowercase().contains("media") ||
-                                     rule.mapped_key.starts_with("http") ||
-                                     rule.mapped_key.contains(":\\");
-                    
-                    if is_special {
-                        if is_key_down {
-                            return handle_special_action(&rule.mapped_key, state);
-                        } else {
-                            return EventAction::Block;
-                        }
-                    }
-
-                    // Обычный ремап клавиатуры
-                    if let Some(dest_vk) = key_name_to_vk(&rule.mapped_key) {
-                        let action = if is_key_down {
-                            SynthAction::KeyPress { vk: dest_vk, scan: 0 }
-                        } else {
-                            SynthAction::KeyRelease { vk: dest_vk, scan: 0 }
-                        };
-                        return EventAction::Replace { actions: vec![action] };
-                    }
-                    
-                    // Комбинация (Ctrl+C и т.д.)
-                    if rule.mapped_key.contains('+') {
-                        if is_key_down {
-                            return handle_special_action(&rule.mapped_key, state);
-                        } else {
-                            return EventAction::Block;
-                        }
-                    }
-                }
+    let rules_opt = engine_schema.keyboard_map.get(&vk_code);
+    if let Some(rules) = rules_opt {
+        let ctx = ctx_arc.read().unwrap();
+        for rule in rules {
+            if check_conditions(&rule.conditions, &ctx) {
+                drop(ctx);
+                return execute_actions(&rule.actions, simulator, &ctx_arc, is_key_down, state);
             }
         }
     }
@@ -640,7 +421,7 @@ pub fn process_mouse_event(
     button: u8,
     _x: i32,
     _y: i32,
-    delta: i32,
+    _delta: i32,
     _flags: u32,
     is_down: bool,
     state: Option<&DaemonStateRef>,
@@ -650,109 +431,40 @@ pub fn process_mouse_event(
         None => return EventAction::PassThrough,
     };
 
-    // Проверяем, включены ли хуки мыши
-    {
-        if let Ok(s) = state_ref.read() {
-            if !s.mouse_hook_enabled {
-                return EventAction::PassThrough;
-            }
-        }
-    }
-
-    // Clear text expansion buffer on mouse click
-    if is_down && button != 255 {
-        crate::daemon::text_expansions::clear_buffer();
-    }
-
-    // Get active profile
-    let active_profile = {
-        let s = match state_ref.read() {
-            Ok(s) => s,
-            Err(_) => return EventAction::PassThrough,
-        };
-        s.active_profile.clone()
+    let s = match state_ref.read() {
+        Ok(s) => s,
+        Err(_) => return EventAction::PassThrough,
     };
 
-    let profile = match active_profile {
-        Some(p) => p,
-        None => return EventAction::PassThrough,
-    };
-
-    // Проверяем макросы, привязанные к кнопкам мыши как триггеры
-    if is_down && button != 255 {
-        for mac in &profile.macros {
-            if check_mouse_combo_match(&mac.trigger_key, button) {
-                // Предотвращаем случайное блокирование левой кнопки мыши без модификаторов
-                if button == 0 && !mac.trigger_key.contains('+') {
-                    tracing::warn!("Защита: чистый клик левой кнопкой мыши не может быть триггером макроса во избежание блокировки мыши");
-                    continue;
-                }
-
-                info!("Мышиный триггер совпал с макросом '{}' (триггер: {})", mac.name, mac.trigger_key);
-                let macro_id = mac.id.clone();
-                let state_clone = state_ref.clone();
-                crate::daemon::runner::spawn_on_runtime(async move {
-                    let _ = crate::daemon::macros::play_macro(&macro_id, &state_clone).await;
-                });
-                return EventAction::Block;
-            }
-        }
-    }
-
-    // Get active process name and window title
-    let (active_process, window_title) = get_active_window_info();
-    
-    tracing::debug!("process_mouse_event: button={}, is_down={}, process='{}', title='{}'", button, is_down, active_process, window_title);
-    
-    // Determine active layers
-    let mut active_layers = Vec::new();
-    
-    for layer in &profile.layers {
-        if is_layer_active(layer, &active_process, &window_title) {
-            active_layers.push(layer.id.clone());
-        }
-    }
-    
-    let mut layers_sorted = profile.layers.clone();
-    layers_sorted.retain(|l| active_layers.contains(&l.id));
-    layers_sorted.sort_by(|a, b| b.priority.cmp(&a.priority));
-    
-    let mut layer_search_order: Vec<Option<String>> = layers_sorted.iter().map(|l| Some(l.id.clone())).collect();
-    layer_search_order.push(None);
-    layer_search_order.push(Some("".to_string()));
-    layer_search_order.push(Some("base".to_string()));
-
-    // Скролл колесика мыши (если delta != 0)
-    if delta != 0 {
-        for search_layer_id in &layer_search_order {
-            for rule in &profile.mouse_remaps {
-            if matches_layer(search_layer_id, &rule.layer_id) {
-                    let is_scroll_rule = rule.original_button.to_lowercase().contains("scroll");
-                    if is_scroll_rule {
-                        let is_up = delta > 0;
-                        let trigger_matches = (is_up && rule.original_button.to_lowercase().contains("up")) ||
-                                              (!is_up && rule.original_button.to_lowercase().contains("down"));
-                        if trigger_matches {
-                            info!("Скролл ремап: {} -> {}", rule.original_button, rule.mapped_action);
-                            return handle_special_action(&rule.mapped_action, state);
-                        }
-                    }
-                }
-            }
-        }
+    if !s.mouse_hook_enabled {
         return EventAction::PassThrough;
     }
 
-    // Check mouse button remaps by layer priority
-    for search_layer_id in &layer_search_order {
-        for rule in &profile.mouse_remaps {
-            if matches_layer(search_layer_id, &rule.layer_id) {
-                if let Some(orig_btn) = mouse_name_to_button(&rule.original_button) {
-                    if orig_btn == button {
-                        info!("Ремаппинг мыши сработал: {} -> {}", rule.original_button, rule.mapped_action);
-                        return handle_special_action(&rule.mapped_action, state);
-                    }
-                }
+    if is_down {
+        if let Ok(mut buf) = s.typed_buffer.lock() {
+            buf.clear();
+        }
+    }
+
+    let simulator = match &s.simulator {
+        Some(sim) => sim,
+        None => return EventAction::PassThrough,
+    };
+
+    let engine_schema = &s.engine_schema;
+
+    let ctx_arc = match crate::trackers::context_tracker::get_context() {
+        Some(c) => c,
+        None => return EventAction::PassThrough,
+    };
+
+    let rules_opt = engine_schema.mouse_map.get(&button);
+    if let Some(rules) = rules_opt {
+        let ctx = ctx_arc.read().unwrap();
+        for rule in rules {
+            if check_conditions(&rule.conditions, &ctx) {
+                drop(ctx);
+                return execute_actions(&rule.actions, simulator, &ctx_arc, is_down, state);
             }
         }
     }
@@ -760,288 +472,90 @@ pub fn process_mouse_event(
     EventAction::PassThrough
 }
 
-#[cfg(target_os = "windows")]
-fn snap_window_left() {
-    use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, SetWindowPos, GetSystemMetrics, SWP_NOZORDER, SWP_NOACTIVATE, SM_CXSCREEN, SM_CYSCREEN};
-    unsafe {
-        let hwnd = GetForegroundWindow();
-        if !hwnd.is_invalid() {
-            let screen_width = GetSystemMetrics(SM_CXSCREEN);
-            let screen_height = GetSystemMetrics(SM_CYSCREEN);
-            let _ = SetWindowPos(hwnd, None, 0, 0, screen_width / 2, screen_height, SWP_NOZORDER | SWP_NOACTIVATE);
-        }
+pub fn vk_to_key_name(vk: u8) -> String {
+    match vk {
+        0x14 => "CapsLock".to_string(),
+        0x1B => "Escape".to_string(),
+        0x20 => "Space".to_string(),
+        0x0D => "Enter".to_string(),
+        0x08 => "Backspace".to_string(),
+        0x09 => "Tab".to_string(),
+        0x2E => "Delete".to_string(),
+        0x2D => "Insert".to_string(),
+        0x21 => "PageUp".to_string(),
+        0x22 => "PageDown".to_string(),
+        0x23 => "End".to_string(),
+        0x24 => "Home".to_string(),
+        0x25 => "Left".to_string(),
+        0x26 => "Up".to_string(),
+        0x27 => "Right".to_string(),
+        0x28 => "Down".to_string(),
+        0xAD => "VolumeMute".to_string(),
+        0xAE => "VolumeDown".to_string(),
+        0xAF => "VolumeUp".to_string(),
+        0x12 | 0xA4 | 0xA5 => "Alt".to_string(),
+        0x11 | 0xA2 | 0xA3 => "Ctrl".to_string(),
+        0x10 | 0xA0 | 0xA1 => "Shift".to_string(),
+        0x5B | 0x5C => "Win".to_string(),
+        0x70 => "F1".to_string(),
+        0x71 => "F2".to_string(),
+        0x72 => "F3".to_string(),
+        0x73 => "F4".to_string(),
+        0x74 => "F5".to_string(),
+        0x75 => "F6".to_string(),
+        0x76 => "F7".to_string(),
+        0x77 => "F8".to_string(),
+        0x78 => "F9".to_string(),
+        0x79 => "F10".to_string(),
+        0x7A => "F11".to_string(),
+        0x7B => "F12".to_string(),
+        val @ 0x41..=0x5A => ((val - 0x41 + b'A') as char).to_string(),
+        val @ 0x30..=0x39 => ((val - 0x30 + b'0') as char).to_string(),
+        other => format!("VK_{}", other),
     }
 }
 
 #[cfg(target_os = "windows")]
-fn snap_window_right() {
-    use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, SetWindowPos, GetSystemMetrics, SWP_NOZORDER, SWP_NOACTIVATE, SM_CXSCREEN, SM_CYSCREEN};
+fn is_shift_pressed() -> bool {
     unsafe {
-        let hwnd = GetForegroundWindow();
-        if !hwnd.is_invalid() {
-            let screen_width = GetSystemMetrics(SM_CXSCREEN);
-            let screen_height = GetSystemMetrics(SM_CYSCREEN);
-            let _ = SetWindowPos(hwnd, None, screen_width / 2, 0, screen_width / 2, screen_height, SWP_NOZORDER | SWP_NOACTIVATE);
-        }
-    }
-}
-
-#[cfg(target_os = "windows")]
-fn center_window() {
-    use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, SetWindowPos, GetSystemMetrics, GetWindowRect, SWP_NOZORDER, SWP_NOACTIVATE, SM_CXSCREEN, SM_CYSCREEN};
-    unsafe {
-        let hwnd = GetForegroundWindow();
-        if !hwnd.is_invalid() {
-            let screen_width = GetSystemMetrics(SM_CXSCREEN);
-            let screen_height = GetSystemMetrics(SM_CYSCREEN);
-            let mut rect = windows::Win32::Foundation::RECT::default();
-            if GetWindowRect(hwnd, &mut rect).is_ok() {
-                let win_width = rect.right - rect.left;
-                let win_height = rect.bottom - rect.top;
-                let x = (screen_width - win_width) / 2;
-                let y = (screen_height - win_height) / 2;
-                let _ = SetWindowPos(hwnd, None, x, y, win_width, win_height, SWP_NOZORDER | SWP_NOACTIVATE);
-            }
-        }
-    }
-}
-
-pub fn get_active_window_info() -> (String, String) {
-    #[cfg(target_os = "windows")]
-    {
-        use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowTextW, GetWindowThreadProcessId};
-        use windows::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
-        use windows::Win32::Foundation::{CloseHandle};
-        
-        unsafe {
-            let hwnd = GetForegroundWindow();
-            if hwnd.is_invalid() {
-                return (String::new(), String::new());
-            }
-            
-            let mut buffer = [0u16; 512];
-            let len = GetWindowTextW(hwnd, &mut buffer);
-            let title = if len > 0 {
-                String::from_utf16_lossy(&buffer[..len as usize])
-            } else {
-                String::new()
-            };
-            
-            let mut process_id = 0u32;
-            GetWindowThreadProcessId(hwnd, Some(&mut process_id));
-            
-            let mut process_name = String::new();
-            if process_id != 0 {
-                if let Ok(process_handle) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, process_id) {
-                    use windows::Win32::System::Threading::QueryFullProcessImageNameW;
-                    let mut path_buffer = [0u16; 260];
-                    let mut size = path_buffer.len() as u32;
-                    if QueryFullProcessImageNameW(process_handle, windows::Win32::System::Threading::PROCESS_NAME_FORMAT(0), windows::core::PWSTR(path_buffer.as_mut_ptr()), &mut size).is_ok() {
-                        let full_path = String::from_utf16_lossy(&path_buffer[..size as usize]);
-                        if let Some(filename) = full_path.split('\\').last() {
-                            process_name = filename.to_string();
-                        }
-                    }
-                    let _ = CloseHandle(process_handle);
-                }
-            }
-            
-            (process_name, title)
-        }
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        (String::new(), String::new())
-    }
-}
-
-fn matches_layer(search_layer_id: &Option<String>, rule_layer_id: &Option<String>) -> bool {
-    match (search_layer_id, rule_layer_id) {
-        (None, None) => true,
-        (None, Some(lid)) => lid.is_empty() || lid == "base",
-        (Some(slid), None) => slid == "base" || slid.is_empty(),
-        (Some(slid), Some(rlid)) => rlid == slid || (slid == "base" && rlid.is_empty()) || (rlid == "base" && slid.is_empty()),
-    }
-}
-
-#[cfg(target_os = "windows")]
-fn get_active_layout_lang() -> String {
-    use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
-    use windows::Win32::UI::Input::KeyboardAndMouse::GetKeyboardLayout;
-    unsafe {
-        let hwnd = GetForegroundWindow();
-        if hwnd.is_invalid() {
-            return "any".to_string();
-        }
-        let thread_id = GetWindowThreadProcessId(hwnd, None);
-        if thread_id == 0 {
-            return "any".to_string();
-        }
-        let hkl = GetKeyboardLayout(thread_id);
-        let lang_id = (hkl.0 as usize) & 0xFFFF;
-        match lang_id {
-            0x0419 => "ru".to_string(),
-            0x0409 => "en".to_string(),
-            _ => "any".to_string(),
-        }
+        let state = windows::Win32::UI::Input::KeyboardAndMouse::GetKeyState(0x10); // VK_SHIFT = 0x10
+        (state & 0x8000u16 as i16) != 0
     }
 }
 
 #[cfg(not(target_os = "windows"))]
-fn get_active_layout_lang() -> String {
-    "any".to_string()
+fn is_shift_pressed() -> bool {
+    false
 }
 
-fn check_mouse_combo_match(combo_str: &str, current_button: u8) -> bool {
-    let parts: Vec<&str> = combo_str.split('+').map(|s| s.trim()).collect();
-    if parts.is_empty() {
-        return false;
-    }
+#[cfg(target_os = "windows")]
+fn vk_to_char(vk: u8, _shift: bool) -> Option<char> {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyboardState, ToUnicodeEx, GetKeyboardLayout, MapVirtualKeyW, MAPVK_VK_TO_VSC_EX};
     
-    let Some(base_btn_str) = parts.last() else {
-        return false;
-    };
-    let base_btn = match mouse_name_to_button(base_btn_str) {
-        Some(btn) => btn,
-        None => return false,
-    };
-    
-    if base_btn != current_button {
-        return false;
-    }
-    
-    let has_modifiers = parts.len() > 1;
-    if !has_modifiers {
-        return true;
-    }
-    
-    let mut req_ctrl = false;
-    let mut req_shift = false;
-    let mut req_alt = false;
-    let mut req_win = false;
-    
-    for &part in &parts[..parts.len() - 1] {
-        let part_lower = part.to_lowercase();
-        if part_lower == "ctrl" || part_lower == "lctrl" || part_lower == "rctrl" {
-            req_ctrl = true;
-        } else if part_lower == "shift" || part_lower == "lshift" || part_lower == "rshift" {
-            req_shift = true;
-        } else if part_lower == "alt" || part_lower == "lalt" || part_lower == "ralt" {
-            req_alt = true;
-        } else if part_lower == "win" || part_lower == "lwin" || part_lower == "rwin" {
-            req_win = true;
+    unsafe {
+        let mut key_state = [0u8; 256];
+        if GetKeyboardState(&mut key_state).is_err() {
+            return None;
         }
-    }
-    
-    #[cfg(target_os = "windows")]
-    {
-        use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL, VK_SHIFT, VK_MENU, VK_LWIN, VK_RWIN};
-        unsafe {
-            let ctrl_pressed = (GetKeyState(VK_CONTROL.0 as i32) as u16 & 0x8000) != 0;
-            let shift_pressed = (GetKeyState(VK_SHIFT.0 as i32) as u16 & 0x8000) != 0;
-            let alt_pressed = (GetKeyState(VK_MENU.0 as i32) as u16 & 0x8000) != 0;
-            let win_pressed = (GetKeyState(VK_LWIN.0 as i32) as u16 & 0x8000) != 0 || (GetKeyState(VK_RWIN.0 as i32) as u16 & 0x8000) != 0;
-            
-            ctrl_pressed == req_ctrl &&
-            shift_pressed == req_shift &&
-            alt_pressed == req_alt &&
-            win_pressed == req_win
-        }
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        true
-    }
-}
-
-fn check_combo_match(combo_str: &str, current_vk: u8) -> bool {
-    let parts: Vec<&str> = combo_str.split('+').map(|s| s.trim()).collect();
-    if parts.is_empty() {
-        return false;
-    }
-    
-    let Some(base_key_str) = parts.last() else {
-        return false;
-    };
-    let base_vk = match key_name_to_vk(base_key_str) {
-        Some(vk) => vk,
-        None => return false,
-    };
-    
-    if base_vk != current_vk {
-        return false;
-    }
-    
-    let has_modifiers = parts.len() > 1;
-    if !has_modifiers {
-        return true;
-    }
-    
-    let mut req_ctrl = false;
-    let mut req_shift = false;
-    let mut req_alt = false;
-    let mut req_win = false;
-    
-    for &part in &parts[..parts.len() - 1] {
-        let part_lower = part.to_lowercase();
-        if part_lower == "ctrl" || part_lower == "lctrl" || part_lower == "rctrl" {
-            req_ctrl = true;
-        } else if part_lower == "shift" || part_lower == "lshift" || part_lower == "rshift" {
-            req_shift = true;
-        } else if part_lower == "alt" || part_lower == "lalt" || part_lower == "ralt" {
-            req_alt = true;
-        } else if part_lower == "win" || part_lower == "lwin" || part_lower == "rwin" {
-            req_win = true;
-        }
-    }
-    
-    #[cfg(target_os = "windows")]
-    {
-        use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_CONTROL, VK_SHIFT, VK_MENU, VK_LWIN, VK_RWIN};
-        unsafe {
-            let ctrl_pressed = (GetKeyState(VK_CONTROL.0 as i32) as u16 & 0x8000) != 0;
-            let shift_pressed = (GetKeyState(VK_SHIFT.0 as i32) as u16 & 0x8000) != 0;
-            let alt_pressed = (GetKeyState(VK_MENU.0 as i32) as u16 & 0x8000) != 0;
-            let win_pressed = (GetKeyState(VK_LWIN.0 as i32) as u16 & 0x8000) != 0 || (GetKeyState(VK_RWIN.0 as i32) as u16 & 0x8000) != 0;
-            
-            ctrl_pressed == req_ctrl &&
-            shift_pressed == req_shift &&
-            alt_pressed == req_alt &&
-            win_pressed == req_win
-        }
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        true
-    }
-}
-
-fn is_layer_active(layer: &crate::shared::types::Layer, active_process: &str, window_title: &str) -> bool {
-    match layer.trigger_type.as_str() {
-        "none" => true,
-        "process" => {
-            !layer.trigger_value.is_empty() && 
-            active_process.to_lowercase().contains(&layer.trigger_value.to_lowercase())
-        }
-        "window_title" => {
-            !layer.trigger_value.is_empty() && 
-            window_title.to_lowercase().contains(&layer.trigger_value.to_lowercase())
-        }
-        "hotkey" => {
-            if let Some(vk) = key_name_to_vk(&layer.trigger_value) {
-                #[cfg(target_os = "windows")]
-                unsafe {
-                    use windows::Win32::UI::Input::KeyboardAndMouse::GetKeyState;
-                    (GetKeyState(vk as i32) as u16 & 0x8000) != 0
+        
+        let dwhkl = GetKeyboardLayout(0);
+        let scan_code = MapVirtualKeyW(vk as u32, MAPVK_VK_TO_VSC_EX);
+        
+        let mut buf = [0u16; 4];
+        let result = ToUnicodeEx(vk as u32, scan_code, &key_state, &mut buf, 0, dwhkl);
+        
+        if result > 0 {
+            if let Some(c) = char::from_u32(buf[0] as u32) {
+                if !c.is_control() {
+                    return Some(c);
                 }
-                #[cfg(not(target_os = "windows"))]
-                {
-                    false
-                }
-            } else {
-                false
             }
         }
-        _ => false,
+        None
     }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn vk_to_char(_vk: u8, _shift: bool) -> Option<char> {
+    None
 }

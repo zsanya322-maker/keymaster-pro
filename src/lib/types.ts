@@ -1,100 +1,73 @@
 /**
- * TypeScript типы — зеркалируют Rust типы из shared/types.rs
+ * TypeScript типы — зеркалируют Rust типы
  */
 
-/** UUID */
 export type Uuid = string
 
-/** Профиль настроек */
 export interface Profile {
   id: Uuid
   name: string
-  description: string
-  keyboard_remappings: Remapping[]
-  mouse_remappings: Remapping[]
-  macros: Macro[]
-  layers: Layer[]
-  is_default: boolean
-  created_at: string
-  updated_at: string
+  isDefault: boolean
+  linkedApps: string[]
+  rules: FrontendRule[]
+  layers: LayerMeta[]
 }
 
-/** Связка: триггер → действие */
-export interface Remapping {
-  id: Uuid
-  trigger: Trigger
-  action: Action
-  layer_id?: Uuid
-  enabled: boolean
-}
-
-/** Триггер (что перехватываем) */
-export interface Trigger {
-  key_combo: KeyCombo
-  device_type: 'any' | 'keyboard' | 'mouse'
-}
-
-/** Комбинация клавиш */
-export interface KeyCombo {
-  vk_code: number
-  modifiers: Modifier[]
-}
-
-/** Модификатор */
-export type Modifier = 'ctrl' | 'alt' | 'shift' | 'win'
-
-/** Действие (что делаем) */
-export type Action =
-  | { type: 'remap'; key_combo: KeyCombo }
-  | { type: 'macro'; macro_id: Uuid }
-  | { type: 'layer_toggle'; layer_id: Uuid }
-  | { type: 'layer_hold'; layer_id: Uuid }
-  | { type: 'block' }
-  | { type: 'launch_app'; path: string; args?: string }
-  | { type: 'open_url'; url: string }
-  | { type: 'system'; action: SystemAction }
-
-/** Системное действие */
-export type SystemAction =
-  | 'volume_up'
-  | 'volume_down'
-  | 'mute'
-  | 'play_pause'
-  | 'next_track'
-  | 'prev_track'
-
-/** Макрос */
-export interface Macro {
+export interface LayerMeta {
   id: Uuid
   name: string
-  steps: MacroStep[]
-  repeat: number
-  delay_between_ms: number
 }
 
-/** Шаг макроса */
+export interface FrontendRule {
+  id: Uuid
+  trigger: FrontendTrigger
+  actions: FrontendAction[]
+  holdActions?: FrontendAction[] | null
+  conditions: FrontendCondition[]
+  priority: number
+}
+
+export type FrontendTrigger =
+  | { type: 'keyDown'; code: number }
+  | { type: 'keyUp'; code: number }
+  | { type: 'mouseDown'; code: number }
+  | { type: 'mouseUp'; code: number }
+  | { type: 'tapHoldKeyDown'; code: number; timeoutMs: number }
+  | { type: 'typedText'; sequence: string }
+
+export type FrontendAction =
+  | { type: 'remapKey'; code: number }
+  | { type: 'remapMouse'; code: number }
+  | { type: 'typeText'; text: string }
+  | { type: 'runMacro'; steps: MacroStep[] }
+  | { type: 'toggleLayer'; layerId: string }
+  | { type: 'holdLayer'; layerId: string }
+  | { type: 'systemVolume'; action: 'mute' | 'up' | 'down' }
+  | { type: 'mediaKey'; key: 'play_pause' | 'next' | 'prev' | 'stop' }
+  | { type: 'windowAction'; action: 'snap_left' | 'snap_right' | 'snap_center' | 'minimize' | 'maximize' | 'close' }
+  | { type: 'launchApp'; path: string }
+  | { type: 'sleep' }
+  | { type: 'monitorOff' }
+
+export type MacroAction =
+  | { type: 'keyDown'; code: number }
+  | { type: 'keyUp'; code: number }
+  | { type: 'mouseDown'; code: number }
+  | { type: 'mouseUp'; code: number }
+  | { type: 'mouseMove'; dx: number; dy: number }
+  | { type: 'mouseScroll'; delta: number }
+  | { type: 'mouseToAbsolute'; x: number; y: number }
+
 export interface MacroStep {
-  type: 'key_press' | 'key_release' | 'mouse_click' | 'mouse_move' | 'scroll' | 'delay'
-  vk_code?: number
-  scan_code?: number
-  button?: number
-  x?: number
-  y?: number
-  delta?: number
-  delay_ms?: number
+  action: MacroAction
+  delayMs: number
 }
 
-/** Слой */
-export interface Layer {
-  id: Uuid
-  name: string
-  description: string
-  trigger_key: number
-  remappings: Remapping[]
-  enabled: boolean
-}
+export type FrontendCondition =
+  | { type: 'windowFocused'; process: string; title?: string }
+  | { type: 'layerActive'; layerId: string }
+  | { type: 'virtualDesktop'; id: number }
 
-/** Конфигурация приложения */
 export interface AppConfig {
   activeProfileId: string | null
   autostart: boolean
@@ -108,4 +81,6 @@ export interface AppConfig {
   fontSize?: number
   rowPadding?: number
   restoreMouseAfterMacro?: boolean
+  tapHoldTimeoutMs?: number
+  onboardingComplete?: boolean
 }

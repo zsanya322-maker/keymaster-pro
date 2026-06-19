@@ -70,6 +70,15 @@ pub fn run_daemon(parent_pid: Option<u32>) -> Result<(), String> {
     // Create shared state
     let state = DaemonState::from_config(&app_config).into_ref();
 
+    // Start Simulator Actor
+    let simulator_tx = crate::simulator::spawn_simulator_thread();
+    if let Ok(mut s) = state.write() {
+        s.simulator = Some(simulator_tx);
+    }
+
+    // Start Context Tracker
+    crate::trackers::context_tracker::spawn_context_tracker(crate::context::AppContextState::default());
+
     // Start Tokio runtime for IPC and background tasks
     let tokio_rt = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(4)
@@ -127,7 +136,9 @@ pub fn run_daemon(parent_pid: Option<u32>) -> Result<(), String> {
                 let mut matched_profile_id = None;
                 let mut default_profile_id = None;
                 
-                let (active_process, _) = crate::daemon::engine::get_active_window_info();
+                let active_process = crate::trackers::context_tracker::get_context()
+                    .and_then(|ctx| ctx.read().ok().map(|c| c.active_process.clone()))
+                    .unwrap_or_default();
                 
                 if !active_process.is_empty() {
                     for id in &profile_ids {
@@ -174,6 +185,26 @@ pub fn run_daemon(parent_pid: Option<u32>) -> Result<(), String> {
         }
     });
 
+    // Запустить фоновый ticker для Tap-Hold (Kanata-style)
+    let taphold_state = state.clone();
+    tokio_rt.spawn(async move {
+        info!("Запущен фоновый ticker для Tap-Hold маппингов");
+        loop {
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            
+            // Если daemon останавливается, выходим
+            {
+                if let Ok(s) = taphold_state.read() {
+                    if !s.running {
+                        break;
+                    }
+                }
+            }
+            
+            crate::daemon::engine::tick_tap_holds(Some(&taphold_state));
+        }
+    });
+
     // Load active profile
     let profile_id = app_config.active_profile_id.clone();
     let loaded_profile = match crate::shared::persistence::load_profile(&profile_id) {
@@ -188,11 +219,8 @@ pub fn run_daemon(parent_pid: Option<u32>) -> Result<(), String> {
                 name: "Default".to_string(),
                 is_default: true,
                 linked_apps: vec![],
-                remaps: vec![],
-                mouse_remaps: vec![],
+                rules: vec![],
                 layers: vec![],
-                macros: vec![],
-                text_expansions: vec![],
             };
             if let Err(e) = crate::shared::persistence::save_profile(&default_prof) {
                 error!("Failed to save default profile to disk: {}", e);
@@ -237,6 +265,9 @@ pub fn run_daemon(parent_pid: Option<u32>) -> Result<(), String> {
 
     // Остановить tokio runtime
     tokio_rt.shutdown_background();
+
+    // Остановить трекер контекста
+    crate::trackers::context_tracker::stop_context_tracker();
 
     info!("KeyMaster Pro Daemon остановлен");
     Ok(())

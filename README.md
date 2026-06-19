@@ -12,7 +12,7 @@
 [![Rust](https://img.shields.io/badge/Rust-edition%202021-CE422B.svg)](https://www.rust-lang.org)
 [![React](https://img.shields.io/badge/React-19-61DAFB.svg)](https://react.dev)
 
-[📥 Download](#-download) · [✨ Features](#-features) · [🛠️ Build](#%EF%B8%8F-build-from-source) · [🛡️ Security](#%EF%B8%8F-security--false-positives) · [💬 Community](#-community)
+[📥 Download](#-download) · [✨ Features](#-features) · [🛠️ Build](#%EF%B8%8F-build-from-source) · [💬 Telegram (RU)](https://t.me/KeyM_Pro) · [🐛 Report Bug](https://github.com/zsanya322-maker/keymaster-pro/issues)
 
 </div>
 
@@ -101,6 +101,8 @@ Automatic profile switching based on the active window.
 | Feature | Description |
 |---------|-------------|
 | 🚀 **Daemon Architecture** | Lightweight background daemon + GUI (two-process design) |
+| ⚡ **Tap-Hold (Kanata-style)** | Single tap triggers one action, holding down triggers another |
+| 🛡️ **System Actions** | Adjust volume, control media, snap windows, launch apps, sleep or turn off monitor |
 | 📊 **Real-time Stats** | CPU, RAM, latency, and keystroke counter in the status bar |
 | 🎨 **Modern UI** | Clean interface with Radix UI + TailwindCSS |
 | 🌐 **Multilingual** | English and Russian interface (i18next) |

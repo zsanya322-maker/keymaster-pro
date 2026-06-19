@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-export type Category = 'keyboard' | 'mouse' | 'macros' | 'autotext' | 'settings';
+export type Category = 'rules' | 'layers' | 'settings';
 
 interface KeyMapStore {
   activeCategory: Category;
@@ -12,7 +12,7 @@ interface KeyMapStore {
 }
 
 export const useKeyMasterStore = create<KeyMapStore>((set) => ({
-  activeCategory: 'keyboard',
+  activeCategory: 'rules',
   selectedProfileId: 'default',
   daemonActive: true,
   setActiveCategory: (cat) => set({ activeCategory: cat }),

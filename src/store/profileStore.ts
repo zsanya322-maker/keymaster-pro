@@ -1,69 +1,80 @@
-import { create } from 'zustand';
-import { invoke } from '@tauri-apps/api/core';
-import { triggerToast } from '../lib/toast';
-
-export interface Profile {
-  id: string;
-  name: string;
-  isDefault: boolean;
-  linkedApps: string[]; // Массив .exe файлов для авто-переключения
-}
+import { create } from 'zustand'
+import { invoke } from '../lib/ipc'
+import type { Profile } from '../lib/types'
 
 interface ProfileState {
-  profiles: Profile[];
-  activeProfileId: string | null;
-  addProfile: (profile: Profile) => void;
-  updateProfile: (id: string, updates: Partial<Profile>) => void;
-  deleteProfile: (id: string) => void;
-  setActiveProfile: (id: string) => void;
-  loadProfiles: () => Promise<void>;
+  profiles: Profile[]
+  activeProfileId: string | null
+  
+  loadProfiles: () => Promise<void>
+  activateProfile: (id: string) => Promise<void>
+  saveProfile: (profile: Profile) => Promise<void>
+  createProfile: (profile: Partial<Profile>) => Promise<void>
+  deleteProfile: (id: string) => Promise<void>
 }
 
-// Временные мок-данные для UI
-const MOCK_PROFILES: Profile[] = [
-  { id: '1', name: 'Default (По умолчанию)', isDefault: true, linkedApps: [] },
-  { id: '2', name: 'Gaming (Игры)', isDefault: false, linkedApps: ['cyberpunk.exe'] },
-];
+export const useProfileStore = create<ProfileState>((set, get) => ({
+  profiles: [],
+  activeProfileId: null,
 
-export const useProfileStore = create<ProfileState>((set) => ({
-  profiles: MOCK_PROFILES,
-  activeProfileId: '1',
-  addProfile: async (profile) => {
-    set((state) => ({ profiles: [...state.profiles, profile] }));
-    try {
-      await invoke('ipc_call', { method: 'profile.create', params: profile });
-    } catch (e) {
-      triggerToast('Failed to create profile in Daemon', 'error');
-    }
-  },
-  updateProfile: async (id, updates) => {
-    set((state) => ({
-      profiles: state.profiles.map((p) => (p.id === id ? { ...p, ...updates } : p)),
-    }));
-    try {
-      await invoke('ipc_call', { method: 'profile.update', params: { id, ...updates } });
-    } catch (e) {
-      triggerToast('Failed to update profile in Daemon', 'error');
-    }
-  },
-  deleteProfile: async (id) => {
-    set((state) => ({ profiles: state.profiles.filter((p) => p.id !== id) }));
-    try { await invoke('ipc_call', { method: 'profile.delete', params: { id } }); } catch (e) {}
-  },
-  setActiveProfile: async (id) => {
-    set({ activeProfileId: id });
-    try {
-      await invoke('ipc_call', { method: 'profile.activate', params: { id } });
-    } catch (e) {
-      triggerToast('Failed to activate profile in Daemon', 'error');
-    }
-  },
   loadProfiles: async () => {
     try {
-      const res: any = await invoke('ipc_call', { method: 'profile.list', params: {} });
-      if (res && res.profiles) set({ profiles: res.profiles, activeProfileId: res.active });
+      const res = await invoke<{ profiles: Profile[], active: string }>('ipc_call', { method: 'profile.list' })
+      set({ 
+        profiles: res.profiles, 
+        activeProfileId: res.active
+      })
     } catch (e) {
-      // Quiet offline fallback
+      console.error('Failed to load profiles', e)
     }
   },
-}));
+
+  activateProfile: async (id) => {
+    try {
+      await invoke('ipc_call', { method: 'profile.activate', params: { id } })
+      set({ activeProfileId: id })
+    } catch (e) {
+      console.error('Failed to activate profile', e)
+    }
+  },
+
+  saveProfile: async (profile) => {
+    try {
+      await invoke('ipc_call', { method: 'profile.save', params: profile })
+      
+      const { profiles } = get()
+      const newProfiles = profiles.map(p => p.id === profile.id ? profile : p)
+      
+      set({ profiles: newProfiles })
+    } catch (e) {
+      console.error('Failed to save profile', e)
+    }
+  },
+
+  createProfile: async (partial) => {
+    try {
+      const newProfile = {
+        id: crypto.randomUUID(),
+        name: 'New Profile',
+        isDefault: false,
+        linkedApps: [],
+        rules: [],
+        layers: [],
+        ...partial
+      }
+      await invoke('ipc_call', { method: 'profile.create', params: newProfile })
+      await get().loadProfiles()
+    } catch (e) {
+      console.error('Failed to create profile', e)
+    }
+  },
+
+  deleteProfile: async (id) => {
+    try {
+      await invoke('ipc_call', { method: 'profile.delete', params: { id } })
+      await get().loadProfiles()
+    } catch (e) {
+      console.error('Failed to delete profile', e)
+    }
+  }
+}))
