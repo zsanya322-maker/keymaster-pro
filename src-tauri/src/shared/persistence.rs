@@ -197,3 +197,43 @@ fn chrono_now() -> Result<String, String> {
         .map_err(|e| format!("SystemTime error: {}", e))?;
     Ok(format!("{}", ts.as_secs()))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_invalid_json_creates_empty_profile() {
+        let dir = profiles_dir().unwrap();
+        let id = "test_invalid";
+        let path = dir.join(format!("{}.json", id));
+        fs::write(&path, "invalid_json_data").unwrap();
+
+        let profile = load_profile(id).unwrap();
+        assert_eq!(profile.id, id);
+        assert_eq!(profile.name, format!("{} (Сброшен)", id));
+        assert!(profile.rules.is_empty());
+
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn test_save_load_round_trip() {
+        let profile = Profile {
+            id: "test_rt".to_string(),
+            name: "Round Trip".to_string(),
+            is_default: false,
+            linked_apps: vec![],
+            rules: vec![],
+            layers: vec![],
+        };
+
+        save_profile(&profile).unwrap();
+        let loaded = load_profile("test_rt").unwrap();
+        
+        assert_eq!(loaded.id, "test_rt");
+        assert_eq!(loaded.name, "Round Trip");
+
+        let _ = delete_profile("test_rt");
+    }
+}

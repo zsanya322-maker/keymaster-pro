@@ -131,3 +131,83 @@ fn compile_action(a: &FrontendAction) -> EngineAction {
         FrontendAction::MonitorOff => EngineAction::MonitorOff,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::schemas::frontend::{FrontendConfig, FrontendRule, FrontendTrigger, FrontendAction, FrontendCondition};
+
+    #[test]
+    fn test_compile_schema_distribution() {
+        let rules = vec![
+            FrontendRule {
+                id: "1".into(),
+                priority: 10,
+                trigger: FrontendTrigger::KeyDown { code: 0x41 },
+                conditions: vec![],
+                actions: vec![FrontendAction::RemapKey { code: 0x42 }],
+                hold_actions: None,
+            },
+            FrontendRule {
+                id: "2".into(),
+                priority: 20,
+                trigger: FrontendTrigger::KeyDown { code: 0x41 },
+                conditions: vec![],
+                actions: vec![FrontendAction::RemapKey { code: 0x43 }],
+                hold_actions: None,
+            },
+            FrontendRule {
+                id: "3".into(),
+                priority: 15,
+                trigger: FrontendTrigger::MouseDown { code: 1 },
+                conditions: vec![],
+                actions: vec![FrontendAction::RemapMouse { code: 2 }],
+                hold_actions: None,
+            },
+            FrontendRule {
+                id: "4".into(),
+                priority: 5,
+                trigger: FrontendTrigger::TapHoldKeyDown { code: 0x20, timeout_ms: 200 },
+                conditions: vec![],
+                actions: vec![FrontendAction::RemapKey { code: 0x21 }],
+                hold_actions: Some(vec![FrontendAction::HoldLayer { layer_id: "test".into() }]),
+            },
+            FrontendRule {
+                id: "5".into(),
+                priority: 1,
+                trigger: FrontendTrigger::TypedText { sequence: "test".into() },
+                conditions: vec![],
+                actions: vec![FrontendAction::TypeText { text: "result".into() }],
+                hold_actions: None,
+            },
+        ];
+
+        let config = FrontendConfig {
+            rules,
+            layers: vec![],
+            tap_hold_timeout_ms: 200,
+        };
+
+        let schema = compile_schema(&config);
+
+        assert_eq!(schema.keyboard_map.len(), 1);
+        assert_eq!(schema.mouse_map.len(), 1);
+        assert_eq!(schema.tap_hold_map.len(), 1);
+        assert_eq!(schema.text_expansion_map.len(), 1);
+
+        let kb_rules = schema.keyboard_map.get(&0x41).unwrap();
+        assert_eq!(kb_rules.len(), 2);
+        assert_eq!(kb_rules[0].priority, 20);
+        assert_eq!(kb_rules[1].priority, 10);
+    }
+
+    #[test]
+    fn test_layer_id_hashing() {
+        let hash1 = calculate_hash(&"my_layer_1");
+        let hash2 = calculate_hash(&"my_layer_1");
+        let hash3 = calculate_hash(&"my_layer_2");
+
+        assert_eq!(hash1, hash2);
+        assert_ne!(hash1, hash3);
+    }
+}

@@ -542,7 +542,7 @@ fn vk_to_char(vk: u8, _shift: bool) -> Option<char> {
         let scan_code = MapVirtualKeyW(vk as u32, MAPVK_VK_TO_VSC_EX);
         
         let mut buf = [0u16; 4];
-        let result = ToUnicodeEx(vk as u32, scan_code, &key_state, &mut buf, 0, dwhkl);
+        let result = ToUnicodeEx(vk as u32, scan_code, &key_state, &mut buf, 0, Some(dwhkl));
         
         if result > 0 {
             if let Some(c) = char::from_u32(buf[0] as u32) {
