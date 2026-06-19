@@ -34,8 +34,15 @@ interface DaemonStatus {
   connected: boolean;
   status: string;
   details?: {
-    status: string;
-    active_profile_id: string;
+    running?: boolean;
+    hooks_installed?: boolean;
+    kb_hook_enabled?: boolean;
+    mouse_hook_enabled?: boolean;
+    active_profile_id?: string;
+    cpu_usage?: number;
+    memory_usage_mb?: number;
+    keystrokes_processed?: number;
+    last_latency_us?: number;
   };
 }
 
@@ -44,7 +51,7 @@ function App() {
   const { config, daemonConnected, setDaemonConnected, loadConfig, sidebarOpen, toggleSidebar } = useAppStore()
   const { activeCategory, setActiveCategory, daemonActive, toggleDaemon, setSelectedProfileId } = useKeyMasterStore()
   
-  const { profiles, activeProfileId, loadProfiles, activateProfile } = useProfileStore()
+  const { profiles, activeProfileId, activateProfile } = useProfileStore()
   const activeProfile = profiles.find(p => p.id === activeProfileId)
   const activeProfileName = activeProfile ? activeProfile.name : 'Default'
 
@@ -128,18 +135,66 @@ function App() {
     init()
   }, [daemonConnected, loadConfig])
 
-  // Daemon connection polling
+  // Daemon connection polling + profile loading
   useEffect(() => {
     let retryCount = 0;
-    const maxRetries = 3;
+    const maxRetries = 5;
+
+    // Загружаем профили как только соединились с daemon.
+    // ВАЖНО: ставим guard, чтобы не дёргать profile.list на каждом poll.
+    async function ensureProfilesLoaded() {
+      const { profiles, activeProfileId } = useProfileStore.getState()
+      if (profiles.length === 0 || !activeProfileId) {
+        await useProfileStore.getState().loadProfiles()
+      }
+    }
 
     async function checkDaemon() {
       try {
         const status = await invoke<DaemonStatus>('daemon_status')
         if (status && status.connected) {
           setDaemonConnected(true)
-          loadProfiles()
-          if (status.details) {
+          await ensureProfilesLoaded()
+          return true
+        }
+      } catch (e) {
+        // fallthrough to retry
+      }
+      return false
+    }
+
+    async function initialConnect() {
+      // Сначала пробуем существующий daemon (если он уже запущен с прошлой сессии)
+      if (await checkDaemon()) return
+
+      // Иначе spawn'им с retry
+      while (retryCount < maxRetries) {
+        retryCount++
+        try {
+          await invoke('spawn_daemon')
+        } catch (err) {
+          // spawn упал — пробуем ещё
+        }
+        // Даём daemon время подняться (init_logging, hooks, IPC server)
+        await new Promise(resolve => setTimeout(resolve, 1500))
+        if (await checkDaemon()) return
+      }
+      // Все retry исчерпаны — UI покажет честную ошибку через daemonConnected=false
+      setDaemonConnected(false)
+    }
+
+    initialConnect()
+
+    // Периодический polling статуса + подгрузка профилей, если ещё не загружены
+    const interval = setInterval(async () => {
+      try {
+        const status = await invoke<DaemonStatus>('daemon_status')
+        const connected = !!(status && status.connected)
+        setDaemonConnected(connected)
+        if (connected) {
+          // Гарантированно подгружаем профили при восстановлении соединения
+          await ensureProfilesLoaded()
+          if (status?.details) {
             const details = status.details as any
             useAppStore.setState({
               diagnostics: {
@@ -149,43 +204,11 @@ function App() {
                 latency: (details.last_latency_us || 0) / 1000.0
               }
             })
-          }
-        } else {
-          throw new Error('Not connected');
-        }
-      } catch (e) {
-        setDaemonConnected(false)
-        if (retryCount < maxRetries) {
-          retryCount++;
-          try {
-            await invoke('spawn_daemon')
-          } catch (err) {}
-          setTimeout(checkDaemon, 2000);
-        }
-      }
-    }
-
-    checkDaemon()
-
-    const interval = setInterval(async () => {
-      try {
-        const status = await invoke<DaemonStatus>('daemon_status')
-        const connected = !!(status && status.connected)
-        setDaemonConnected(connected)
-        if (connected && status?.details) {
-          const details = status.details as any
-          useAppStore.setState({
-            diagnostics: {
-              keystrokes: details.keystrokes_processed || 0,
-              cpu: details.cpu_usage || 0,
-              ram: details.memory_usage_mb || 0,
-              latency: (details.last_latency_us || 0) / 1000.0
-            }
-          })
-          if (details.active_profile_id) {
-            const currentActive = useProfileStore.getState().activeProfileId
-            if (currentActive !== details.active_profile_id) {
-              useProfileStore.setState({ activeProfileId: details.active_profile_id })
+            if (details.active_profile_id) {
+              const currentActive = useProfileStore.getState().activeProfileId
+              if (currentActive !== details.active_profile_id) {
+                useProfileStore.setState({ activeProfileId: details.active_profile_id })
+              }
             }
           }
         }
@@ -195,7 +218,7 @@ function App() {
     }, 3000)
 
     return () => clearInterval(interval)
-  }, [setDaemonConnected, loadProfiles])
+  }, [setDaemonConnected])
 
   // Sync Zustand spec store selected profile
   useEffect(() => {
@@ -239,7 +262,7 @@ function App() {
         
         await invoke('ipc_call', { method: 'profile.import', params: profileData })
         showToast(`Profile "${profileData.name}" imported successfully!`, 'success')
-        loadProfiles()
+        await useProfileStore.getState().loadProfiles()
       }
     } catch (e) {
       showToast(`Import failed: ${e instanceof Error ? e.message : String(e)}`, 'error')
@@ -407,16 +430,22 @@ function App() {
           </button>
           {activeMenu === 'profiles' && (
             <div className="absolute left-0 mt-1 w-48 bg-app-surface border border-app-border rounded-lg shadow-xl py-1 z-50 animate-fade-in">
-              {profiles.map(p => (
-                <button
-                  key={p.id}
-                  onClick={() => { selectProfile(p.id); setActiveMenu(null); }}
-                  className={`w-full text-left px-3 py-1.5 hover:bg-app-surface-hover text-xs flex justify-between items-center cursor-pointer ${activeProfileId === p.id ? 'text-app-primary font-bold' : 'text-app-text'}`}
-                >
-                  <span>{p.name}</span>
-                  {activeProfileId === p.id && <span className="text-[10px]">✓</span>}
-                </button>
-              ))}
+              {profiles.length === 0 ? (
+                <div className="px-3 py-2 text-[11px] text-app-muted italic">
+                  {daemonConnected ? 'Загрузка профилей…' : 'Daemon не подключён'}
+                </div>
+              ) : (
+                profiles.map(p => (
+                  <button
+                    key={p.id}
+                    onClick={() => { selectProfile(p.id); setActiveMenu(null); }}
+                    className={`w-full text-left px-3 py-1.5 hover:bg-app-surface-hover text-xs flex justify-between items-center cursor-pointer ${activeProfileId === p.id ? 'text-app-primary font-bold' : 'text-app-text'}`}
+                  >
+                    <span>{p.name}</span>
+                    {activeProfileId === p.id && <span className="text-[10px]">✓</span>}
+                  </button>
+                ))
+              )}
             </div>
           )}
         </div>

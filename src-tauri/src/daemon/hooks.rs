@@ -301,7 +301,11 @@ extern "system" fn mouse_hook_callback(
         || msg_type == WM_MBUTTONDOWN as u32
         || msg_type == WM_XBUTTONDOWN as u32;
 
-    tracing::debug!("Хук мыши: msg_type={}, button={}, x={}, y={}, delta={}, is_mouse_down={}", msg_type, button, x, y, delta, is_mouse_down);
+    // Логируем только значимые события мыши (клики/скролл),
+    // но НЕ каждый WM_MOUSEMOVE — иначе лог раздувается до сотен МБ.
+    if button != 255 || is_mouse_down || delta != 0 {
+        tracing::debug!("Хук мыши: msg_type={}, button={}, x={}, y={}, delta={}, is_mouse_down={}", msg_type, button, x, y, delta, is_mouse_down);
+    }
 
     let state_ref = GLOBAL_STATE.get();
 

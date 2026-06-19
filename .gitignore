@@ -53,3 +53,6 @@ option_b_layout.png
 
 # Misc artifacts
 -p/
+# Windows reserved device name — accidental redirects to "nul" from
+# non-cmd shells (bash) create a literal file. Ignore & never commit.
+nul

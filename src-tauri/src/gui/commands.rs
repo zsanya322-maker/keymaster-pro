@@ -125,9 +125,14 @@ pub async fn daemon_status(state: State<'_, GuiState>) -> Result<serde_json::Val
 }
 
 /// IPC-прокси: отправить произвольный JSON-RPC запрос в Daemon
+///
+/// `params` опционален: фронтенд вызывает методы без параметров (profile.list, get_config,
+/// open_log_folder, macro.start_recording, macro.stop_recording) как
+/// `invoke('ipc_call', { method })` — без поля params. Обязательный аргумент
+/// здесь ломал бы десериализацию Tauri и команда падала бы ДО пайпа.
 #[tauri::command]
-pub async fn ipc_call(method: String, params: serde_json::Value) -> Result<serde_json::Value, String> {
-    crate::daemon::ipc_client::call(&method, Some(params)).await
+pub async fn ipc_call(method: String, params: Option<serde_json::Value>) -> Result<serde_json::Value, String> {
+    crate::daemon::ipc_client::call(&method, params).await
 }
 
 /// Тестовая команда

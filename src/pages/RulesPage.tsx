@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import { useProfileStore } from '../store/profileStore';
+import { useAppStore } from '../stores/app-store';
 import { RuleBuilderModal } from '../components/RuleBuilderModal';
 import { FrontendRule } from '../lib/types';
 
 export const RulesPage: React.FC = () => {
   const { profiles, activeProfileId, saveProfile } = useProfileStore();
+  const daemonConnected = useAppStore(state => state.daemonConnected);
   const activeProfile = profiles.find(p => p.id === activeProfileId) || null;
   
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -36,12 +38,25 @@ export const RulesPage: React.FC = () => {
   };
 
   if (!activeProfile) {
+    if (!daemonConnected) {
+      return (
+        <div className="p-8 text-center text-app-muted flex flex-col items-center gap-3">
+          <div className="text-2xl opacity-50">🔌</div>
+          <div className="font-semibold">Daemon не подключён</div>
+          <div className="text-xs max-w-md">
+            Перейдите в <span className="text-app-primary font-semibold">Settings → Daemon</span> и нажмите
+            «Restart Daemon». Если не помогает — проверьте файл лога:
+            <code className="block mt-2 text-[10px] bg-app-surface px-2 py-1 rounded">%APPDATA%\KeyMaster Pro\logs\daemon.log</code>
+          </div>
+        </div>
+      );
+    }
     if (profiles.length > 0) {
-      return <div className="p-8 text-center text-app-muted">Выберите профиль в меню Profiles</div>;
+      return <div className="p-8 text-center text-app-muted">Выберите профиль в меню Profiles (верхняя панель)</div>;
     }
     return (
       <div className="p-8 text-center text-app-muted flex flex-col items-center gap-2">
-        <span className="animate-pulse">Daemon не подключён. Пытаюсь запустить...</span>
+        <div className="animate-pulse">Daemon подключён, загружаю профили…</div>
       </div>
     );
   }

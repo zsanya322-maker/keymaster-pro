@@ -135,7 +135,7 @@ fn compile_action(a: &FrontendAction) -> EngineAction {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schemas::frontend::{FrontendConfig, FrontendRule, FrontendTrigger, FrontendAction, FrontendCondition};
+    use crate::schemas::frontend::{FrontendConfig, FrontendRule, FrontendTrigger, FrontendAction};
 
     #[test]
     fn test_compile_schema_distribution() {
