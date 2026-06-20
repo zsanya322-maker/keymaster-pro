@@ -9,9 +9,8 @@ import { enable, disable } from '@tauri-apps/plugin-autostart';
 
 export function SettingsPage() {
   const { t, i18n } = useTranslation();
-  const { config, setConfig, daemonConnected, setDaemonConnected } = useAppStore();
+  const { config, setConfig, daemonConnected } = useAppStore();
   const [activeTab, setActiveTab] = useState<'general' | 'profiles' | 'daemon' | 'logs'>('general');
-  const [restartingIPC, setRestartingIPC] = useState(false);
   const [isElevated, setIsElevated] = useState(false);
 
   useEffect(() => {
@@ -28,6 +27,7 @@ export function SettingsPage() {
 
   // States for Auto-updater
   const [updateStatus, setUpdateStatus] = useState<string>('');
+  const [updateError, setUpdateError] = useState(false);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [updateAvailable, setUpdateAvailable] = useState<any>(null);
   const [downloading, setDownloading] = useState(false);
@@ -36,6 +36,7 @@ export function SettingsPage() {
   const handleCheckForUpdates = async () => {
     setCheckingUpdate(true);
     setUpdateStatus(t('settings.updater_checking'));
+    setUpdateError(false);
     try {
       const update = await check();
       if (update) {
@@ -46,8 +47,9 @@ export function SettingsPage() {
         setUpdateStatus(t('settings.updater_latest'));
       }
     } catch (err: any) {
-      triggerToast('Update check failed', 'error');
+      triggerToast(t('settings.toast_update_check_failed'), 'error');
       setUpdateStatus(t('settings.updater_failed_check', { error: err.message || err }));
+      setUpdateError(true);
     } finally {
       setCheckingUpdate(false);
     }
@@ -57,8 +59,9 @@ export function SettingsPage() {
     if (!updateAvailable) return;
     setDownloading(true);
     setProgress(0);
-    setUpdateStatus(t('settings.updater_downloading'));
-    try {
+      setUpdateStatus(t('settings.updater_downloading'));
+      setUpdateError(false);
+      try {
       let downloaded = 0;
       let contentLength = 0;
       await updateAvailable.downloadAndInstall((event: any) => {
@@ -81,12 +84,13 @@ export function SettingsPage() {
         try {
           await invoke('restart_app');
         } catch (e) {
-          triggerToast('Failed to restart app', 'error');
+          triggerToast(t('settings.toast_restart_failed'), 'error');
         }
       }, 1500);
     } catch (err: any) {
-      triggerToast('Failed to install update', 'error');
+      triggerToast(t('settings.toast_install_failed'), 'error');
       setUpdateStatus(t('settings.updater_failed_install', { error: err.message || err }));
+      setUpdateError(true);
       setDownloading(false);
     }
   };
@@ -113,32 +117,15 @@ export function SettingsPage() {
       try {
         if (newValue) {
           await enable();
-          triggerToast(t('settings.autostart_enabled', 'Автозапуск включен'), 'success');
+          triggerToast(t('settings.autostart_enabled'), 'success');
         } else {
           await disable();
-          triggerToast(t('settings.autostart_disabled', 'Автозапуск выключен'), 'success');
+          triggerToast(t('settings.autostart_disabled'), 'success');
         }
       } catch (e: any) {
-        triggerToast(`Failed to configure autostart: ${e}`, 'error');
+        triggerToast(t('settings.toast_autostart_failed', { error: e }), 'error');
       }
     }
-  };
-
-  const handleRestartIPC = async () => {
-    setRestartingIPC(true);
-    // Имитация перезапуска IPC-соединения
-    setTimeout(async () => {
-      try {
-        const status: any = await invoke('daemon_status');
-        setDaemonConnected(!!(status && status.connected));
-      } catch (e) {}
-      setLogs(prev => [
-        ...prev,
-        `[${new Date().toLocaleTimeString()}] [DEBUG] Re-connecting IPC Named Pipe...`,
-        `[${new Date().toLocaleTimeString()}] [INFO] Named Pipe Connection established successfully.`
-      ]);
-      setRestartingIPC(false);
-    }, 1500);
   };
 
   const handleClearLogs = () => {
@@ -149,7 +136,7 @@ export function SettingsPage() {
     try {
       await invoke('ipc_call', { method: 'open_log_folder' });
     } catch (e: any) {
-      triggerToast(`Failed to open logs: ${e}`, 'error');
+      triggerToast(t('settings.toast_open_logs_failed', { error: e }), 'error');
     }
   };
 
@@ -222,8 +209,8 @@ export function SettingsPage() {
 
               <div className="flex items-center justify-between p-4 bg-app-surface-hover/30 border border-app-border/60 rounded-xl">
                 <div>
-                  <h4 className="text-sm font-bold text-app-text">{t('settings.restore_mouse', 'Возвращать мышь после макроса')}</h4>
-                  <p className="text-xs text-app-muted mt-0.5">{t('settings.restore_mouse_desc', 'После выполнения макроса курсор возвращается туда, где был до его запуска')}</p>
+                  <h4 className="text-sm font-bold text-app-text">{t('settings.restore_mouse')}</h4>
+                  <p className="text-xs text-app-muted mt-0.5">{t('settings.restore_mouse_desc')}</p>
                 </div>
                 <label className="relative inline-flex items-center cursor-pointer">
                   <input
@@ -239,8 +226,8 @@ export function SettingsPage() {
               <div className="p-4 bg-app-surface-hover/30 border border-app-border/60 rounded-xl space-y-3">
                 <div className="flex items-center justify-between">
                   <div>
-                    <h4 className="text-sm font-bold text-app-text">Tap-Hold Timeout</h4>
-                    <p className="text-xs text-app-muted mt-0.5">Delay before a tap is considered a hold (Kanata-style)</p>
+                    <h4 className="text-sm font-bold text-app-text">{t('settings.tap_hold_timeout')}</h4>
+                    <p className="text-xs text-app-muted mt-0.5">{t('settings.tap_hold_timeout_desc')}</p>
                   </div>
                   <span className="text-sm font-mono text-app-primary bg-app-primary/10 px-2 py-1 rounded">
                     {config.tapHoldTimeoutMs || 200} ms
@@ -354,8 +341,8 @@ export function SettingsPage() {
 
               <div className="flex items-center justify-between p-4 bg-app-surface-hover/30 border border-app-border/60 rounded-xl">
                 <div>
-                  <h4 className="text-sm font-bold text-app-text">{t('settings.fontSize', 'Размер шрифта')}</h4>
-                  <p className="text-xs text-app-muted mt-0.5">{t('settings.fontSize_desc', 'Масштаб шрифта в таблицах правил (10px - 14px)')}</p>
+                  <h4 className="text-sm font-bold text-app-text">{t('settings.fontSize')}</h4>
+                  <p className="text-xs text-app-muted mt-0.5">{t('settings.fontSize_desc')}</p>
                 </div>
                 <div className="flex items-center gap-4 min-w-[200px]">
                   <input
@@ -375,8 +362,8 @@ export function SettingsPage() {
 
               <div className="flex items-center justify-between p-4 bg-app-surface-hover/30 border border-app-border/60 rounded-xl">
                 <div>
-                  <h4 className="text-sm font-bold text-app-text">{t('settings.rowPadding', 'Отступы строк')}</h4>
-                  <p className="text-xs text-app-muted mt-0.5">{t('settings.rowPadding_desc', 'Вертикальные отступы в таблицах правил (7px - 10px)')}</p>
+                  <h4 className="text-sm font-bold text-app-text">{t('settings.rowPadding')}</h4>
+                  <p className="text-xs text-app-muted mt-0.5">{t('settings.rowPadding_desc')}</p>
                 </div>
                 <div className="flex items-center gap-4 min-w-[200px]">
                   <input
@@ -397,16 +384,16 @@ export function SettingsPage() {
               {/* Live Preview Table */}
               <div className="p-4 bg-app-surface-hover/20 border border-app-border/40 rounded-xl space-y-3">
                 <span className="text-[10px] font-bold text-app-muted uppercase tracking-wider block">
-                  {t('settings.preview_title', 'Предварительный просмотр таблицы (Live Preview)')}
+                  {t('settings.preview_title')}
                 </span>
                 
                 <div className="overflow-x-auto border border-app-border rounded-lg bg-app-bg/40">
                   <table className="w-full text-left border-collapse" style={{ fontSize: 'var(--table-font-size, 12px)' }}>
                     <thead>
                       <tr className="bg-app-surface/60 border-b border-app-border text-[10px] font-bold text-app-muted uppercase tracking-wider">
-                        <th className="px-3 py-2">{t('settings.preview_col_trigger', 'Клавиша (Триггер)')}</th>
-                        <th className="px-3 py-2">{t('settings.preview_col_action', 'Действие (Экшн)')}</th>
-                        <th className="px-3 py-2 text-right pr-4">{t('settings.preview_col_status', 'Состояние')}</th>
+                        <th className="px-3 py-2">{t('settings.preview_col_trigger')}</th>
+                        <th className="px-3 py-2">{t('settings.preview_col_action')}</th>
+                        <th className="px-3 py-2 text-right pr-4">{t('settings.preview_col_status')}</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-app-border/40">
@@ -418,7 +405,7 @@ export function SettingsPage() {
                           <kbd className="keycap">Escape</kbd>
                         </td>
                         <td className="px-3 text-right pr-4 text-xs font-semibold text-app-success" style={{ paddingTop: 'var(--table-row-padding, 8px)', paddingBottom: 'var(--table-row-padding, 8px)' }}>
-                          {t('common.enabled', 'Включено')}
+                          {t('common.enabled')}
                         </td>
                       </tr>
                       <tr>
@@ -427,11 +414,11 @@ export function SettingsPage() {
                         </td>
                         <td className="px-3" style={{ paddingTop: 'var(--table-row-padding, 8px)', paddingBottom: 'var(--table-row-padding, 8px)' }}>
                           <span className="px-2 py-0.5 rounded bg-app-primary/10 border border-app-primary/20 text-app-primary text-xs font-semibold">
-                            {t('mouse_remapping.actions.copy', 'Копировать')}
+                            {t('common.copy')}
                           </span>
                         </td>
                         <td className="px-3 text-right pr-4 text-xs font-semibold text-app-success" style={{ paddingTop: 'var(--table-row-padding, 8px)', paddingBottom: 'var(--table-row-padding, 8px)' }}>
-                          {t('common.enabled', 'Включено')}
+                          {t('common.enabled')}
                         </td>
                       </tr>
                     </tbody>
@@ -491,7 +478,7 @@ export function SettingsPage() {
                       <>
                         {updateAvailable ? (
                           <span className="text-app-primary font-bold">●</span>
-                        ) : updateStatus.includes('ошибка') || updateStatus.includes('Failed') || updateStatus.includes('Не удалось') ? (
+                        ) : updateError ? (
                           <span className="text-app-danger font-bold">●</span>
                         ) : (
                           <span className="text-app-success font-bold">●</span>
@@ -530,32 +517,32 @@ export function SettingsPage() {
 
               <div className="p-4 bg-app-surface-hover/30 border border-app-border/60 rounded-xl flex items-center justify-between">
                 <div>
-                  <h4 className="text-sm font-bold text-app-text">{t('settings.daemon_elevation', 'Права Администратора (UAC)')}</h4>
+                  <h4 className="text-sm font-bold text-app-text">{t('settings.daemon_elevation')}</h4>
                   <p className="text-xs text-app-muted mt-0.5">
-                    {isElevated 
-                      ? t('settings.daemon_elevation_active_desc', 'Приложение запущено от имени Администратора. Доступен полный перехват во всех окнах.')
-                      : t('settings.daemon_elevation_inactive_desc', 'Запустите приложение от имени Администратора для работы горячих клавиш в защищенных или запущенных от админа играх/программах.')
+                    {isElevated
+                      ? t('settings.daemon_elevation_active_desc')
+                      : t('settings.daemon_elevation_inactive_desc')
                     }
                   </p>
                 </div>
                 {isElevated ? (
                   <div className="flex items-center gap-2">
                     <span className="px-3 py-1 rounded-xl text-xs font-bold border border-app-success/20 bg-app-success/10 text-app-success uppercase tracking-wider">
-                      {t('settings.daemon_elevation_admin', 'Администратор')}
+                      {t('settings.daemon_elevation_admin')}
                     </span>
                     <button
                       onClick={async () => {
                         try {
                           await invoke('spawn_daemon');
-                          triggerToast('Daemon start requested', 'success');
+                          triggerToast(t('settings.toast_daemon_start_requested'), 'success');
                         } catch (e: any) {
-                          triggerToast(`Failed to start daemon: ${e}`, 'error');
+                          triggerToast(t('settings.toast_daemon_start_failed', { error: e }), 'error');
                         }
                       }}
                       className="flex items-center gap-2 px-3 py-2 text-xs font-bold bg-app-primary text-white rounded-lg hover:bg-app-primary/80 transition-colors cursor-pointer"
                     >
                       <RefreshCw size={12} />
-                      Restart Daemon
+                      {t('settings.daemon_restart_label')}
                     </button>
                   </div>
                 ) : (
@@ -564,28 +551,28 @@ export function SettingsPage() {
                       onClick={async () => {
                         try {
                           await invoke('spawn_daemon');
-                          triggerToast('Daemon start requested', 'success');
+                          triggerToast(t('settings.toast_daemon_start_requested'), 'success');
                         } catch (e: any) {
-                          triggerToast(`Failed to start daemon: ${e}`, 'error');
+                          triggerToast(t('settings.toast_daemon_start_failed', { error: e }), 'error');
                         }
                       }}
                       className="flex items-center gap-2 px-3 py-2 text-xs font-bold bg-app-primary text-white rounded-lg hover:bg-app-primary/80 transition-colors cursor-pointer"
                     >
                       <RefreshCw size={12} />
-                      Restart Daemon
+                      {t('settings.daemon_restart_label')}
                     </button>
                     <button
                       onClick={async () => {
                         try {
                           await invoke('restart_as_admin');
                         } catch (e: any) {
-                          triggerToast(`Failed to restart as admin: ${e}`, 'error');
+                          triggerToast(t('settings.toast_admin_restart_failed', { error: e }), 'error');
                         }
                       }}
                       className="flex items-center gap-2 px-3 py-2 text-xs font-bold bg-app-primary text-white rounded-lg hover:bg-app-primary/80 transition-colors cursor-pointer"
                     >
                       <Shield size={12} />
-                      {t('settings.daemon_elevation_restart', 'Запустить от Администратора')}
+                      {t('settings.daemon_elevation_restart')}
                     </button>
                   </div>
                 )}
@@ -619,21 +606,6 @@ export function SettingsPage() {
                   </label>
                 </div>
               </div>
-
-              <div className="flex justify-between items-center p-4 bg-app-surface-hover/30 border border-app-border/60 rounded-xl">
-                <div>
-                  <h4 className="text-sm font-bold text-app-text">{t('settings.daemon_restart_ipc')}</h4>
-                  <p className="text-xs text-app-muted mt-0.5">{t('settings.daemon_restart_ipc_desc')}</p>
-                </div>
-                <button
-                  onClick={handleRestartIPC}
-                  disabled={restartingIPC}
-                  className="flex items-center gap-2 px-3 py-2 text-xs font-bold bg-app-surface-hover hover:bg-app-border border border-app-border text-app-muted hover:text-app-text rounded-lg transition-colors cursor-pointer"
-                >
-                  <RefreshCw size={12} className={restartingIPC ? 'animate-spin' : ''} />
-                  {t('settings.daemon_restart_btn')}
-                </button>
-              </div>
             </div>
           </div>
         )}
@@ -654,7 +626,7 @@ export function SettingsPage() {
                   className="flex items-center gap-2 text-xs bg-app-primary/10 hover:bg-app-primary/20 border border-app-primary/30 text-app-primary px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
                 >
                   <FolderOpen size={14} />
-                  {t('settings.logs_open_folder', 'Открыть папку')}
+                  {t('settings.logs_open_folder')}
                 </button>
                 <button
                   onClick={handleClearLogs}

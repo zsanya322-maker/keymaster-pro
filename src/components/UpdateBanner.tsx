@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react'
 import { Check, X } from 'lucide-react'
+import { useTranslation } from 'react-i18next'
 
 export function UpdateBanner() {
+  const { t } = useTranslation()
   const [updateInfo, setUpdateInfo] = useState<any>(null)
   const [isDismissed, setIsDismissed] = useState(false)
   const [isUpdating, setIsUpdating] = useState(false)
@@ -44,7 +46,7 @@ export function UpdateBanner() {
         <div className="bg-white/20 p-1 rounded-full">
           <Check size={14} />
         </div>
-        <span className="text-sm font-semibold">Update available: v{updateInfo.version}</span>
+        <span className="text-sm font-semibold">{t('updateBanner.available', { version: updateInfo.version })}</span>
       </div>
       
       <div className="flex items-center gap-2">
@@ -53,7 +55,7 @@ export function UpdateBanner() {
           disabled={isUpdating}
           className="bg-white text-app-primary hover:bg-white/90 px-3 py-1 rounded-full text-xs font-bold transition-colors disabled:opacity-50"
         >
-          {isUpdating ? 'Installing...' : 'Install & Restart'}
+          {isUpdating ? t('updateBanner.installing') : t('updateBanner.install_restart')}
         </button>
         <button 
           onClick={() => setIsDismissed(true)}

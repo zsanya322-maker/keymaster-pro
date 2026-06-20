@@ -210,3 +210,10 @@ pub fn is_elevated() -> bool {
         false
     }
 }
+
+/// Загрузить конфигурацию приложения напрямую из config.json (без IPC с демоном)
+#[tauri::command]
+pub fn get_gui_config() -> Result<serde_json::Value, String> {
+    let config = crate::shared::config::load_config()?;
+    Ok(serde_json::to_value(config).unwrap())
+}

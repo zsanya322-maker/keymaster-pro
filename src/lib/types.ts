@@ -20,6 +20,7 @@ export interface LayerMeta {
 
 export interface FrontendRule {
   id: Uuid
+  name?: string
   trigger: FrontendTrigger
   actions: FrontendAction[]
   holdActions?: FrontendAction[] | null
@@ -64,7 +65,8 @@ export interface MacroStep {
 }
 
 export type FrontendCondition =
-  | { type: 'windowFocused'; process: string; title?: string }
+  | { type: 'processActive'; process: string }
+  | { type: 'windowFocused'; title: string }
   | { type: 'layerActive'; layerId: string }
   | { type: 'virtualDesktop'; id: number }
 

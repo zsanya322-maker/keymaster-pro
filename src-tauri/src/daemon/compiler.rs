@@ -51,8 +51,11 @@ pub fn compile_schema(frontend: &FrontendConfig) -> EngineSchema {
 
 fn compile_rule(rule: &FrontendRule) -> CompiledRule {
     let conditions = rule.conditions.iter().map(|c| match c {
-        FrontendCondition::WindowFocused { process, .. } => {
-            EngineCondition::WindowFocused { process_hash: calculate_hash(&process.to_lowercase()) }
+        FrontendCondition::ProcessActive { process } => {
+            EngineCondition::ProcessActive { process_hash: calculate_hash(&crate::shared::clean_process_name(process)) }
+        }
+        FrontendCondition::WindowFocused { title } => {
+            EngineCondition::WindowFocused { title_contains: title.to_lowercase() }
         }
         FrontendCondition::LayerActive { layer_id } => {
             EngineCondition::LayerActive { layer_id_hash: calculate_hash(layer_id) }
@@ -73,8 +76,11 @@ fn compile_rule(rule: &FrontendRule) -> CompiledRule {
 
 fn compile_tap_hold_rule(rule: &FrontendRule, timeout_ms: u32) -> CompiledTapHoldRule {
     let conditions = rule.conditions.iter().map(|c| match c {
-        FrontendCondition::WindowFocused { process, .. } => {
-            EngineCondition::WindowFocused { process_hash: calculate_hash(&process.to_lowercase()) }
+        FrontendCondition::ProcessActive { process } => {
+            EngineCondition::ProcessActive { process_hash: calculate_hash(&crate::shared::clean_process_name(process)) }
+        }
+        FrontendCondition::WindowFocused { title } => {
+            EngineCondition::WindowFocused { title_contains: title.to_lowercase() }
         }
         FrontendCondition::LayerActive { layer_id } => {
             EngineCondition::LayerActive { layer_id_hash: calculate_hash(layer_id) }

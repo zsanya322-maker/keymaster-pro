@@ -26,9 +26,14 @@ pub static PENDING_TAP_HOLDS: LazyLock<Mutex<HashMap<u8, PendingTapHold>>> = Laz
 fn check_conditions(conditions: &[EngineCondition], ctx: &crate::context::AppContext) -> bool {
     for cond in conditions {
         match cond {
-            EngineCondition::WindowFocused { process_hash } => {
+            EngineCondition::ProcessActive { process_hash } => {
                 let current_hash = calculate_hash(&ctx.active_process);
                 if *process_hash != current_hash {
+                    return false;
+                }
+            }
+            EngineCondition::WindowFocused { title_contains } => {
+                if !ctx.active_window_title.to_lowercase().contains(title_contains) {
                     return false;
                 }
             }
@@ -92,7 +97,29 @@ fn execute_actions(
             }
             EngineAction::MacroCommands { commands } => {
                 if is_down {
-                    for cmd in commands { let _ = simulator.send(cmd.clone()); }
+                    let mut restore_pos = None;
+                    #[cfg(target_os = "windows")]
+                    {
+                        if let Some(s_ref) = state {
+                            if let Ok(s) = s_ref.read() {
+                                if s.restore_mouse_after_macro {
+                                    let mut point = windows::Win32::Foundation::POINT { x: 0, y: 0 };
+                                    unsafe {
+                                        let _ = windows::Win32::UI::WindowsAndMessaging::GetCursorPos(&mut point);
+                                    }
+                                    restore_pos = Some((point.x, point.y));
+                                }
+                            }
+                        }
+                    }
+
+                    for cmd in commands { 
+                        let _ = simulator.send(cmd.clone()); 
+                    }
+
+                    if let Some((rx, ry)) = restore_pos {
+                        let _ = simulator.send(SimulatorCommand::MouseAbsolute { x: rx, y: ry });
+                    }
                 }
             }
             EngineAction::ToggleLayer { layer_id_hash } => {
@@ -286,9 +313,12 @@ pub fn process_keyboard_event(
                 if let Ok(mut buf) = s.typed_buffer.lock() {
                     buf.push(c);
                     // Keep buffer under reasonable size
-                    let buf_len = buf.len();
-                    if buf_len > 30 {
-                        buf.drain(0..buf_len - 30);
+                    let char_count = buf.chars().count();
+                    if char_count > 30 {
+                        let skip_chars = char_count - 30;
+                        if let Some((byte_idx, _)) = buf.char_indices().nth(skip_chars) {
+                            buf.drain(0..byte_idx);
+                        }
                     }
                     
                     // Search for match in text_expansion_map

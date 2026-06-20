@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { FrontendRule, FrontendTrigger } from '../lib/types';
 import { ActionEditor } from './ruleBuilder/ActionEditor';
 import { ConditionEditor } from './ruleBuilder/ConditionEditor';
@@ -11,15 +12,18 @@ interface RuleBuilderModalProps {
 }
 
 export const RuleBuilderModal: React.FC<RuleBuilderModalProps> = ({ existingRule, onClose, onSave }) => {
+  const { t } = useTranslation();
   const [rule, setRule] = useState<FrontendRule>(existingRule ? {
     // deep copy to avoid mutations before save
     ...existingRule,
+    name: existingRule.name || '',
     actions: [...existingRule.actions],
     conditions: [...existingRule.conditions],
     holdActions: existingRule.holdActions ? [...existingRule.holdActions] : [],
     trigger: { ...existingRule.trigger }
   } : {
     id: crypto.randomUUID(),
+    name: '',
     trigger: { type: 'keyDown', code: 0 },
     actions: [],
     holdActions: [],
@@ -38,7 +42,7 @@ export const RuleBuilderModal: React.FC<RuleBuilderModalProps> = ({ existingRule
       <div className="bg-app-surface border border-app-border rounded-xl shadow-2xl w-[600px] flex flex-col glow-primary">
         <div className="p-4 border-b border-app-border bg-app-bg/40 flex justify-between items-center">
           <h3 className="text-base font-bold text-app-text">
-            {existingRule ? 'Edit Rule' : 'Create Rule'}
+            {existingRule ? t('ruleBuilder.modal.edit_title') : t('ruleBuilder.modal.create_title')}
           </h3>
           <button onClick={onClose} className="text-app-muted hover:text-app-text transition-colors">
             ✕
@@ -46,9 +50,21 @@ export const RuleBuilderModal: React.FC<RuleBuilderModalProps> = ({ existingRule
         </div>
 
         <div className="p-6 space-y-6 max-h-[70vh] overflow-y-auto">
+          {/* RULE NAME */}
+          <div className="space-y-2">
+            <h4 className="text-xs font-bold text-app-muted uppercase tracking-wider">{t('ruleBuilder.tabs.name', 'Название правила')}</h4>
+            <input
+              type="text"
+              value={rule.name || ''}
+              onChange={(e) => setRule({ ...rule, name: e.target.value })}
+              placeholder={t('ruleBuilder.placeholders.name', 'Назовите правило (например, "Копировать")')}
+              className="bg-app-surface-hover border border-app-border text-sm text-app-text rounded-lg p-2 w-full focus:ring-1 focus:ring-app-primary"
+            />
+          </div>
+
           {/* TRIGGER */}
           <div className="space-y-2">
-            <h4 className="text-xs font-bold text-app-muted uppercase tracking-wider">Trigger</h4>
+            <h4 className="text-xs font-bold text-app-muted uppercase tracking-wider">{t('ruleBuilder.tabs.trigger')}</h4>
             <div className="flex gap-2">
               <select 
                 value={rule.trigger.type}
@@ -64,12 +80,12 @@ export const RuleBuilderModal: React.FC<RuleBuilderModalProps> = ({ existingRule
                 }}
                 className="bg-app-surface-hover border border-app-border text-sm text-app-text rounded-lg p-2"
               >
-                <option value="keyDown">Key Down</option>
-                <option value="keyUp">Key Up</option>
-                <option value="mouseDown">Mouse Down</option>
-                <option value="mouseUp">Mouse Up</option>
-                <option value="tapHoldKeyDown">Tap-Hold (Key)</option>
-                <option value="typedText">Typed Text (Expansion)</option>
+                <option value="keyDown">{t('ruleBuilder.trigger_types.keyDown')}</option>
+                <option value="keyUp">{t('ruleBuilder.trigger_types.keyUp')}</option>
+                <option value="mouseDown">{t('ruleBuilder.trigger_types.mouseDown')}</option>
+                <option value="mouseUp">{t('ruleBuilder.trigger_types.mouseUp')}</option>
+                <option value="tapHoldKeyDown">{t('ruleBuilder.trigger_types.tapHoldKeyDown')}</option>
+                <option value="typedText">{t('ruleBuilder.trigger_types.typedText')}</option>
               </select>
               
               {rule.trigger.type === 'typedText' ? (
@@ -80,7 +96,7 @@ export const RuleBuilderModal: React.FC<RuleBuilderModalProps> = ({ existingRule
                     ...rule,
                     trigger: { type: 'typedText', sequence: e.target.value }
                   })}
-                  placeholder="e.g. @@"
+                  placeholder={t('ruleBuilder.placeholders.sequence')}
                   className="bg-app-surface-hover border border-app-border text-sm text-app-text rounded-lg p-2 flex-grow"
                 />
               ) : (
@@ -108,9 +124,9 @@ export const RuleBuilderModal: React.FC<RuleBuilderModalProps> = ({ existingRule
                       });
                     }
                   }}
-                  placeholder="Timeout (ms)"
+                  placeholder={t('ruleBuilder.placeholders.timeout')}
                   className="bg-app-surface-hover border border-app-border text-sm text-app-text rounded-lg p-2 w-32"
-                  title="Timeout in milliseconds before Hold actions are triggered"
+                  title={t('ruleBuilder.placeholders.timeout_title')}
                 />
               )}
             </div>
@@ -119,16 +135,16 @@ export const RuleBuilderModal: React.FC<RuleBuilderModalProps> = ({ existingRule
           {/* CONDITIONS */}
           <div className="space-y-2">
             <h4 className="text-xs font-bold text-app-muted uppercase tracking-wider flex justify-between items-center">
-              Conditions
+              {t('ruleBuilder.tabs.conditions')}
               <button 
-                onClick={() => setRule({ ...rule, conditions: [...rule.conditions, { type: 'windowFocused', process: '' }] })}
+                onClick={() => setRule({ ...rule, conditions: [...rule.conditions, { type: 'processActive', process: '' }] })}
                 className="text-[10px] bg-app-primary/20 text-app-primary px-2 py-1 rounded hover:bg-app-primary/40 transition-colors"
               >
-                + Add Condition
+                {t('ruleBuilder.buttons.add_condition')}
               </button>
             </h4>
             {rule.conditions.length === 0 ? (
-              <p className="text-xs text-app-muted opacity-60 italic">No conditions. Triggers globally.</p>
+              <p className="text-xs text-app-muted opacity-60 italic">{t('ruleBuilder.hints.no_conditions_global')}</p>
             ) : (
               <div className="space-y-2">
                 {rule.conditions.map((cond, i) => (
@@ -152,16 +168,16 @@ export const RuleBuilderModal: React.FC<RuleBuilderModalProps> = ({ existingRule
           {/* ACTIONS (TAP ACTIONS if TapHold) */}
           <div className="space-y-2">
             <h4 className="text-xs font-bold text-app-muted uppercase tracking-wider flex justify-between items-center">
-              {isTapHold ? 'Tap Actions (Triggered on quick press)' : 'Actions'}
+              {isTapHold ? t('ruleBuilder.tabs.tap_actions') : t('ruleBuilder.tabs.actions')}
               <button 
                 onClick={() => setRule({ ...rule, actions: [...rule.actions, { type: 'typeText', text: '' }] })}
                 className="text-[10px] bg-app-primary/20 text-app-primary px-2 py-1 rounded hover:bg-app-primary/40 transition-colors"
               >
-                + Add Action
+                {t('ruleBuilder.buttons.add_action')}
               </button>
             </h4>
             {rule.actions.length === 0 ? (
-              <p className="text-xs text-app-danger italic">Rule must have at least one action!</p>
+              <p className="text-xs text-app-danger italic">{t('ruleBuilder.hints.must_have_action')}</p>
             ) : (
               <div className="space-y-2">
                 {rule.actions.map((act, i) => (
@@ -186,16 +202,16 @@ export const RuleBuilderModal: React.FC<RuleBuilderModalProps> = ({ existingRule
           {isTapHold && (
             <div className="space-y-2 p-3 bg-app-bg/50 border border-app-border rounded-lg mt-4">
               <h4 className="text-xs font-bold text-app-muted uppercase tracking-wider flex justify-between items-center">
-                Hold Actions (Triggered on timeout)
+                {t('ruleBuilder.tabs.hold_actions')}
                 <button 
                   onClick={() => setRule({ ...rule, holdActions: [...(rule.holdActions || []), { type: 'holdLayer', layerId: '' }] })}
                   className="text-[10px] bg-app-primary/20 text-app-primary px-2 py-1 rounded hover:bg-app-primary/40 transition-colors"
                 >
-                  + Add Hold Action
+                  {t('ruleBuilder.buttons.add_hold_action')}
                 </button>
               </h4>
               {!rule.holdActions || rule.holdActions.length === 0 ? (
-                <p className="text-xs text-app-muted opacity-60 italic">No hold actions. It's just a tap key right now.</p>
+                <p className="text-xs text-app-muted opacity-60 italic">{t('ruleBuilder.hints.no_hold_actions')}</p>
               ) : (
                 <div className="space-y-2">
                   {rule.holdActions.map((act, i) => (
@@ -221,14 +237,14 @@ export const RuleBuilderModal: React.FC<RuleBuilderModalProps> = ({ existingRule
 
         <div className="p-4 border-t border-app-border bg-app-bg/40 flex justify-end gap-3">
           <button onClick={onClose} className="px-4 py-2 text-sm font-semibold text-app-muted hover:text-app-text transition-colors">
-            Cancel
+            {t('ruleBuilder.buttons.cancel')}
           </button>
           <button 
             onClick={handleSave} 
             disabled={rule.actions.length === 0}
             className="px-4 py-2 bg-app-primary hover:bg-app-primary-hover disabled:opacity-50 text-white rounded-lg text-sm font-semibold shadow-lg shadow-app-primary/20 transition-all cursor-pointer"
           >
-            Save Rule
+            {t('ruleBuilder.buttons.save_rule')}
           </button>
         </div>
       </div>

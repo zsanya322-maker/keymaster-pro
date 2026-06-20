@@ -20,7 +20,9 @@ import {
   Github,
   MessageCircle,
   Settings,
-  Layers
+  Layers,
+  Plus,
+  Trash2
 } from 'lucide-react'
 
 // Import pages directly
@@ -29,6 +31,8 @@ import { SettingsPage } from '../pages/SettingsPage'
 import { LayersPanel } from '../components/LayersPanel'
 import { UpdateBanner } from '../components/UpdateBanner'
 import { OnboardingWizard } from '../components/OnboardingWizard'
+
+const APP_VERSION = '0.2.0'
 
 interface DaemonStatus {
   connected: boolean;
@@ -47,9 +51,9 @@ interface DaemonStatus {
 }
 
 function App() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const { config, daemonConnected, setDaemonConnected, loadConfig, sidebarOpen, toggleSidebar } = useAppStore()
-  const { activeCategory, setActiveCategory, daemonActive, toggleDaemon, setSelectedProfileId } = useKeyMasterStore()
+  const { activeCategory, setActiveCategory } = useKeyMasterStore()
   
   const { profiles, activeProfileId, activateProfile } = useProfileStore()
   const activeProfile = profiles.find(p => p.id === activeProfileId)
@@ -126,14 +130,21 @@ function App() {
 
 
 
-  // Load config on startup and when daemon connects
+  // Load config on startup
   useEffect(() => {
     const init = async () => {
       await loadConfig()
+      // Применяем язык из config к i18n. Без этого сохранённый в config
+      // язык игнорировался — UI всегда оставался на дефолтном 'en',
+      // пока пользователь не переключит язык вручную в Settings.
+      const savedLang = useAppStore.getState().config.language
+      if (savedLang && savedLang !== i18n.language) {
+        await i18n.changeLanguage(savedLang)
+      }
       setIsInitialized(true)
     }
     init()
-  }, [daemonConnected, loadConfig])
+  }, [loadConfig, i18n])
 
   // Daemon connection polling + profile loading
   useEffect(() => {
@@ -220,13 +231,6 @@ function App() {
     return () => clearInterval(interval)
   }, [setDaemonConnected])
 
-  // Sync Zustand spec store selected profile
-  useEffect(() => {
-    if (activeProfileId) {
-      setSelectedProfileId(activeProfileId)
-    }
-  }, [activeProfileId, setSelectedProfileId])
-
   // Tauri Window Control Actions
 
 
@@ -310,17 +314,15 @@ function App() {
 
   const selectProfile = (id: string) => {
     activateProfile(id)
-    setSelectedProfileId(id)
   }
 
   const handleToggleDaemon = async () => {
-    toggleDaemon()
     if (daemonConnected) {
       try {
         await invoke('stop_daemon')
         setDaemonConnected(false)
-      } catch (e) {
-        showToast('Failed to stop daemon', 'error')
+      } catch (e: any) {
+        showToast(t('rules.toast_daemon_stop_failed', { error: e }), 'error')
       }
     } else {
       try {
@@ -329,8 +331,8 @@ function App() {
           const status = await invoke<DaemonStatus>('daemon_status')
           setDaemonConnected(!!(status && status.connected))
         }, 1500)
-      } catch (e) {
-        showToast('Failed to start daemon', 'error')
+      } catch (e: any) {
+        showToast(t('rules.toast_daemon_start_failed', { error: e }), 'error')
       }
     }
   }
@@ -429,21 +431,53 @@ function App() {
             {t('menu.profiles', 'Profiles')}
           </button>
           {activeMenu === 'profiles' && (
-            <div className="absolute left-0 mt-1 w-48 bg-app-surface border border-app-border rounded-lg shadow-xl py-1 z-50 animate-fade-in">
+            <div className="absolute left-0 mt-1 w-52 bg-app-surface border border-app-border rounded-lg shadow-xl py-1 z-50 animate-fade-in">
+              <button
+                onClick={async () => {
+                  const name = prompt(t('profiles_menu.new_profile_prompt', 'Введите имя нового профиля:'), 'New Profile')
+                  if (name && name.trim()) {
+                    await useProfileStore.getState().createProfile({ name: name.trim() })
+                  }
+                  setActiveMenu(null)
+                }}
+                className="w-full text-left px-3 py-1.5 hover:bg-app-surface-hover text-xs text-app-primary font-semibold border-b border-app-border flex items-center gap-1.5 cursor-pointer"
+              >
+                <Plus size={12} />
+                {t('profiles_menu.create_profile', 'Создать профиль')}
+              </button>
               {profiles.length === 0 ? (
                 <div className="px-3 py-2 text-[11px] text-app-muted italic">
-                  {daemonConnected ? 'Загрузка профилей…' : 'Daemon не подключён'}
+                  {daemonConnected ? t('profiles_menu.loading', 'Загрузка профилей…') : t('profiles_menu.daemon_off', 'Daemon не подключён')}
                 </div>
               ) : (
                 profiles.map(p => (
-                  <button
-                    key={p.id}
-                    onClick={() => { selectProfile(p.id); setActiveMenu(null); }}
-                    className={`w-full text-left px-3 py-1.5 hover:bg-app-surface-hover text-xs flex justify-between items-center cursor-pointer ${activeProfileId === p.id ? 'text-app-primary font-bold' : 'text-app-text'}`}
-                  >
-                    <span>{p.name}</span>
-                    {activeProfileId === p.id && <span className="text-[10px]">✓</span>}
-                  </button>
+                  <div key={p.id} className="flex items-center hover:bg-app-surface-hover group justify-between">
+                    <button
+                      onClick={() => { selectProfile(p.id); setActiveMenu(null); }}
+                      className={`flex-1 text-left px-3 py-1.5 text-xs cursor-pointer truncate ${activeProfileId === p.id ? 'text-app-primary font-bold' : 'text-app-text'}`}
+                    >
+                      {p.name}
+                    </button>
+                    <div className="flex items-center pr-2 gap-1.5 shrink-0">
+                      {activeProfileId === p.id && <span className="text-[10px] text-app-primary">✓</span>}
+                      {!p.isDefault && (
+                        <button
+                          onClick={async (e) => {
+                            e.stopPropagation()
+                            if (confirm(t('profiles_menu.confirm_delete', 'Удалить профиль "{{name}}"?', { name: p.name }))) {
+                              await useProfileStore.getState().deleteProfile(p.id)
+                              await useProfileStore.getState().loadProfiles()
+                            }
+                            setActiveMenu(null)
+                          }}
+                          className="opacity-0 group-hover:opacity-100 text-app-danger hover:text-red-500 p-0.5 rounded transition-opacity cursor-pointer flex items-center"
+                          title={t('profiles_menu.delete_title', 'Удалить профиль')}
+                        >
+                          <Trash2 size={11} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 ))
               )}
             </div>
@@ -542,20 +576,21 @@ function App() {
           <div className="p-3 border-t border-app-border/60 bg-app-bg/10 flex flex-col items-center overflow-hidden shrink-0 w-full">
             <button
               onClick={handleToggleDaemon}
+              title={t('footer.daemon_toggle_hint')}
               className={`w-full py-1.5 px-2 rounded-lg text-xs font-bold border flex items-center justify-center gap-2 transition-all cursor-pointer ${
-                daemonActive && daemonConnected
+                daemonConnected
                   ? 'bg-emerald-500/10 hover:bg-emerald-500/20 border-emerald-500/30 text-emerald-400'
                   : 'bg-red-500/10 hover:bg-red-500/20 border-red-500/30 text-red-400'
               }`}
             >
               <Shield size={13} className="shrink-0" />
               <span className="text-[11px] font-bold truncate">
-                Daemon {daemonActive && daemonConnected ? 'ON' : 'OFF'}
+                {daemonConnected ? t('footer.daemon_on') : t('footer.daemon_off')}
               </span>
             </button>
             <div className="flex items-center justify-between w-full mt-2 px-1">
               <span className="text-[9px] text-app-muted/60 font-mono tracking-tighter">
-                Lat: {daemonActive && daemonConnected ? '0.12ms' : 'N/A'}
+                Lat: {daemonConnected ? '0.12ms' : 'N/A'}
               </span>
               <div className="flex gap-2 text-app-muted/60">
                 <a href="https://t.me/keymasterpro" target="_blank" rel="noreferrer" className="hover:text-app-text transition-colors">
@@ -608,9 +643,9 @@ function App() {
         </div>
         
         <div className="flex items-center gap-3 text-xs">
-          <span>{t('dashboard.active_profile', 'Active Profile')}: <strong className="text-app-primary">{activeProfileName}</strong></span>
+          <span>{t('footer.active_profile', 'Active Profile')}: <strong className="text-app-primary">{activeProfileName}</strong></span>
           <span className="text-app-muted/40">|</span>
-          <span>Tauri Engine v2.1</span>
+          <span>{t('footer.engine_version', 'KeyMaster Pro v{{version}}', { version: APP_VERSION })}</span>
         </div>
       </footer>
 

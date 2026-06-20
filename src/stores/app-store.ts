@@ -49,6 +49,8 @@ const defaultConfig: AppConfig = {
   fontSize: 12,
   rowPadding: 8,
   restoreMouseAfterMacro: true,
+  onboardingComplete: false,
+  tapHoldTimeoutMs: 200,
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -64,7 +66,7 @@ export const useAppStore = create<AppState>((set) => ({
   }),
   loadConfig: async () => {
     try {
-      const serverConfig = await invoke<AppConfig>('ipc_call', { method: 'get_config' });
+      const serverConfig = await invoke<AppConfig>('get_gui_config');
       if (serverConfig) {
         set({ config: serverConfig });
       }

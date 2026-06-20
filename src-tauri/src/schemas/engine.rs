@@ -37,7 +37,8 @@ pub struct CompiledTapHoldRule {
 
 #[derive(Debug, Clone)]
 pub enum EngineCondition {
-    WindowFocused { process_hash: u64 },
+    ProcessActive { process_hash: u64 },
+    WindowFocused { title_contains: String },
     LayerActive { layer_id_hash: u64 },
     VirtualDesktop { id: u32 },
 }

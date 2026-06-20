@@ -25,6 +25,10 @@ static MOUSE_HOOK_INSTALLED: AtomicBool = AtomicBool::new(false);
 /// Глобальная ссылка на состояние Daemon
 static GLOBAL_STATE: OnceLock<DaemonStateRef> = OnceLock::new();
 
+use std::sync::Mutex;
+pub static LAST_RECORDED_MOUSE_POS: Mutex<Option<(i32, i32)>> = Mutex::new(None);
+pub static LAST_RECORDED_MOUSE_TIME: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+
 /// Результат установки хуков
 #[derive(Debug)]
 pub struct HookHandles {
@@ -193,6 +197,30 @@ extern "system" fn keyboard_hook_callback(
 
     if let Some(s_ref) = state_ref {
         if let Ok(s) = s_ref.read() {
+            // Перехват F12 для запуска / остановки записи макроса
+            if vk_code == 0x7B { // F12
+                if is_key_down {
+                    if s.is_recording.load(Ordering::Relaxed) {
+                        s.is_recording.store(false, Ordering::Relaxed);
+                        crate::gui::events::broadcast_event(crate::gui::events::DaemonEvent::MacroRecordingStopped { macro_id: "".to_string() });
+                        tracing::info!("Запись макроса остановлена по нажатию F12");
+                    } else if s.record_ready.load(Ordering::Relaxed) {
+                        s.is_recording.store(true, Ordering::Relaxed);
+                        if let Ok(mut last_time) = s.last_record_time.lock() {
+                            *last_time = None;
+                        }
+                        if let Ok(mut last_pos) = LAST_RECORDED_MOUSE_POS.lock() {
+                            *last_pos = None;
+                        }
+                        if let Ok(mut last_mouse_time) = LAST_RECORDED_MOUSE_TIME.lock() {
+                            *last_mouse_time = None;
+                        }
+                        tracing::info!("Запись макроса запущена по нажатию F12");
+                    }
+                }
+                return LRESULT(1); // Блокируем F12 для системы
+            }
+
             if s.is_recording.load(Ordering::Relaxed) {
                 if let Ok(mut last_time_lock) = s.last_record_time.lock() {
                     let now = std::time::Instant::now();
@@ -311,32 +339,141 @@ extern "system" fn mouse_hook_callback(
 
     if let Some(s_ref) = state_ref {
         if let Ok(s) = s_ref.read() {
-            if s.is_recording.load(Ordering::Relaxed) && button != 255 {
-                if let Ok(mut last_time_lock) = s.last_record_time.lock() {
-                    let now = std::time::Instant::now();
-                    let delay_ms = match *last_time_lock {
+            if s.is_recording.load(Ordering::Relaxed) {
+                let now = std::time::Instant::now();
+                let mut steps_to_record = Vec::new();
+
+                // Получим задержку для первого шага на этом событии
+                let mut current_delay = 0u32;
+                if let Ok(last_time) = s.last_record_time.lock() {
+                    current_delay = match *last_time {
                         Some(last) => now.duration_since(last).as_millis() as u32,
                         None => 0,
                     };
-                    *last_time_lock = Some(now);
+                }
 
+                // 1. Проверяем, нужно ли вставить координаты перед кликом/скроллом
+                if button != 255 || delta != 0 {
+                    let mut need_force_mouse_pos = false;
+                    if let Ok(mut last_pos_guard) = LAST_RECORDED_MOUSE_POS.lock() {
+                        match *last_pos_guard {
+                            Some((lx, ly)) => {
+                                if lx != x || ly != y {
+                                    *last_pos_guard = Some((x, y));
+                                    need_force_mouse_pos = true;
+                                }
+                            }
+                            None => {
+                                *last_pos_guard = Some((x, y));
+                                need_force_mouse_pos = true;
+                            }
+                        }
+                    }
+                    if need_force_mouse_pos {
+                        if let Ok(mut last_mouse_time) = LAST_RECORDED_MOUSE_TIME.lock() {
+                            *last_mouse_time = Some(now);
+                        }
+                        steps_to_record.push(crate::schemas::frontend::MacroStep {
+                            action: crate::schemas::frontend::MacroAction::MouseToAbsolute { x, y },
+                            delay_ms: current_delay,
+                        });
+                        // Для последующего действия в этом же событии задержка будет 0
+                        current_delay = 0;
+                    }
+                }
+
+                // 2. Обрабатываем текущее действие
+                let mut action_to_record = None;
+                if button != 255 {
                     let action = if is_mouse_down {
                         crate::schemas::frontend::MacroAction::MouseDown { code: button }
                     } else {
                         crate::schemas::frontend::MacroAction::MouseUp { code: button }
                     };
+                    action_to_record = Some(action);
+                } else if delta != 0 {
+                    action_to_record = Some(crate::schemas::frontend::MacroAction::MouseScroll { delta });
+                } else if msg_type == WM_MOUSEMOVE as u32 {
+                    let record_mouse_moves = s.record_mouse_moves.load(Ordering::Relaxed);
+                    let record_mouse_drag_drop_only = s.record_mouse_drag_drop_only.load(Ordering::Relaxed);
 
-                    let step = crate::schemas::frontend::MacroStep {
-                        action,
-                        delay_ms,
-                    };
-                    if let Ok(mut steps) = s.recorded_steps.lock() {
-                        steps.push(step.clone());
+                    let mut should_record = false;
+
+                    if record_mouse_moves {
+                        let is_drag = if record_mouse_drag_drop_only {
+                            let is_left_down = (unsafe { windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(0x01) } as u16 & 0x8000) != 0;
+                            let is_right_down = (unsafe { windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(0x02) } as u16 & 0x8000) != 0;
+                            let is_middle_down = (unsafe { windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(0x04) } as u16 & 0x8000) != 0;
+                            is_left_down || is_right_down || is_middle_down
+                        } else {
+                            true
+                        };
+
+                        if is_drag {
+                            if let Ok(mut last_pos_guard) = LAST_RECORDED_MOUSE_POS.lock() {
+                                match *last_pos_guard {
+                                    Some((lx, ly)) => {
+                                        // Порог 15 пикселей для сглаживания мелких движений
+                                        if (x - lx).abs() > 15 || (y - ly).abs() > 15 {
+                                            // Троттлинг 100 мс для предотвращения генерации сотен шагов
+                                            if let Ok(last_time_guard) = LAST_RECORDED_MOUSE_TIME.lock() {
+                                                match *last_time_guard {
+                                                    Some(last_t) => {
+                                                        if now.duration_since(last_t).as_millis() >= 100 {
+                                                            should_record = true;
+                                                        }
+                                                    }
+                                                    None => {
+                                                        should_record = true;
+                                                    }
+                                                }
+                                            }
+                                            if should_record {
+                                                *last_pos_guard = Some((x, y));
+                                            }
+                                        }
+                                    }
+                                    None => {
+                                        *last_pos_guard = Some((x, y));
+                                        should_record = true;
+                                    }
+                                }
+                            }
+                        }
                     }
-                    if let Ok(step_json) = serde_json::to_value(&step) {
-                        crate::gui::events::broadcast_event(crate::gui::events::DaemonEvent::MacroRecordingStep {
-                            step: step_json,
-                        });
+
+                    if should_record {
+                        if let Ok(mut last_mouse_time) = LAST_RECORDED_MOUSE_TIME.lock() {
+                            *last_mouse_time = Some(now);
+                        }
+                        action_to_record = Some(crate::schemas::frontend::MacroAction::MouseToAbsolute { x, y });
+                    }
+                }
+
+                if let Some(action) = action_to_record {
+                    steps_to_record.push(crate::schemas::frontend::MacroStep {
+                        action,
+                        delay_ms: current_delay,
+                    });
+                }
+
+                // 3. Сохраняем шаги и обновляем глобальное время записи
+                if !steps_to_record.is_empty() {
+                    if let Ok(mut last_time_lock) = s.last_record_time.lock() {
+                        *last_time_lock = Some(now);
+                    }
+                    
+                    if let Ok(mut steps) = s.recorded_steps.lock() {
+                        for step in &steps_to_record {
+                            steps.push(step.clone());
+                        }
+                    }
+                    for step in steps_to_record {
+                        if let Ok(step_json) = serde_json::to_value(&step) {
+                            crate::gui::events::broadcast_event(crate::gui::events::DaemonEvent::MacroRecordingStep {
+                                step: step_json,
+                            });
+                        }
                     }
                 }
             }

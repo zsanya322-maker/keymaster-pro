@@ -147,7 +147,7 @@ pub fn run_daemon(parent_pid: Option<u32>) -> Result<(), String> {
                                 default_profile_id = Some(prof.id.clone());
                             }
                             for app in &prof.linked_apps {
-                                if app.to_lowercase() == active_process.to_lowercase() {
+                                if crate::shared::clean_process_name(app) == crate::shared::clean_process_name(&active_process) {
                                     matched_profile_id = Some(prof.id.clone());
                                     break;
                                 }
@@ -231,6 +231,12 @@ pub fn run_daemon(parent_pid: Option<u32>) -> Result<(), String> {
 
     {
         if let Ok(mut s) = state.write() {
+            let frontend_config = crate::schemas::frontend::FrontendConfig {
+                rules: loaded_profile.rules.clone(),
+                layers: loaded_profile.layers.clone(),
+                tap_hold_timeout_ms: app_config.tap_hold_timeout_ms,
+            };
+            s.engine_schema = crate::daemon::compiler::compile_schema(&frontend_config);
             s.active_profile = Some(loaded_profile);
         }
     }

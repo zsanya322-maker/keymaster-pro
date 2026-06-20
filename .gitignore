@@ -56,3 +56,7 @@ option_b_layout.png
 # Windows reserved device name — accidental redirects to "nul" from
 # non-cmd shells (bash) create a literal file. Ignore & never commit.
 nul
+
+# Local dev logs / AI handoff notes — never commit
+logs
+HANDOFF.md

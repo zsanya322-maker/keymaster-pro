@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
 import { MacroStep, MacroAction } from '../../lib/types';
 import { KeyPicker } from './KeyPicker';
@@ -10,74 +11,142 @@ interface MacroEditorProps {
 }
 
 export const MacroEditor: React.FC<MacroEditorProps> = ({ steps, onChange }) => {
+  const { t } = useTranslation();
   const [isRecording, setIsRecording] = useState(false);
   const [recordedCount, setRecordedCount] = useState(0);
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const [recordMouseMoves, setRecordMouseMoves] = useState(false);
+  const [recordMouseDragDropOnly, setRecordMouseDragDropOnly] = useState(true);
+
+  const isRecordingRef = useRef(isRecording);
+  const recordMouseMovesRef = useRef(recordMouseMoves);
+  const recordMouseDragDropOnlyRef = useRef(recordMouseDragDropOnly);
+  // Guard от двойного stop_recording: UI-клик и poll могут соревноваться.
+  // true = стоп инициирован кнопкой Stop, poll должен уступить.
+  const isStoppingRef = useRef(false);
 
   useEffect(() => {
-    // Check initial status on mount
+    isRecordingRef.current = isRecording;
+  }, [isRecording]);
+
+  useEffect(() => {
+    recordMouseMovesRef.current = recordMouseMoves;
+  }, [recordMouseMoves]);
+
+  useEffect(() => {
+    recordMouseDragDropOnlyRef.current = recordMouseDragDropOnly;
+  }, [recordMouseDragDropOnly]);
+
+  const syncSettings = (ready: boolean, moves: boolean, dragDrop: boolean, currentSteps?: MacroStep[]) => {
+    invoke('ipc_call', {
+      method: 'macro.set_record_ready',
+      params: {
+        ready,
+        recordMouseMoves: moves,
+        recordMouseDragDropOnly: dragDrop,
+        existingSteps: currentSteps || [],
+      }
+    }).catch(e => {
+      console.error('Failed to set record ready with options', e);
+    });
+  };
+
+  const handleRecordMouseMovesChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.checked;
+    setRecordMouseMoves(val);
+    syncSettings(true, val, recordMouseDragDropOnly, steps);
+  };
+
+  const handleRecordMouseDragDropOnlyChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.checked;
+    setRecordMouseDragDropOnly(val);
+    syncSettings(true, recordMouseMoves, val, steps);
+  };
+
+  const stepsRef = useRef(steps);
+  useEffect(() => {
+    stepsRef.current = steps;
+    // Синхронизируем шаги на бэкенде, если мы готовы к записи, но НЕ ведем саму запись сейчас
+    if (!isRecordingRef.current) {
+      syncSettings(true, recordMouseMovesRef.current, recordMouseDragDropOnlyRef.current, steps);
+    }
+  }, [steps]);
+
+  const onChangeRef = useRef(onChange);
+  useEffect(() => {
+    onChangeRef.current = onChange;
+  }, [onChange]);
+
+  useEffect(() => {
     const checkStatus = async () => {
       try {
         const res = await invoke<{ isRecording: boolean; stepsCount: number }>('ipc_call', {
           method: 'macro.get_recording_status',
         });
-        setIsRecording(res.isRecording);
         setRecordedCount(res.stepsCount);
+        setIsRecording(res.isRecording);
       } catch (e) {
-        console.error('Failed to get recording status', e);
+        console.error('Failed to get initial recording status', e);
       }
     };
     checkStatus();
 
-    return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
+    // Запускаем постоянный опрос каждые 300 мс
+    const interval = setInterval(async () => {
+      try {
+        const res = await invoke<{ isRecording: boolean; stepsCount: number }>('ipc_call', {
+          method: 'macro.get_recording_status',
+        });
+        setRecordedCount(res.stepsCount);
+
+        const wasRecording = isRecordingRef.current;
+        if (res.isRecording && !wasRecording) {
+          // Запись стартовала снаружи (F12) — синхронизируем UI.
+          isStoppingRef.current = false;
+          setIsRecording(true);
+        } else if (!res.isRecording && wasRecording && !isStoppingRef.current) {
+          // Запись остановлена снаружи (F12) и UI-кнопка Stop не при чём —
+          // забираем шаги. Если уже стопаем через кнопку, poll уступает (isStoppingRef=true).
+          setIsRecording(false);
+          const stepsRes = await invoke<{ steps: MacroStep[] }>('ipc_call', { method: 'macro.stop_recording' });
+          if (stepsRes.steps && stepsRes.steps.length > 0) {
+            onChangeRef.current(stepsRes.steps);
+          }
+        }
+      } catch (e) {
+        console.error('Failed to poll recording status', e);
       }
+    }, 300);
+
+    return () => {
+      clearInterval(interval);
+      // Гарантированно стопаем запись при размонтировании: иначе бэкенд
+      // продолжит писать нажатия в recorded_steps даже после закрытия модалки.
+      invoke('ipc_call', { method: 'macro.stop_recording' }).catch(() => {});
+      // Выключаем готовность к записи на бэкенде
+      syncSettings(false, recordMouseMovesRef.current, recordMouseDragDropOnlyRef.current, []);
     };
   }, []);
 
-  // Poll status while recording
-  useEffect(() => {
-    if (isRecording) {
-      intervalRef.current = setInterval(async () => {
-        try {
-          const res = await invoke<{ isRecording: boolean; stepsCount: number }>('ipc_call', {
-            method: 'macro.get_recording_status',
-          });
-          setRecordedCount(res.stepsCount);
-          if (!res.isRecording) {
-            setIsRecording(false);
-            if (intervalRef.current) clearInterval(intervalRef.current);
-          }
-        } catch (e) {
-          console.error('Failed to poll recording status', e);
-        }
-      }, 500);
-    } else {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
-      }
-    }
-
-    return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-      }
-    };
-  }, [isRecording]);
-
   const handleStartRecording = async () => {
     try {
-      await invoke('ipc_call', { method: 'macro.start_recording' });
+      await invoke('ipc_call', {
+        method: 'macro.start_recording',
+        params: {
+          recordMouseMoves,
+          recordMouseDragDropOnly,
+          existingSteps: steps,
+        }
+      });
       setIsRecording(true);
-      setRecordedCount(0);
+      setRecordedCount(steps.length);
     } catch (e) {
       console.error('Failed to start recording', e);
     }
   };
 
   const handleStopRecording = async () => {
+    // Взводим guard, чтобы poll не пытался забрать шаги параллельно.
+    isStoppingRef.current = true;
     try {
       const res = await invoke<{ steps: MacroStep[] }>('ipc_call', { method: 'macro.stop_recording' });
       setIsRecording(false);
@@ -87,6 +156,8 @@ export const MacroEditor: React.FC<MacroEditorProps> = ({ steps, onChange }) => 
     } catch (e) {
       console.error('Failed to stop recording', e);
       setIsRecording(false);
+    } finally {
+      isStoppingRef.current = false;
     }
   };
 
@@ -141,7 +212,7 @@ export const MacroEditor: React.FC<MacroEditorProps> = ({ steps, onChange }) => 
   return (
     <div className="space-y-4 border border-app-border rounded-lg p-4 bg-app-bg/30">
       <div className="flex items-center justify-between">
-        <span className="text-xs font-bold text-app-muted uppercase tracking-wider">Macro Steps</span>
+        <span className="text-xs font-bold text-app-muted uppercase tracking-wider">{t('macro.title')}</span>
         <div className="flex gap-2">
           {isRecording ? (
             <button
@@ -150,7 +221,7 @@ export const MacroEditor: React.FC<MacroEditorProps> = ({ steps, onChange }) => 
               className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors shadow-md cursor-pointer animate-pulse"
             >
               <Square size={12} fill="white" />
-              Stop ({recordedCount})
+              {t('macro.stop')} ({recordedCount})
             </button>
           ) : (
             <button
@@ -159,7 +230,7 @@ export const MacroEditor: React.FC<MacroEditorProps> = ({ steps, onChange }) => 
               className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-app-primary text-white rounded-lg hover:bg-app-primary/80 transition-colors shadow-md cursor-pointer"
             >
               <Circle size={12} fill="white" className="text-red-500" />
-              Record Keystrokes
+              {t('macro.record_keystrokes')}
             </button>
           )}
           <button
@@ -169,17 +240,48 @@ export const MacroEditor: React.FC<MacroEditorProps> = ({ steps, onChange }) => 
             className="flex items-center gap-1 px-3 py-1.5 text-xs font-semibold bg-app-surface border border-app-border text-app-text rounded-lg hover:bg-app-surface-hover transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Plus size={12} />
-            Add Step
+            {t('macro.add_step')}
           </button>
         </div>
+      </div>
+
+      {/* Подсказка про F12 */}
+      <div className="bg-app-primary/5 border border-app-primary/10 rounded-lg p-2 flex items-center gap-2 text-[10px] text-app-muted">
+        <span className="bg-app-surface border border-app-border px-1.5 py-0.5 rounded font-mono text-[9px] font-bold text-app-text shrink-0 shadow-sm">F12</span>
+        <span>{t('macro.f12_hint', 'Нажмите F12 для запуска/остановки записи макроса')}</span>
+      </div>
+
+      {/* Настройки записи мыши */}
+      <div className="flex flex-col sm:flex-row gap-4 p-2.5 bg-app-surface/20 border border-app-border/40 rounded-lg text-xs">
+        <label className="flex items-center gap-2 cursor-pointer select-none text-app-text">
+          <input
+            type="checkbox"
+            checked={recordMouseMoves}
+            disabled={isRecording}
+            onChange={handleRecordMouseMovesChange}
+            className="rounded border-app-border bg-app-bg text-app-primary focus:ring-app-primary cursor-pointer w-4 h-4"
+          />
+          <span>{t('macro.record_mouse_moves', 'Записывать движения мыши')}</span>
+        </label>
+        
+        {recordMouseMoves && (
+          <label className="flex items-center gap-2 cursor-pointer select-none text-app-text">
+            <input
+              type="checkbox"
+              checked={recordMouseDragDropOnly}
+              disabled={isRecording}
+              onChange={handleRecordMouseDragDropOnlyChange}
+              className="rounded border-app-border bg-app-bg text-app-primary focus:ring-app-primary cursor-pointer w-4 h-4"
+            />
+            <span>{t('macro.record_mouse_drag_drop_only', 'Только при перетаскивании (Drag-n-Drop)')}</span>
+          </label>
+        )}
       </div>
 
       {steps.length === 0 ? (
         <div className="text-center py-8 border border-dashed border-app-border rounded-lg bg-app-bg/10">
           <p className="text-xs text-app-muted">
-            {isRecording
-              ? 'Recording in progress... Type keys to record steps.'
-              : 'No steps in macro. Click "Record Keystrokes" or add them manually.'}
+            {isRecording ? t('macro.empty_recording') : t('macro.empty_idle')}
           </p>
         </div>
       ) : (
@@ -237,13 +339,13 @@ export const MacroEditor: React.FC<MacroEditorProps> = ({ steps, onChange }) => 
                   }}
                   className="bg-app-bg border border-app-border text-xs text-app-text rounded p-1 w-28 cursor-pointer disabled:opacity-50"
                 >
-                  <option value="keyDown">Key Down</option>
-                  <option value="keyUp">Key Up</option>
-                  <option value="mouseDown">Mouse Down</option>
-                  <option value="mouseUp">Mouse Up</option>
-                  <option value="mouseMove">Mouse Move (Rel)</option>
-                  <option value="mouseScroll">Mouse Scroll</option>
-                  <option value="mouseToAbsolute">Mouse Move (Abs)</option>
+                  <option value="keyDown">{t('macro.step_types.keyDown')}</option>
+                  <option value="keyUp">{t('macro.step_types.keyUp')}</option>
+                  <option value="mouseDown">{t('macro.step_types.mouseDown')}</option>
+                  <option value="mouseUp">{t('macro.step_types.mouseUp')}</option>
+                  <option value="mouseMove">{t('macro.step_types.mouseMove_rel')}</option>
+                  <option value="mouseScroll">{t('macro.step_types.mouseScroll')}</option>
+                  <option value="mouseToAbsolute">{t('macro.step_types.mouseMove_abs')}</option>
                 </select>
 
                 {/* Target input: KeyPicker, Mouse Dropdown or coordinates */}
@@ -292,7 +394,7 @@ export const MacroEditor: React.FC<MacroEditorProps> = ({ steps, onChange }) => 
                             delta: parseInt(e.target.value) || 0,
                           } as any)
                         }
-                        placeholder="e.g. 120 or -120"
+                        placeholder={t('ruleBuilder.placeholders.delta')}
                         className="bg-app-bg border border-app-border text-xs text-app-text rounded p-1 w-full text-right font-mono disabled:opacity-50"
                       />
                     </div>
@@ -341,11 +443,11 @@ export const MacroEditor: React.FC<MacroEditorProps> = ({ steps, onChange }) => 
                       }
                       className="bg-app-bg border border-app-border text-xs text-app-text rounded p-1 w-full cursor-pointer disabled:opacity-50"
                     >
-                      <option value="1">Left Button (1)</option>
-                      <option value="2">Right Button (2)</option>
-                      <option value="3">Middle Button (3)</option>
-                      <option value="4">X1 Button (4)</option>
-                      <option value="5">X2 Button (5)</option>
+                      <option value="1">{t('ruleBuilder.action_options.mouse_left')}</option>
+                      <option value="2">{t('ruleBuilder.action_options.mouse_right')}</option>
+                      <option value="3">{t('ruleBuilder.action_options.mouse_middle')}</option>
+                      <option value="4">{t('ruleBuilder.action_options.mouse_x1')}</option>
+                      <option value="5">{t('ruleBuilder.action_options.mouse_x2')}</option>
                     </select>
                   )}
 
@@ -370,7 +472,7 @@ export const MacroEditor: React.FC<MacroEditorProps> = ({ steps, onChange }) => 
                     value={step.delayMs}
                     disabled={isRecording}
                     onChange={(e) => handleUpdateStepDelay(index, parseInt(e.target.value) || 0)}
-                    placeholder="Delay"
+                    placeholder={t('ruleBuilder.placeholders.delay')}
                     className="bg-app-bg border border-app-border text-xs text-app-text rounded p-1 w-full text-right font-mono disabled:opacity-50"
                   />
                   <span className="text-[10px] text-app-muted font-semibold">ms</span>
@@ -382,7 +484,7 @@ export const MacroEditor: React.FC<MacroEditorProps> = ({ steps, onChange }) => 
                   onClick={() => handleRemoveStep(index)}
                   disabled={isRecording}
                   className="p-1 text-app-danger hover:text-red-400 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer shrink-0"
-                  title="Remove Step"
+                  title={t('macro.remove_step_tooltip')}
                 >
                   <Trash2 size={13} />
                 </button>

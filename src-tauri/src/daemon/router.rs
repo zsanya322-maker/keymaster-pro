@@ -191,6 +191,7 @@ pub async fn dispatch(method: &str, params: Option<Value>, state: &DaemonStateRe
                     let new_rule = match example_type {
                         "remap" => FrontendRule {
                             id: uuid::Uuid::new_v4().to_string(),
+                            name: Some("Caps Lock -> Backspace".to_string()),
                             trigger: FrontendTrigger::KeyDown { code: 20 }, // VK_CAPITAL (Caps Lock)
                             actions: vec![FrontendAction::RemapKey { code: 8 }], // VK_BACK (Backspace)
                             hold_actions: None,
@@ -199,6 +200,7 @@ pub async fn dispatch(method: &str, params: Option<Value>, state: &DaemonStateRe
                         },
                         "expansion" => FrontendRule {
                             id: uuid::Uuid::new_v4().to_string(),
+                            name: Some("Email Expansion".to_string()),
                             trigger: FrontendTrigger::TypedText { sequence: "@@".to_string() },
                             actions: vec![FrontendAction::TypeText { text: "user@example.com".to_string() }],
                             hold_actions: None,
@@ -207,6 +209,7 @@ pub async fn dispatch(method: &str, params: Option<Value>, state: &DaemonStateRe
                         },
                         "macro" => FrontendRule {
                             id: uuid::Uuid::new_v4().to_string(),
+                            name: Some("Demo Macro".to_string()),
                             trigger: FrontendTrigger::KeyDown { code: 123 }, // F12
                             actions: vec![FrontendAction::RunMacro { steps: vec![
                                 MacroStep { action: MacroAction::KeyDown { code: 72 }, delay_ms: 50 }, // H
@@ -230,13 +233,38 @@ pub async fn dispatch(method: &str, params: Option<Value>, state: &DaemonStateRe
 
         // Macro recording
         "macro.start_recording" => {
+            let record_mouse_moves = params.as_ref()
+                .and_then(|p| p.get("recordMouseMoves"))
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let record_mouse_drag_drop_only = params.as_ref()
+                .and_then(|p| p.get("recordMouseDragDropOnly"))
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true);
+            let existing_steps_opt = params.as_ref()
+                .and_then(|p| p.get("existingSteps"))
+                .and_then(|v| serde_json::from_value::<Vec<crate::schemas::frontend::MacroStep>>(v.clone()).ok());
+
             let s = state.read().map_err(|_| "Failed to lock state")?;
             s.is_recording.store(true, std::sync::atomic::Ordering::Relaxed);
+            s.record_mouse_moves.store(record_mouse_moves, std::sync::atomic::Ordering::Relaxed);
+            s.record_mouse_drag_drop_only.store(record_mouse_drag_drop_only, std::sync::atomic::Ordering::Relaxed);
+
             if let Ok(mut steps) = s.recorded_steps.lock() {
-                steps.clear();
+                if let Some(existing) = existing_steps_opt {
+                    *steps = existing;
+                } else {
+                    steps.clear();
+                }
             }
             if let Ok(mut last_time) = s.last_record_time.lock() {
                 *last_time = None;
+            }
+            if let Ok(mut last_pos) = crate::daemon::hooks::LAST_RECORDED_MOUSE_POS.lock() {
+                *last_pos = None;
+            }
+            if let Ok(mut last_mouse_time) = crate::daemon::hooks::LAST_RECORDED_MOUSE_TIME.lock() {
+                *last_mouse_time = None;
             }
             Ok(json!({ "success": true }))
         }
@@ -257,6 +285,50 @@ pub async fn dispatch(method: &str, params: Option<Value>, state: &DaemonStateRe
             Ok(json!({
                 "isRecording": is_recording,
                 "stepsCount": count
+            }))
+        }
+        "macro.set_record_ready" => {
+            if let Some(p) = params {
+                let ready = p.get("ready").and_then(|v| v.as_bool()).unwrap_or(false);
+                let record_mouse_moves = p.get("recordMouseMoves").and_then(|v| v.as_bool()).unwrap_or(false);
+                let record_mouse_drag_drop_only = p.get("recordMouseDragDropOnly").and_then(|v| v.as_bool()).unwrap_or(true);
+                let existing_steps_opt = p.get("existingSteps")
+                    .and_then(|v| serde_json::from_value::<Vec<crate::schemas::frontend::MacroStep>>(v.clone()).ok());
+                
+                let s = state.read().map_err(|_| "Failed to lock state")?;
+                s.record_ready.store(ready, std::sync::atomic::Ordering::Relaxed);
+                s.record_mouse_moves.store(record_mouse_moves, std::sync::atomic::Ordering::Relaxed);
+                s.record_mouse_drag_drop_only.store(record_mouse_drag_drop_only, std::sync::atomic::Ordering::Relaxed);
+
+                if let Ok(mut steps) = s.recorded_steps.lock() {
+                    if ready {
+                        if let Some(existing) = existing_steps_opt {
+                            *steps = existing;
+                        } else {
+                            steps.clear();
+                        }
+                    } else {
+                        steps.clear();
+                    }
+                }
+                Ok(json!({ "success": true }))
+            } else {
+                Err("Missing parameters".into())
+            }
+        }
+
+        "get_active_window" => {
+            if let Some(ctx_state) = crate::trackers::context_tracker::get_context() {
+                if let Ok(ctx) = ctx_state.read() {
+                    return Ok(json!({
+                        "process": ctx.active_process,
+                        "title": ctx.active_window_title,
+                    }));
+                }
+            }
+            Ok(json!({
+                "process": "",
+                "title": "",
             }))
         }
 

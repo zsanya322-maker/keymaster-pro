@@ -49,6 +49,12 @@ pub fn spawn_context_tracker(ctx: AppContextState) {
                         return;
                     }
 
+                    // Инициализируем текущее активное окно сразу при запуске
+                    let fg_window = windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow();
+                    if !fg_window.is_invalid() {
+                        update_active_window(fg_window);
+                    }
+
                     // Windows Message Loop is REQUIRED for out-of-context WinEvent hooks.
                     let mut msg = MSG::default();
                     while GetMessageW(&mut msg, None, 0, 0).into() {
@@ -85,43 +91,104 @@ pub fn get_context() -> Option<AppContextState> {
 }
 
 #[cfg(target_os = "windows")]
-unsafe extern "system" fn win_event_proc(
-    _h_win_event_hook: HWINEVENTHOOK,
-    _event: u32,
-    hwnd: HWND,
-    _id_object: i32,
-    _id_child: i32,
-    _id_event_thread: u32,
-    _dwms_event_time: u32,
-) {
-    use windows::Win32::UI::WindowsAndMessaging::{GetWindowThreadProcessId, GetWindowTextW};
-    use windows::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
-    use windows::Win32::Foundation::{CloseHandle, MAX_PATH};
-    use windows::Win32::System::ProcessStatus::GetProcessImageFileNameW;
+use windows::Win32::System::Diagnostics::ToolHelp::{
+    CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
+};
+
+#[cfg(target_os = "windows")]
+unsafe fn get_process_name_by_toolhelp32(pid: u32) -> Option<String> {
+    use windows::Win32::Foundation::CloseHandle;
+    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0).ok()? };
+    let mut entry = PROCESSENTRY32W::default();
+    entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+
+    let mut result = None;
+    if unsafe { Process32FirstW(snapshot, &mut entry).is_ok() } {
+        loop {
+            if entry.th32ProcessID == pid {
+                let len = entry.szExeFile.iter().position(|&c| c == 0).unwrap_or(entry.szExeFile.len());
+                let exe_name = String::from_utf16_lossy(&entry.szExeFile[..len]);
+                result = Some(exe_name);
+                break;
+            }
+            if unsafe { Process32NextW(snapshot, &mut entry).is_err() } {
+                break;
+            }
+        }
+    }
+    let _ = unsafe { CloseHandle(snapshot) };
+    result
+}
+
+#[cfg(target_os = "windows")]
+unsafe fn get_process_name_from_handle(process_handle: windows::Win32::Foundation::HANDLE) -> Option<String> {
+    use windows::Win32::System::Threading::QueryFullProcessImageNameW;
+    use windows::Win32::Foundation::MAX_PATH;
     use std::path::Path;
 
-    let mut process_id = 0;
-    let process_handle = unsafe {
-        GetWindowThreadProcessId(hwnd, Some(&mut process_id));
-        match OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, process_id) {
-            Ok(h) => h,
-            Err(_) => return,
-        }
+    let mut path_buf = [0u16; MAX_PATH as usize];
+    let mut size = path_buf.len() as u32;
+    
+    let res = unsafe {
+        QueryFullProcessImageNameW(
+            process_handle,
+            windows::Win32::System::Threading::PROCESS_NAME_FORMAT(0),
+            windows::core::PWSTR(path_buf.as_mut_ptr()),
+            &mut size,
+        )
     };
 
+    if res.is_ok() && size > 0 {
+        let path_str = String::from_utf16_lossy(&path_buf[..size as usize]);
+        return Path::new(&path_str)
+            .file_name()
+            .map(|s| s.to_string_lossy().to_string());
+    }
+
+    use windows::Win32::System::ProcessStatus::GetProcessImageFileNameW;
     let mut path_buf = [0u16; MAX_PATH as usize];
     let len = unsafe { GetProcessImageFileNameW(process_handle, &mut path_buf) };
-    unsafe { let _ = CloseHandle(process_handle); }
-
-    let process_name = if len > 0 {
+    if len > 0 {
         let path_str = String::from_utf16_lossy(&path_buf[..len as usize]);
-        Path::new(&path_str)
+        return Path::new(&path_str)
             .file_name()
-            .map(|s| s.to_string_lossy().to_string())
-            .unwrap_or_default()
-    } else {
-        String::new()
-    };
+            .map(|s| s.to_string_lossy().to_string());
+    }
+
+    None
+}
+
+#[cfg(target_os = "windows")]
+unsafe fn get_process_name_by_pid(pid: u32) -> String {
+    use windows::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+    use windows::Win32::Foundation::CloseHandle;
+
+    if let Ok(process_handle) = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) } {
+        let name_opt = unsafe { get_process_name_from_handle(process_handle) };
+        let _ = unsafe { CloseHandle(process_handle) };
+        if let Some(name) = name_opt {
+            return name;
+        }
+    }
+
+    if let Some(name) = unsafe { get_process_name_by_toolhelp32(pid) } {
+        return name;
+    }
+
+    String::new()
+}
+
+#[cfg(target_os = "windows")]
+pub unsafe fn update_active_window(hwnd: HWND) {
+    use windows::Win32::UI::WindowsAndMessaging::{GetWindowThreadProcessId, GetWindowTextW};
+    
+    let mut process_id = 0;
+    unsafe { GetWindowThreadProcessId(hwnd, Some(&mut process_id)) };
+    if process_id == 0 {
+        return;
+    }
+
+    let process_name = unsafe { get_process_name_by_pid(process_id) };
 
     let mut title_buf = [0u16; 512];
     let title_len = unsafe { GetWindowTextW(hwnd, &mut title_buf) };
@@ -133,9 +200,21 @@ unsafe extern "system" fn win_event_proc(
 
     if let Some(ctx_arc) = CONTEXT_STATE.get() {
         if let Ok(mut ctx) = ctx_arc.write() {
-            ctx.active_process = process_name.to_lowercase();
+            ctx.active_process = crate::shared::clean_process_name(&process_name);
             ctx.active_window_title = title;
-            // info!("Active window updated: {} ({})", ctx.active_window_title, ctx.active_process);
         }
     }
+}
+
+#[cfg(target_os = "windows")]
+unsafe extern "system" fn win_event_proc(
+    _h_win_event_hook: HWINEVENTHOOK,
+    _event: u32,
+    hwnd: HWND,
+    _id_object: i32,
+    _id_child: i32,
+    _id_event_thread: u32,
+    _dwms_event_time: u32,
+) {
+    unsafe { update_active_window(hwnd) };
 }

@@ -19,6 +19,7 @@ pub struct LayerMeta {
 #[serde(rename_all = "camelCase")]
 pub struct FrontendRule {
     pub id: String,
+    pub name: Option<String>,
     pub trigger: FrontendTrigger,
     pub actions: Vec<FrontendAction>,
     pub hold_actions: Option<Vec<FrontendAction>>,
@@ -76,7 +77,8 @@ pub struct MacroStep {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum FrontendCondition {
-    WindowFocused { process: String, title: Option<String> },
+    ProcessActive { process: String },
+    WindowFocused { title: String },
     LayerActive { layer_id: String },
     VirtualDesktop { id: u32 },
 }
