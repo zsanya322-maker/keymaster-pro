@@ -12,7 +12,10 @@ pub static EVENT_LISTENERS: LazyLock<Mutex<Vec<mpsc::UnboundedSender<String>>>> 
 /// Отправить событие всем подключенным GUI клиентам
 pub fn broadcast_event(event: DaemonEvent) {
     if let Ok(json_str) = serde_json::to_string(&event) {
-        let mut listeners = EVENT_LISTENERS.lock().unwrap();
+        // Если замок отравлен (паника в другом потоке при retain), достаём данные —
+        // Vec<UnboundedSender> остаётся консистентным. Паника тут = abort daemon,
+        // т.к. broadcast_event вызывается из LL-хуков.
+        let mut listeners = EVENT_LISTENERS.lock().unwrap_or_else(|e| e.into_inner());
         listeners.retain(|tx| {
             let mut msg = json_str.clone();
             msg.push('\n');

@@ -3,7 +3,34 @@ import { useTranslation } from 'react-i18next';
 import { useProfileStore } from '../store/profileStore';
 import { useAppStore } from '../stores/app-store';
 import { RuleBuilderModal } from '../components/RuleBuilderModal';
-import { FrontendRule } from '../lib/types';
+import { FrontendRule, FrontendTrigger } from '../lib/types';
+import { vkToName } from '../lib/keyCodes';
+
+/** Возвращает человекочитаемое имя клавиши/мыши для триггера. */
+function formatTriggerKey(trigger: FrontendTrigger): string {
+  switch (trigger.type) {
+    case 'keyDown':
+    case 'keyUp':
+    case 'mouseDown':
+    case 'mouseUp':
+    case 'tapHoldKeyDown':
+      return vkToName(trigger.code);
+    case 'typedText':
+      return `"${trigger.sequence}"`;
+  }
+}
+
+/** Возвращает localized тип триггера (key/mouse/tapHold/typed). */
+function formatTriggerType(trigger: FrontendTrigger, t: (k: string) => string): string {
+  switch (trigger.type) {
+    case 'keyDown': return t('rules.trigger_key_down');
+    case 'keyUp': return t('rules.trigger_key_up');
+    case 'mouseDown': return t('rules.trigger_mouse_down');
+    case 'mouseUp': return t('rules.trigger_mouse_up');
+    case 'tapHoldKeyDown': return t('rules.trigger_tap_hold');
+    case 'typedText': return t('rules.trigger_typed');
+  }
+}
 
 export const RulesPage: React.FC = () => {
   const { t } = useTranslation();
@@ -94,7 +121,8 @@ export const RulesPage: React.FC = () => {
           </thead>
           <tbody className="divide-y divide-app-border/40">
             {activeProfile.rules.map((rule) => {
-              const triggerText = `${rule.trigger.type} (${(rule.trigger as any).code})`;
+              const triggerKey = formatTriggerKey(rule.trigger);
+              const triggerType = formatTriggerType(rule.trigger, t);
               
               return (
                 <tr key={rule.id} className="hover:bg-app-surface-hover/30 transition-colors">
@@ -102,7 +130,10 @@ export const RulesPage: React.FC = () => {
                     {rule.name || <span className="opacity-40 italic text-xs">{t('rules.no_name', 'Без названия')}</span>}
                   </td>
                   <td className="px-4 py-3 font-medium">
-                    <span className="keycap font-mono text-xs">{triggerText}</span>
+                    <div className="flex flex-col gap-0.5">
+                      <span className="keycap font-mono text-xs font-semibold text-app-text">{triggerKey}</span>
+                      <span className="text-[10px] text-app-muted uppercase tracking-wider">{triggerType}</span>
+                    </div>
                   </td>
                   <td className="px-4 py-3 text-app-muted">
                     {rule.conditions.length === 0 ? <span className="opacity-50">—</span> : (

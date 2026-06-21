@@ -52,6 +52,11 @@ pub struct DaemonState {
     pub last_record_time: std::sync::Mutex<Option<std::time::Instant>>,
     /// Buffer for tracking rolling text inputs for text expansion
     pub typed_buffer: std::sync::Mutex<String>,
+    /// Режим захвата клавиши/кнопки мыши для KeyPicker.
+    /// Когда true, оба LL-хука сразу возвращают PassThrough, минуя engine —
+    /// это позволяет GUI записать любую клавишу/кнопку, даже если активное правило
+    /// её блокирует. GUI выставляет флаг через IPC только на время listening.
+    pub key_capture_active: std::sync::atomic::AtomicBool,
 }
 
 impl DaemonState {
@@ -78,6 +83,7 @@ impl DaemonState {
             recorded_steps: std::sync::Mutex::new(Vec::new()),
             last_record_time: std::sync::Mutex::new(None),
             typed_buffer: std::sync::Mutex::new(String::new()),
+            key_capture_active: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -110,6 +116,7 @@ impl Default for DaemonState {
             recorded_steps: std::sync::Mutex::new(Vec::new()),
             last_record_time: std::sync::Mutex::new(None),
             typed_buffer: std::sync::Mutex::new(String::new()),
+            key_capture_active: std::sync::atomic::AtomicBool::new(false),
         }
     }
 }

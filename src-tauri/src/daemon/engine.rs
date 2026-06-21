@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 use std::sync::{Mutex, LazyLock};
+use std::sync::RwLockReadGuard;
 use std::time::Instant;
+use tracing::error;
+use crate::context::AppContext;
 use crate::daemon::state::DaemonStateRef;
 use crate::schemas::engine::{EngineCondition, EngineAction, SimulatorCommand};
 use crate::shared::calculate_hash;
@@ -10,6 +13,25 @@ use crate::shared::calculate_hash;
 pub enum EventAction {
     PassThrough,
     Block,
+}
+
+/// Безопасно читает контекст приложения.
+///
+/// Возвращает `None`, если RwLock отравлен (poisoned) из-за паники в другом потоке,
+/// либо если контекст ещё не инициализирован. В callback'ах LL-хуков паника = abort
+/// процесса, поэтому НИКОГДА не используем `.unwrap()` на `ctx_arc.read()` —
+/// только через эту функцию.
+fn try_read_ctx(ctx_arc: &crate::context::AppContextState) -> Option<RwLockReadGuard<'_, AppContext>> {
+    match ctx_arc.read() {
+        Ok(guard) => Some(guard),
+        Err(poisoned) => {
+            error!("AppContext RwLock отравлен, пропускаем обработку правила");
+            // Достаём гварда из отравленного замка — данные внутри консистентны,
+            // просто паника произошла в другом потоке. Возвращаем, чтобы обработка
+            // продолжалась на «последнем корректном» состоянии, а не падал daemon.
+            Some(poisoned.into_inner())
+        }
+    }
 }
 
 pub struct PendingTapHold {
@@ -322,7 +344,9 @@ pub fn process_keyboard_event(
                     }
                     
                     // Search for match in text_expansion_map
-                    let ctx = ctx_arc.read().unwrap();
+                    let Some(ctx) = try_read_ctx(&ctx_arc) else {
+                        return EventAction::PassThrough;
+                    };
                     for (seq, rules) in &engine_schema.text_expansion_map {
                         if buf.ends_with(seq) {
                             for rule in rules {
@@ -388,7 +412,9 @@ pub fn process_keyboard_event(
         // Now check if this new key down matches a TapHold rule
         let tap_rules_opt = engine_schema.tap_hold_map.get(&vk_code);
         if let Some(rules) = tap_rules_opt {
-            let ctx = ctx_arc.read().unwrap();
+            let Some(ctx) = try_read_ctx(&ctx_arc) else {
+                return EventAction::PassThrough;
+            };
             for rule in rules {
                 if check_conditions(&rule.conditions, &ctx) {
                     if let Ok(mut pending) = PENDING_TAP_HOLDS.lock() {
@@ -435,7 +461,9 @@ pub fn process_keyboard_event(
 
     let rules_opt = engine_schema.keyboard_map.get(&vk_code);
     if let Some(rules) = rules_opt {
-        let ctx = ctx_arc.read().unwrap();
+        let Some(ctx) = try_read_ctx(&ctx_arc) else {
+            return EventAction::PassThrough;
+        };
         for rule in rules {
             if check_conditions(&rule.conditions, &ctx) {
                 drop(ctx);
@@ -490,7 +518,9 @@ pub fn process_mouse_event(
 
     let rules_opt = engine_schema.mouse_map.get(&button);
     if let Some(rules) = rules_opt {
-        let ctx = ctx_arc.read().unwrap();
+        let Some(ctx) = try_read_ctx(&ctx_arc) else {
+            return EventAction::PassThrough;
+        };
         for rule in rules {
             if check_conditions(&rule.conditions, &ctx) {
                 drop(ctx);

@@ -197,6 +197,14 @@ extern "system" fn keyboard_hook_callback(
 
     if let Some(s_ref) = state_ref {
         if let Ok(s) = s_ref.read() {
+            // Режим захвата клавиши для KeyPicker: пропускаем клавишу мимо engine,
+            // чтобы GUI мог её записать даже если правило её блокирует.
+            // F12 (служебная клавиша записи макроса) здесь не фильтруем —
+            // её перехватываем ниже как обычно.
+            if s.key_capture_active.load(Ordering::Relaxed) && vk_code != 0x7B {
+                return unsafe { CallNextHookEx(None, code, wparam, lparam) };
+            }
+
             // Перехват F12 для запуска / остановки записи макроса
             if vk_code == 0x7B { // F12
                 if is_key_down {
@@ -339,6 +347,12 @@ extern "system" fn mouse_hook_callback(
 
     if let Some(s_ref) = state_ref {
         if let Ok(s) = s_ref.read() {
+            // Режим захвата кнопки мыши для KeyPicker: пропускаем событие мимо engine,
+            // чтобы GUI мог записать клик даже если правило его блокирует.
+            if s.key_capture_active.load(Ordering::Relaxed) {
+                return unsafe { CallNextHookEx(None, code, wparam, lparam) };
+            }
+
             if s.is_recording.load(Ordering::Relaxed) {
                 let now = std::time::Instant::now();
                 let mut steps_to_record = Vec::new();

@@ -317,6 +317,20 @@ pub async fn dispatch(method: &str, params: Option<Value>, state: &DaemonStateRe
             }
         }
 
+        "keycapture.set_active" => {
+            // Включает/выключает режим захвата клавиши/кнопки для KeyPicker.
+            // Когда active=true, оба LL-хука пропускают события мимо engine —
+            // GUI может записать любую клавишу, даже заблокированную правилом.
+            if let Some(p) = params {
+                let active = p.get("active").and_then(|v| v.as_bool()).unwrap_or(false);
+                let s = state.read().map_err(|_| "Failed to lock state")?;
+                s.key_capture_active.store(active, std::sync::atomic::Ordering::Relaxed);
+                Ok(json!({ "success": true, "active": active }))
+            } else {
+                Err("Missing parameters".into())
+            }
+        }
+
         "get_active_window" => {
             if let Some(ctx_state) = crate::trackers::context_tracker::get_context() {
                 if let Ok(ctx) = ctx_state.read() {

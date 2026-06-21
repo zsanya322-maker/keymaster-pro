@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import { useTranslation } from 'react-i18next';
 import { vkToName } from '../../lib/keyCodes';
 
@@ -8,14 +9,41 @@ interface KeyPickerProps {
   className?: string;
 }
 
+/** Авто-выход из режима listening, если юзер забыл нажать клавишу. */
+const LISTEN_TIMEOUT_MS = 10_000;
+
 export const KeyPicker: React.FC<KeyPickerProps> = ({ value, onChange, className = '' }) => {
   const { t } = useTranslation();
   const [isRecording, setIsRecording] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const lastFinishTime = useRef(0);
 
+  // Управление флагом key_capture_active в daemon.
+  // Когда isRecording=true — включаем (правила временно отключаются, клавиши/клики
+  // проходят до приложения в первозданном виде, что позволяет записать даже
+  // кнопку, заблокированную активным правилом).
+  // Снимаем флаг при любом выходе из listening, а также при unmount компонента.
   useEffect(() => {
     if (!isRecording) return;
+
+    let cancelled = false;
+    invoke('ipc_call', { method: 'keycapture.set_active', params: { active: true } })
+      .catch((e) => console.warn('keycapture.set_active failed', e));
+
+    return () => {
+      if (cancelled) return;
+      invoke('ipc_call', { method: 'keycapture.set_active', params: { active: false } })
+        .catch((e) => console.warn('keycapture.set_active (off) failed', e));
+    };
+  }, [isRecording]);
+
+  useEffect(() => {
+    if (!isRecording) return;
+
+    // Авто-таймаут: если за LISTEN_TIMEOUT_MS не нажата клавиша — выходим из listening.
+    const timeoutId = window.setTimeout(() => {
+      setIsRecording(false);
+    }, LISTEN_TIMEOUT_MS);
 
     const finish = (vk: number) => {
       onChange(vk);
@@ -34,9 +62,8 @@ export const KeyPicker: React.FC<KeyPickerProps> = ({ value, onChange, className
     };
 
     // Мышиные кнопки: браузер отдаёт button 0/1/2, маппим в VK_LBUTTON/VK_RBUTTON/VK_MBUTTON.
-    // ВАЖНО: если daemon держит low-level mouse hook и подавляет события,
-    // эти события могут не доходить до WebView — тогда биндинг мыши через
-    // запись не сработает (см. HANDOFF.md, известное ограничение).
+    // Благодаря key_capture_active=true клик всегда доходит до WebView, даже если
+    // активное правило блокирует эту кнопку мыши.
     const handleMouseDown = (e: MouseEvent) => {
       e.preventDefault();
       e.stopPropagation();
@@ -53,6 +80,7 @@ export const KeyPicker: React.FC<KeyPickerProps> = ({ value, onChange, className
     window.addEventListener('keydown', handleKeyDown, true);
     window.addEventListener('mousedown', handleMouseDown, true);
     return () => {
+      window.clearTimeout(timeoutId);
       window.removeEventListener('keydown', handleKeyDown, true);
       window.removeEventListener('mousedown', handleMouseDown, true);
     };
@@ -73,10 +101,10 @@ export const KeyPicker: React.FC<KeyPickerProps> = ({ value, onChange, className
       } ${className}`}
       title={isRecording ? t('keyPicker.listening_tooltip') : t('keyPicker.capture_tooltip')}
     >
-      {isRecording 
-        ? t('keyPicker.press_key') 
-        : value === 0 
-          ? t('keyPicker.none', 'None') 
+      {isRecording
+        ? t('keyPicker.press_key')
+        : value === 0
+          ? t('keyPicker.none', 'None')
           : `${vkToName(value)} (${value})`}
     </button>
   );

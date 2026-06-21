@@ -78,6 +78,12 @@
     "col_actions": "Действия",
     "col_controls": "Управление",
     "no_name": "Без названия",
+    "trigger_key_down": "Клавиша ↓",
+    "trigger_key_up": "Клавиша ↑",
+    "trigger_mouse_down": "Мышь ↓",
+    "trigger_mouse_up": "Мышь ↑",
+    "trigger_tap_hold": "Тап / Холд",
+    "trigger_typed": "Текст",
     "empty_state": "Правил нет. Нажмите «Добавить правило», чтобы начать.",
     "no_profile_select": "Выберите профиль в меню «Профили» (верхняя панель)",
     "daemon_off_title": "Daemon не подключён",
@@ -94,7 +100,7 @@
     "toast_exported": "Профиль «{{name}}» успешно экспортирован!",
     "toast_export_failed": "Ошибка экспорта: {{error}}",
     "toast_about": "KeyMaster Pro: продвинутая утилита для клавиатуры и мыши.",
-    "toast_daemon_stop_failed": "Не удалось остановить daemon",
+    "toast_daemon_stop_failed": "Не удалось остановить daemon: {{error}}",
     "toast_daemon_start_failed": "Не удалось запустить daemon: {{error}}"
   },
   "layers": {

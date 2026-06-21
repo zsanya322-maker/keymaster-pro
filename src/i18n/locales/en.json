@@ -78,6 +78,12 @@
     "col_actions": "Actions",
     "col_controls": "Controls",
     "no_name": "No Name",
+    "trigger_key_down": "Key ↓",
+    "trigger_key_up": "Key ↑",
+    "trigger_mouse_down": "Mouse ↓",
+    "trigger_mouse_up": "Mouse ↑",
+    "trigger_tap_hold": "Tap / Hold",
+    "trigger_typed": "Typed",
     "empty_state": "No rules defined. Click \"Add Rule\" to get started.",
     "no_profile_select": "Select a profile in the Profiles menu (top bar)",
     "daemon_off_title": "Daemon not connected",
@@ -94,7 +100,7 @@
     "toast_exported": "Profile \"{{name}}\" exported successfully!",
     "toast_export_failed": "Export failed: {{error}}",
     "toast_about": "KeyMaster Pro: high-density keyboard & mouse utility.",
-    "toast_daemon_stop_failed": "Failed to stop daemon",
+    "toast_daemon_stop_failed": "Failed to stop daemon: {{error}}",
     "toast_daemon_start_failed": "Failed to start daemon: {{error}}"
   },
   "layers": {

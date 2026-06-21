@@ -87,7 +87,7 @@ async fn handle_client(pipe: NamedPipeServer, state: DaemonStateRef) -> Result<(
 
                     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
                     {
-                        let mut listeners = crate::gui::events::EVENT_LISTENERS.lock().unwrap();
+                        let mut listeners = crate::gui::events::EVENT_LISTENERS.lock().unwrap_or_else(|e| e.into_inner());
                         listeners.push(tx);
                     }
 
