@@ -50,7 +50,8 @@
     "create_profile": "Create Profile",
     "new_profile_prompt": "Enter new profile name:",
     "confirm_delete": "Are you sure you want to delete profile \"{{name}}\"?",
-    "delete_title": "Delete profile"
+    "delete_title": "Delete profile",
+    "delete_btn": "Delete"
   },
   "footer": {
     "daemon_on": "Daemon ON",
@@ -101,7 +102,8 @@
     "toast_export_failed": "Export failed: {{error}}",
     "toast_about": "KeyMaster Pro: high-density keyboard & mouse utility.",
     "toast_daemon_stop_failed": "Failed to stop daemon: {{error}}",
-    "toast_daemon_start_failed": "Failed to start daemon: {{error}}"
+    "toast_daemon_start_failed": "Failed to start daemon: {{error}}",
+    "invalid_mouse_code": "Invalid mouse code — re-record the button"
   },
   "layers": {
     "title": "Layers Management",
@@ -152,7 +154,8 @@
       "must_have_action": "Rule must have at least one action!",
       "create_layer_first": "Create a layer first in the Layers Meta section",
       "select_layer": "Select a layer...",
-      "capture_window": "Capture active window"
+      "capture_window": "Capture active window",
+      "windowMatch_or": "Match if process OR title equals the active window. Leave one field empty to ignore it."
     },
     "trigger_types": {
       "keyDown": "Key Down (Key Down)",
@@ -165,7 +168,8 @@
     "condition_types": {
       "processActive": "Process Active (ProcessActive)",
       "windowFocused": "Window Title / Header (WindowFocused)",
-      "layerActive": "Layer Active (LayerActive)"
+      "layerActive": "Layer Active (LayerActive)",
+      "windowMatch": "Active Window (process OR title)"
     },
     "action_types": {
       "remapKey": "Remap Key (RemapKey)",
@@ -179,7 +183,8 @@
       "windowAction": "Window Action (WindowAction)",
       "launchApp": "Launch App (LaunchApp)",
       "sleep": "PC Sleep (Sleep)",
-      "monitorOff": "Monitor Off (MonitorOff)"
+      "monitorOff": "Monitor Off (MonitorOff)",
+      "focusProcess": "Focus Process Window"
     },
     "action_options": {
       "mouse_left": "Left Button (1)",
@@ -336,5 +341,9 @@
     "logs_clear": "Clear buffer",
     "logs_cleared": "Console log buffer cleared.",
     "logs_open_folder": "Open Folder"
+  },
+  "confirmDialog": {
+    "confirm": "Confirm",
+    "cancel": "Cancel"
   }
 }

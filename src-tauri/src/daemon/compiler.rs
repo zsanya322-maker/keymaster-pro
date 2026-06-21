@@ -63,6 +63,13 @@ fn compile_rule(rule: &FrontendRule) -> CompiledRule {
         FrontendCondition::VirtualDesktop { id } => {
             EngineCondition::VirtualDesktop { id: *id }
         }
+        FrontendCondition::WindowMatch { process, title } => {
+            EngineCondition::WindowMatch {
+                process_hash: process.as_ref().filter(|s| !s.is_empty())
+                    .map(|p| calculate_hash(&crate::shared::clean_process_name(p))),
+                title_contains: title.as_ref().filter(|s| !s.is_empty()).map(|t| t.to_lowercase()),
+            }
+        }
     }).collect();
 
     let actions = rule.actions.iter().map(compile_action).collect();
@@ -87,6 +94,13 @@ fn compile_tap_hold_rule(rule: &FrontendRule, timeout_ms: u32) -> CompiledTapHol
         }
         FrontendCondition::VirtualDesktop { id } => {
             EngineCondition::VirtualDesktop { id: *id }
+        }
+        FrontendCondition::WindowMatch { process, title } => {
+            EngineCondition::WindowMatch {
+                process_hash: process.as_ref().filter(|s| !s.is_empty())
+                    .map(|p| calculate_hash(&crate::shared::clean_process_name(p))),
+                title_contains: title.as_ref().filter(|s| !s.is_empty()).map(|t| t.to_lowercase()),
+            }
         }
     }).collect();
 
@@ -133,6 +147,7 @@ fn compile_action(a: &FrontendAction) -> EngineAction {
         FrontendAction::MediaKey { key } => EngineAction::MediaKey { key: key.clone() },
         FrontendAction::WindowAction { action } => EngineAction::WindowAction { action: action.clone() },
         FrontendAction::LaunchApp { path } => EngineAction::LaunchApp { path: path.clone() },
+        FrontendAction::FocusProcess { process } => EngineAction::FocusProcess { process: crate::shared::clean_process_name(process) },
         FrontendAction::Sleep => EngineAction::Sleep,
         FrontendAction::MonitorOff => EngineAction::MonitorOff,
     }

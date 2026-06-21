@@ -41,6 +41,12 @@ pub enum EngineCondition {
     WindowFocused { title_contains: String },
     LayerActive { layer_id_hash: u64 },
     VirtualDesktop { id: u32 },
+    /// Объединённое условие «Активное окно»: срабатывает по ИЛИ.
+    /// Хотя бы одно поле должно быть Some. None = не проверяется.
+    WindowMatch {
+        process_hash: Option<u64>,
+        title_contains: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -69,6 +75,8 @@ pub enum EngineAction {
     MediaKey { key: String },
     WindowAction { action: String },
     LaunchApp { path: String },
+    /// Поднять окно указанного процесса поверх всех окон.
+    FocusProcess { process: String },
     Sleep,
     MonitorOff,
 }

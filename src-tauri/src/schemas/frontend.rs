@@ -51,6 +51,8 @@ pub enum FrontendAction {
     MediaKey { key: String },
     WindowAction { action: String },
     LaunchApp { path: String },
+    /// Поднять окно указанного процесса поверх всех окон (поиск по имени .exe).
+    FocusProcess { process: String },
     Sleep,
     MonitorOff,
 }
@@ -81,4 +83,13 @@ pub enum FrontendCondition {
     WindowFocused { title: String },
     LayerActive { layer_id: String },
     VirtualDesktop { id: u32 },
+    /// Объединённое условие «Активное окно»: срабатывает, если совпал процесс ИЛИ заголовок.
+    /// process и title оба опциональны, но хотя бы один должен быть заполнен.
+    /// Срабатывает по ИЛИ: достаточно совпадения любого из указанных полей.
+    WindowMatch {
+        #[serde(default)]
+        process: Option<String>,
+        #[serde(default)]
+        title: Option<String>,
+    },
 }

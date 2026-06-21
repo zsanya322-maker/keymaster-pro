@@ -61,21 +61,29 @@ export const KeyPicker: React.FC<KeyPickerProps> = ({ value, onChange, className
       finish(e.keyCode);
     };
 
-    // Мышиные кнопки: браузер отдаёт button 0/1/2, маппим в VK_LBUTTON/VK_RBUTTON/VK_MBUTTON.
-    // Благодаря key_capture_active=true клик всегда доходит до WebView, даже если
-    // активное правило блокирует эту кнопку мыши.
-    const handleMouseDown = (e: MouseEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      // Если клик пришелся по самой кнопке записи, просто выключаем запись (отмена)
-      if (buttonRef.current && buttonRef.current.contains(e.target as Node)) {
-        setIsRecording(false);
-        return;
-      }
-      const vkMap = [0x01, 0x02, 0x04]; // VK_LBUTTON, VK_RBUTTON, VK_MBUTTON
-      const vk = vkMap[e.button] ?? 0x01;
-      finish(vk);
-    };
+      // Мышиные кнопки: JS MouseEvent.button отдаёт 0=L, 1=M, 2=R, 3=X1, 4=X2.
+      // Маппим в единые коды с hooks.rs/engine (1=L, 2=R, 3=M, 4=X1, 5=X2).
+      // Благодаря key_capture_active=true клик всегда доходит до WebView, даже если
+      // активное правило блокирует эту кнопку мыши.
+      const handleMouseDown = (e: MouseEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        // Если клик пришелся по самой кнопке записи, просто выключаем запись (отмена)
+        if (buttonRef.current && buttonRef.current.contains(e.target as Node)) {
+          setIsRecording(false);
+          return;
+        }
+        // e.button: 0=L, 1=M, 2=R, 3=X1, 4=X2 → единые коды 1-5
+        const MOUSE_BUTTON_TO_VK: Record<number, number> = {
+          0: 1, // LMB
+          2: 2, // RMB
+          1: 3, // MMB
+          3: 4, // X1
+          4: 5, // X2
+        };
+        const vk = MOUSE_BUTTON_TO_VK[e.button] ?? 1;
+        finish(vk);
+      };
 
     window.addEventListener('keydown', handleKeyDown, true);
     window.addEventListener('mousedown', handleMouseDown, true);

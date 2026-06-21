@@ -31,6 +31,7 @@ import { SettingsPage } from '../pages/SettingsPage'
 import { LayersPanel } from '../components/LayersPanel'
 import { UpdateBanner } from '../components/UpdateBanner'
 import { OnboardingWizard } from '../components/OnboardingWizard'
+import { ConfirmDialog } from '../components/ConfirmDialog'
 
 const APP_VERSION = '0.2.0'
 
@@ -65,6 +66,8 @@ function App() {
   const [activeMenu, setActiveMenu] = useState<string | null>(null)
   const [isHovered, setIsHovered] = useState(false)
   const [isInitialized, setIsInitialized] = useState(false)
+  // Профиль, ожидающий подтверждения удаления (null = модалка закрыта).
+  const [profileToDelete, setProfileToDelete] = useState<{ id: string; name: string } | null>(null)
   
   const diagnostics = useAppStore(state => state.diagnostics)
 
@@ -464,11 +467,7 @@ function App() {
                         <button
                           onClick={async (e) => {
                             e.stopPropagation()
-                            if (confirm(t('profiles_menu.confirm_delete', 'Удалить профиль "{{name}}"?', { name: p.name }))) {
-                              await useProfileStore.getState().deleteProfile(p.id)
-                              await useProfileStore.getState().loadProfiles()
-                            }
-                            setActiveMenu(null)
+                            setProfileToDelete({ id: p.id, name: p.name })
                           }}
                           className="opacity-0 group-hover:opacity-100 text-app-danger hover:text-red-500 p-0.5 rounded transition-opacity cursor-pointer flex items-center"
                           title={t('profiles_menu.delete_title', 'Удалить профиль')}
@@ -695,6 +694,23 @@ function App() {
 
       <UpdateBanner />
       <OnboardingWizard />
+
+      <ConfirmDialog
+        open={profileToDelete !== null}
+        title={t('profiles_menu.delete_title', 'Удалить профиль')}
+        message={t('profiles_menu.confirm_delete', 'Удалить профиль "{{name}}"?', { name: profileToDelete?.name ?? '' })}
+        danger
+        confirmLabel={t('profiles_menu.delete_btn', 'Удалить')}
+        onCancel={() => setProfileToDelete(null)}
+        onConfirm={async () => {
+          if (profileToDelete) {
+            await useProfileStore.getState().deleteProfile(profileToDelete.id)
+            await useProfileStore.getState().loadProfiles()
+          }
+          setProfileToDelete(null)
+          setActiveMenu(null)
+        }}
+      />
 
     </div>
   )

@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useProfileStore } from '../store/profileStore';
 import { useAppStore } from '../stores/app-store';
 import { RuleBuilderModal } from '../components/RuleBuilderModal';
-import { FrontendRule, FrontendTrigger } from '../lib/types';
+import { FrontendRule, FrontendTrigger, FrontendCondition, FrontendAction } from '../lib/types';
 import { vkToName } from '../lib/keyCodes';
 
 /** Возвращает человекочитаемое имя клавиши/мыши для триггера. */
@@ -29,6 +29,51 @@ function formatTriggerType(trigger: FrontendTrigger, t: (k: string) => string): 
     case 'mouseUp': return t('rules.trigger_mouse_up');
     case 'tapHoldKeyDown': return t('rules.trigger_tap_hold');
     case 'typedText': return t('rules.trigger_typed');
+  }
+}
+
+/**
+ * Проверяет, что у триггера мыши валидный код (1-5).
+ * Код 0 или >5 — невалидный (старые правила или баг записи).
+ * Такие правила никогда не сработают и подсвечиваются в таблице.
+ */
+function isInvalidMouseTrigger(trigger: FrontendTrigger): boolean {
+  if (trigger.type !== 'mouseDown' && trigger.type !== 'mouseUp') return false;
+  return trigger.code < 1 || trigger.code > 5;
+}
+
+/** Локализованное короткое имя условия для таблицы правил. */
+function formatConditionLabel(c: FrontendCondition, t: (k: string) => string): string {
+  switch (c.type) {
+    case 'processActive': return `${t('ruleBuilder.condition_types.processActive')}: ${c.process || '—'}`;
+    case 'windowFocused': return `${t('ruleBuilder.condition_types.windowFocused')}: ${c.title || '—'}`;
+    case 'layerActive': return `${t('ruleBuilder.condition_types.layerActive')}: ${c.layerId || '—'}`;
+    case 'virtualDesktop': return `VD ${c.id}`;
+    case 'windowMatch': {
+      const parts: string[] = [];
+      if (c.process) parts.push(c.process);
+      if (c.title) parts.push(`"${c.title}"`);
+      return `${t('ruleBuilder.condition_types.windowMatch')}: ${parts.length ? parts.join(' / ') : '—'}`;
+    }
+  }
+}
+
+/** Локализованное короткое имя действия для таблицы правил. */
+function formatActionLabel(a: FrontendAction, t: (k: string) => string): string {
+  switch (a.type) {
+    case 'remapKey': return `${t('ruleBuilder.action_types.remapKey')} → ${vkToName(a.code)}`;
+    case 'remapMouse': return `${t('ruleBuilder.action_types.remapMouse')} → ${vkToName(a.code)}`;
+    case 'typeText': return `${t('ruleBuilder.action_types.typeText')}: "${a.text}"`;
+    case 'runMacro': return `${t('ruleBuilder.action_types.runMacro')} (${a.steps.length})`;
+    case 'toggleLayer': return `${t('ruleBuilder.action_types.toggleLayer')}`;
+    case 'holdLayer': return `${t('ruleBuilder.action_types.holdLayer')}`;
+    case 'systemVolume': return `${t('ruleBuilder.action_types.systemVolume')}: ${a.action}`;
+    case 'mediaKey': return `${t('ruleBuilder.action_types.mediaKey')}: ${a.key}`;
+    case 'windowAction': return `${t('ruleBuilder.action_types.windowAction')}: ${a.action}`;
+    case 'launchApp': return `${t('ruleBuilder.action_types.launchApp')}`;
+    case 'focusProcess': return `${t('ruleBuilder.action_types.focusProcess')}: ${a.process || '—'}`;
+    case 'sleep': return t('ruleBuilder.action_types.sleep');
+    case 'monitorOff': return t('ruleBuilder.action_types.monitorOff');
   }
 }
 
@@ -123,24 +168,32 @@ export const RulesPage: React.FC = () => {
             {activeProfile.rules.map((rule) => {
               const triggerKey = formatTriggerKey(rule.trigger);
               const triggerType = formatTriggerType(rule.trigger, t);
-              
+              const invalidMouse = isInvalidMouseTrigger(rule.trigger);
+
               return (
                 <tr key={rule.id} className="hover:bg-app-surface-hover/30 transition-colors">
                   <td className="px-4 py-3 font-semibold text-app-text">
                     {rule.name || <span className="opacity-40 italic text-xs">{t('rules.no_name', 'Без названия')}</span>}
                   </td>
                   <td className="px-4 py-3 font-medium">
-                    <div className="flex flex-col gap-0.5">
-                      <span className="keycap font-mono text-xs font-semibold text-app-text">{triggerKey}</span>
-                      <span className="text-[10px] text-app-muted uppercase tracking-wider">{triggerType}</span>
-                    </div>
+                    {invalidMouse ? (
+                      <div className="flex flex-col gap-0.5" title={t('rules.invalid_mouse_code')}>
+                        <span className="text-app-danger text-xs font-semibold">⚠ {t('rules.invalid_mouse_code')}</span>
+                        <span className="text-[10px] text-app-muted uppercase tracking-wider">{triggerType}</span>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col gap-0.5">
+                        <span className="keycap font-mono text-xs font-semibold text-app-text">{triggerKey}</span>
+                        <span className="text-[10px] text-app-muted uppercase tracking-wider">{triggerType}</span>
+                      </div>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-app-muted">
                     {rule.conditions.length === 0 ? <span className="opacity-50">—</span> : (
                       <div className="flex flex-wrap gap-1">
                         {rule.conditions.map((c, i) => (
                           <span key={i} className="px-1.5 py-0.5 rounded bg-app-primary/10 border border-app-primary/20 text-app-primary text-[10px]">
-                            {c.type}
+                            {formatConditionLabel(c, t)}
                           </span>
                         ))}
                       </div>
@@ -150,12 +203,12 @@ export const RulesPage: React.FC = () => {
                     <div className="flex flex-col gap-1">
                       {rule.actions.map((a, i) => (
                         <span key={`tap-${i}`} className="px-2 py-1 rounded bg-app-surface border border-app-border text-app-text text-xs font-mono inline-block w-fit">
-                          {rule.trigger.type === 'tapHoldKeyDown' ? t('rules.tap_prefix') : ''}{a.type}
+                          {rule.trigger.type === 'tapHoldKeyDown' ? t('rules.tap_prefix') : ''}{formatActionLabel(a, t)}
                         </span>
                       ))}
                       {rule.holdActions?.map((a, i) => (
                         <span key={`hold-${i}`} className="px-2 py-1 rounded bg-app-primary/10 border border-app-primary/30 text-app-primary text-xs font-mono inline-block w-fit mt-1">
-                          {t('rules.hold_prefix')}{a.type}
+                          {t('rules.hold_prefix')}{formatActionLabel(a, t)}
                         </span>
                       ))}
                     </div>

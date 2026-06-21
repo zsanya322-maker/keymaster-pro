@@ -67,6 +67,22 @@ fn check_conditions(conditions: &[EngineCondition], ctx: &crate::context::AppCon
             EngineCondition::VirtualDesktop { .. } => {
                 // Not implemented yet
             }
+            EngineCondition::WindowMatch { process_hash, title_contains } => {
+                // ИЛИ: совпадает процесс ИЛИ совпадает заголовок.
+                // Если оба None (пустое условие) — считаем, что не сработало,
+                // чтобы правило без данных не матчило всё подряд.
+                let process_ok = match process_hash {
+                    Some(h) => calculate_hash(&ctx.active_process) == *h,
+                    None => false,
+                };
+                let title_ok = match title_contains {
+                    Some(t) => ctx.active_window_title.to_lowercase().contains(t),
+                    None => false,
+                };
+                if !process_ok && !title_ok {
+                    return false;
+                }
+            }
         }
     }
     true
@@ -238,6 +254,11 @@ fn execute_actions(
             EngineAction::LaunchApp { path } => {
                 if is_down {
                     crate::simulator::system::launch_app(path);
+                }
+            }
+            EngineAction::FocusProcess { process } => {
+                if is_down {
+                    crate::simulator::system::focus_process(process);
                 }
             }
             EngineAction::Sleep => {

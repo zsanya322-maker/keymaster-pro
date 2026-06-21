@@ -47,6 +47,7 @@ export type FrontendAction =
   | { type: 'mediaKey'; key: 'play_pause' | 'next' | 'prev' | 'stop' }
   | { type: 'windowAction'; action: 'snap_left' | 'snap_right' | 'snap_center' | 'minimize' | 'maximize' | 'close' }
   | { type: 'launchApp'; path: string }
+  | { type: 'focusProcess'; process: string }
   | { type: 'sleep' }
   | { type: 'monitorOff' }
 
@@ -69,6 +70,7 @@ export type FrontendCondition =
   | { type: 'windowFocused'; title: string }
   | { type: 'layerActive'; layerId: string }
   | { type: 'virtualDesktop'; id: number }
+  | { type: 'windowMatch'; process?: string; title?: string }
 
 export interface AppConfig {
   activeProfileId: string | null

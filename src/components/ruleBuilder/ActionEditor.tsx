@@ -1,5 +1,6 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
+import { invoke } from '@tauri-apps/api/core';
 import { FrontendAction } from '../../lib/types';
 import { KeyPicker } from './KeyPicker';
 import { MacroEditor } from './MacroEditor';
@@ -43,6 +44,8 @@ export const ActionEditor: React.FC<ActionEditorProps> = ({ action, onChange, on
               onChange({ type, action: 'snap_left' } as FrontendAction);
             } else if (type === 'launchApp') {
               onChange({ type, path: '' } as FrontendAction);
+            } else if (type === 'focusProcess') {
+              onChange({ type, process: '' } as FrontendAction);
             } else if (type === 'sleep' || type === 'monitorOff') {
               onChange({ type } as FrontendAction);
             }
@@ -59,6 +62,7 @@ export const ActionEditor: React.FC<ActionEditorProps> = ({ action, onChange, on
           <option value="mediaKey">{t('ruleBuilder.action_types.mediaKey')}</option>
           <option value="windowAction">{t('ruleBuilder.action_types.windowAction')}</option>
           <option value="launchApp">{t('ruleBuilder.action_types.launchApp')}</option>
+          <option value="focusProcess">{t('ruleBuilder.action_types.focusProcess')}</option>
           <option value="sleep">{t('ruleBuilder.action_types.sleep')}</option>
           <option value="monitorOff">{t('ruleBuilder.action_types.monitorOff')}</option>
         </select>
@@ -183,6 +187,35 @@ export const ActionEditor: React.FC<ActionEditorProps> = ({ action, onChange, on
                   className="px-3 h-[26px] flex items-center justify-center text-xs font-semibold bg-app-surface border border-app-border text-app-text rounded hover:bg-app-surface-hover transition-colors cursor-pointer shrink-0"
                 >
                   {t('common.browse')}
+                </button>
+              </div>
+            )}
+
+            {action.type === 'focusProcess' && (
+              <div className="flex gap-2 flex-1 items-center">
+                <input
+                  type="text"
+                  value={action.process}
+                  onChange={(e) => onChange({ ...action, process: e.target.value })}
+                  placeholder={t('ruleBuilder.placeholders.process')}
+                  className="bg-app-bg border border-app-border text-xs text-app-text rounded p-1 flex-1"
+                />
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      const res = await invoke<{ process: string; title: string }>('ipc_call', { method: 'get_active_window' });
+                      if (res.process) {
+                        onChange({ ...action, process: res.process });
+                      }
+                    } catch (e) {
+                      console.error('Failed to capture active window', e);
+                    }
+                  }}
+                  className="px-3 h-[26px] flex items-center justify-center text-xs font-semibold bg-app-primary text-white rounded hover:bg-app-primary/80 transition-colors cursor-pointer shrink-0"
+                  title={t('ruleBuilder.hints.capture_window', 'Захватить активное окно')}
+                >
+                  📸 {t('ruleBuilder.buttons.capture', 'Захват')}
                 </button>
               </div>
             )}

@@ -50,7 +50,8 @@
     "create_profile": "Создать профиль",
     "new_profile_prompt": "Введите имя нового профиля:",
     "confirm_delete": "Вы уверены, что хотите удалить профиль \"{{name}}\"?",
-    "delete_title": "Удалить профиль"
+    "delete_title": "Удалить профиль",
+    "delete_btn": "Удалить"
   },
   "footer": {
     "daemon_on": "Daemon ВКЛ",
@@ -101,7 +102,8 @@
     "toast_export_failed": "Ошибка экспорта: {{error}}",
     "toast_about": "KeyMaster Pro: продвинутая утилита для клавиатуры и мыши.",
     "toast_daemon_stop_failed": "Не удалось остановить daemon: {{error}}",
-    "toast_daemon_start_failed": "Не удалось запустить daemon: {{error}}"
+    "toast_daemon_start_failed": "Не удалось запустить daemon: {{error}}",
+    "invalid_mouse_code": "Невалидный код мыши — перезапишите кнопку"
   },
   "layers": {
     "title": "Управление слоями",
@@ -152,7 +154,8 @@
       "must_have_action": "В правиле должно быть хотя бы одно действие!",
       "create_layer_first": "Сначала создайте слой в разделе «Слои»",
       "select_layer": "Выберите слой...",
-      "capture_window": "Захватить активное окно"
+      "capture_window": "Захватить активное окно",
+      "windowMatch_or": "Совпадёт, если процесс ИЛИ заголовок равен активному окну. Оставь одно поле пустым, чтобы его не учитывать."
     },
     "trigger_types": {
       "keyDown": "Нажатие клавиши (Key Down)",
@@ -165,7 +168,8 @@
     "condition_types": {
       "processActive": "В процессе (ProcessActive)",
       "windowFocused": "Заголовок окна (WindowFocused)",
-      "layerActive": "Слой активен (LayerActive)"
+      "layerActive": "Слой активен (LayerActive)",
+      "windowMatch": "Активное окно (процесс ИЛИ заголовок)"
     },
     "action_types": {
       "remapKey": "Переназначить клавишу (RemapKey)",
@@ -179,7 +183,8 @@
       "windowAction": "Действие с окном (WindowAction)",
       "launchApp": "Запустить программу (LaunchApp)",
       "sleep": "Сон ПК (Sleep)",
-      "monitorOff": "Выключить монитор (MonitorOff)"
+      "monitorOff": "Выключить монитор (MonitorOff)",
+      "focusProcess": "Поднять окно процесса"
     },
     "action_options": {
       "mouse_left": "Левая кнопка (1)",
@@ -336,5 +341,9 @@
     "logs_clear": "Очистить буфер",
     "logs_cleared": "Буфер логов очищен.",
     "logs_open_folder": "Открыть папку"
+  },
+  "confirmDialog": {
+    "confirm": "Подтвердить",
+    "cancel": "Отмена"
   }
 }

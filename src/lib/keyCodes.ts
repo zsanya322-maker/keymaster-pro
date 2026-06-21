@@ -57,12 +57,13 @@ export function vkToName(vk: number): string {
   if (KEY_MAP[vk]) {
     return KEY_MAP[vk];
   }
-  // Mouse buttons (0x01=L, 0x02=R, 0x04=M, 0x05=X1, 0x06=X2)
-  if (vk === 0x01) return "LMB";
-  if (vk === 0x02) return "RMB";
-  if (vk === 0x04) return "MMB";
-  if (vk === 0x05) return "X1";
-  if (vk === 0x06) return "X2";
+  // Mouse buttons — единые коды с hooks.rs (1=L, 2=R, 3=M, 4=X1, 5=X2).
+  // Windows WH_MOUSE_LL отдаёт именно эти номера в mouse_map, KeyPicker шлёт те же.
+  if (vk === 1) return "LMB";
+  if (vk === 2) return "RMB";
+  if (vk === 3) return "MMB";
+  if (vk === 4) return "X1";
+  if (vk === 5) return "X2";
   if (vk === 0x5B || vk === 0x5C) return "Win";
   if (vk === 0x12 || vk === 0xA4 || vk === 0xA5) return "Alt";
   if (vk === 0x11 || vk === 0xA2 || vk === 0xA3) return "Ctrl";
