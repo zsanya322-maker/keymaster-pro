@@ -47,7 +47,7 @@ export type FrontendAction =
   | { type: 'mediaKey'; key: 'play_pause' | 'next' | 'prev' | 'stop' }
   | { type: 'windowAction'; action: 'snap_left' | 'snap_right' | 'snap_center' | 'minimize' | 'maximize' | 'close' }
   | { type: 'launchApp'; path: string }
-  | { type: 'focusProcess'; process: string }
+  | { type: 'focusProcess'; process?: string; title?: string }
   | { type: 'sleep' }
   | { type: 'monitorOff' }
 
@@ -66,8 +66,6 @@ export interface MacroStep {
 }
 
 export type FrontendCondition =
-  | { type: 'processActive'; process: string }
-  | { type: 'windowFocused'; title: string }
   | { type: 'layerActive'; layerId: string }
   | { type: 'virtualDesktop'; id: number }
   | { type: 'windowMatch'; process?: string; title?: string }

@@ -90,40 +90,52 @@ pub fn launch_app(path: &str) {
     }
 }
 
-/// Поднять окно указанного процесса поверх всех окон.
+/// Поднять окно указанного процесса/заголовка поверх всех окон.
 ///
-/// `process` — очищенное имя процесса (без .exe, lowercase). Сравнение case-insensitive
-/// через clean_process_name. Ищет первое видимое top-level окно, принадлежащее этому процессу,
-/// восстанавливает его (если свёрнуто) и поднимает в foreground.
+/// Поиск по ИЛИ (достаточно одного совпадения):
+/// - `process` — точное совпадение clean-имени (без .exe, lowercase)
+/// - `title` — заголовок окна содержит указанную строку (case-insensitive)
 ///
-/// Использует SetForegroundWindow + AllowSetForegroundWindow, что покрывает большинство
-/// обычных приложений. Для некоторых UWP/защищённых процессов может потребоваться UAC.
-pub fn focus_process(process: &str) {
+/// Если оба None/пустые — ничего не делает. Если заполнены оба — поднимает
+/// первое окно, где совпал процесс ИЛИ заголовок.
+///
+/// Восстанавливает окно (если свёрнуто) и поднимает в foreground.
+/// SetForegroundWindow + AllowSetForegroundWindow покрывает большинство обычных
+/// приложений. Для некоторых UWP/защищённых процессов может потребоваться UAC.
+pub fn focus_process(process: Option<&str>, title: Option<&str>) {
     #[cfg(target_os = "windows")]
     unsafe {
         use windows::Win32::UI::WindowsAndMessaging::{
-            EnumWindows, IsWindowVisible, GetWindowThreadProcessId, ShowWindow,
-            SetForegroundWindow, AllowSetForegroundWindow, SW_RESTORE,
+            EnumWindows, IsWindowVisible, GetWindowThreadProcessId, GetWindowTextW,
+            GetWindowTextLengthW, ShowWindow, SetForegroundWindow,
+            AllowSetForegroundWindow, SW_RESTORE,
         };
 
-        let target = crate::shared::clean_process_name(process);
-        if target.is_empty() {
+        // Чистим входные данные: process → clean lowercase, title → trimmed lowercase.
+        // Пустые/отсутствующие поля трактуем как «не участвует в поиске».
+        let target_process = process
+            .map(crate::shared::clean_process_name)
+            .filter(|p| !p.is_empty());
+        let target_title = title
+            .map(|t| t.trim().to_lowercase())
+            .filter(|t| !t.is_empty());
+
+        // Если оба поля пустые — искать не по чему, выходим.
+        if target_process.is_none() && target_title.is_none() {
             return;
         }
 
-        // PID целевого процесса. Берём первый подходящий — в системе может быть
-        // несколько процессов с одним именем (например, несколько chrome.exe);
-        // поднимаем окно первого найденного.
-        //
-        // EnumWindows принимает fn pointer (не замыкание), поэтому передаём target
+        // EnumWindows принимает fn pointer (не замыкание), поэтому передаём критерии
         // и накопленный результат через thread_local.
         thread_local! {
-            static TARGET_PROCESS: std::cell::RefCell<String> = std::cell::RefCell::new(String::new());
+            static TARGET_PROCESS: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+            static TARGET_TITLE: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
             static FOUND: std::cell::RefCell<Option<HWND>> = const { std::cell::RefCell::new(None) };
         }
 
         FOUND.with(|f| *f.borrow_mut() = None);
-        TARGET_PROCESS.with(|t| *t.borrow_mut() = target.clone());
+        TARGET_PROCESS.with(|t| *t.borrow_mut() = target_process.clone());
+        TARGET_TITLE.with(|t| *t.borrow_mut() = target_title.clone());
 
         // Callback для EnumWindows — без захвата, как требует WinAPI.
         unsafe extern "system" fn enum_callback(hwnd: HWND, _: LPARAM) -> BOOL {
@@ -131,20 +143,47 @@ pub fn focus_process(process: &str) {
                 if !IsWindowVisible(hwnd).as_bool() {
                     return BOOL(1); // пропускаем невидимые
                 }
-                let mut pid: u32 = 0;
-                GetWindowThreadProcessId(hwnd, Some(&mut pid));
-                if pid == 0 {
-                    return BOOL(1);
-                }
-                let matched = TARGET_PROCESS.with(|t| {
-                    let target = t.borrow();
-                    if let Some(name) = process_name_by_pid(pid) {
-                        crate::shared::clean_process_name(&name) == *target
+
+                // Проверка по процессу (если задан критерий).
+                let process_matched = TARGET_PROCESS.with(|t| {
+                    if let Some(target) = t.borrow().as_ref() {
+                        let mut pid: u32 = 0;
+                        GetWindowThreadProcessId(hwnd, Some(&mut pid));
+                        if pid == 0 {
+                            return false;
+                        }
+                        if let Some(name) = process_name_by_pid(pid) {
+                            return crate::shared::clean_process_name(&name) == *target;
+                        }
+                        false
                     } else {
                         false
                     }
                 });
-                if matched {
+
+                // Проверка по заголовку (если задан критерий).
+                // Сравнение «содержит» (case-insensitive), заголовок уже в lowercase.
+                let title_matched = TARGET_TITLE.with(|t| {
+                    if let Some(target) = t.borrow().as_ref() {
+                        let len = GetWindowTextLengthW(hwnd);
+                        if len <= 0 {
+                            return false;
+                        }
+                        let mut buf = vec![0u16; (len as usize) + 1];
+                        let written = GetWindowTextW(hwnd, &mut buf);
+                        if written <= 0 {
+                            return false;
+                        }
+                        let title = String::from_utf16_lossy(&buf[..written as usize])
+                            .to_lowercase();
+                        title.contains(target.as_str())
+                    } else {
+                        false
+                    }
+                });
+
+                // ИЛИ: достаточно совпадения любого из критериев.
+                if process_matched || title_matched {
                     FOUND.with(|f| *f.borrow_mut() = Some(hwnd));
                     BOOL(0) // нашли — стоп
                 } else {

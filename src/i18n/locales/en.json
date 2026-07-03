@@ -166,8 +166,6 @@
       "typedText": "Typed Text (Expansion)"
     },
     "condition_types": {
-      "processActive": "Process Active (ProcessActive)",
-      "windowFocused": "Window Title / Header (WindowFocused)",
       "layerActive": "Layer Active (LayerActive)",
       "windowMatch": "Active Window (process OR title)"
     },

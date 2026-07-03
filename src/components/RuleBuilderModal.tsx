@@ -137,7 +137,7 @@ export const RuleBuilderModal: React.FC<RuleBuilderModalProps> = ({ existingRule
             <h4 className="text-xs font-bold text-app-muted uppercase tracking-wider flex justify-between items-center">
               {t('ruleBuilder.tabs.conditions')}
               <button 
-                onClick={() => setRule({ ...rule, conditions: [...rule.conditions, { type: 'processActive', process: '' }] })}
+                onClick={() => setRule({ ...rule, conditions: [...rule.conditions, { type: 'windowMatch', process: '', title: '' }] })}
                 className="text-[10px] bg-app-primary/20 text-app-primary px-2 py-1 rounded hover:bg-app-primary/40 transition-colors"
               >
                 {t('ruleBuilder.buttons.add_condition')}

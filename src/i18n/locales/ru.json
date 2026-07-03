@@ -166,8 +166,6 @@
       "typedText": "Ввод текста (Typed Text)"
     },
     "condition_types": {
-      "processActive": "В процессе (ProcessActive)",
-      "windowFocused": "Заголовок окна (WindowFocused)",
       "layerActive": "Слой активен (LayerActive)",
       "windowMatch": "Активное окно (процесс ИЛИ заголовок)"
     },

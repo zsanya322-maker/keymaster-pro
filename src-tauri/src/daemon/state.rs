@@ -57,6 +57,11 @@ pub struct DaemonState {
     /// это позволяет GUI записать любую клавишу/кнопку, даже если активное правило
     /// её блокирует. GUI выставляет флаг через IPC только на время listening.
     pub key_capture_active: std::sync::atomic::AtomicBool,
+    /// Последняя нажатая кнопка мыши в режиме key_capture_active.
+    /// Хук записывает сюда код 1-5 (L/R/M/X1/X2), а GUI забирает поллингом
+    /// через keycapture.get_captured_mouse (с auto-reset в None после чтения).
+    /// Решает проблему X1/X2, которые WebView2 не передаёт в JS как mousedown.
+    pub last_captured_mouse: std::sync::Mutex<Option<u8>>,
 }
 
 impl DaemonState {
@@ -84,6 +89,7 @@ impl DaemonState {
             last_record_time: std::sync::Mutex::new(None),
             typed_buffer: std::sync::Mutex::new(String::new()),
             key_capture_active: std::sync::atomic::AtomicBool::new(false),
+            last_captured_mouse: std::sync::Mutex::new(None),
         }
     }
 
@@ -117,6 +123,7 @@ impl Default for DaemonState {
             last_record_time: std::sync::Mutex::new(None),
             typed_buffer: std::sync::Mutex::new(String::new()),
             key_capture_active: std::sync::atomic::AtomicBool::new(false),
+            last_captured_mouse: std::sync::Mutex::new(None),
         }
     }
 }

@@ -323,12 +323,33 @@ pub async fn dispatch(method: &str, params: Option<Value>, state: &DaemonStateRe
             // GUI может записать любую клавишу, даже заблокированную правилом.
             if let Some(p) = params {
                 let active = p.get("active").and_then(|v| v.as_bool()).unwrap_or(false);
-                let s = state.read().map_err(|_| "Failed to lock state")?;
+                let s = state.write().map_err(|_| "Failed to lock state")?;
                 s.key_capture_active.store(active, std::sync::atomic::Ordering::Relaxed);
+                // Сбрасываем предыдущий захваченный код при включении/выключении,
+                // чтобы GUI не подхватило «залежавшееся» значение.
+                if let Ok(mut captured) = s.last_captured_mouse.lock() {
+                    *captured = None;
+                }
                 Ok(json!({ "success": true, "active": active }))
             } else {
                 Err("Missing parameters".into())
             }
+        }
+
+        "keycapture.get_captured_mouse" => {
+            // Поллинг: GUI вызывает это каждые ~50мс во время listening KeyPicker'а.
+            // Возвращает код последней нажатой кнопки (1-5) и сбрасывает в None.
+            // 0 = ничего не нажато с последнего опроса.
+            let button: u8 = {
+                let s = state.read().map_err(|_| "Failed to lock state")?;
+                if !s.key_capture_active.load(std::sync::atomic::Ordering::Relaxed) {
+                    return Ok(json!({ "button": 0 }));
+                }
+                let mut captured = s.last_captured_mouse.lock()
+                    .map_err(|_| "Failed to lock last_captured_mouse")?;
+                captured.take().unwrap_or(0)
+            };
+            Ok(json!({ "button": button }))
         }
 
         "get_active_window" => {

@@ -51,12 +51,6 @@ pub fn compile_schema(frontend: &FrontendConfig) -> EngineSchema {
 
 fn compile_rule(rule: &FrontendRule) -> CompiledRule {
     let conditions = rule.conditions.iter().map(|c| match c {
-        FrontendCondition::ProcessActive { process } => {
-            EngineCondition::ProcessActive { process_hash: calculate_hash(&crate::shared::clean_process_name(process)) }
-        }
-        FrontendCondition::WindowFocused { title } => {
-            EngineCondition::WindowFocused { title_contains: title.to_lowercase() }
-        }
         FrontendCondition::LayerActive { layer_id } => {
             EngineCondition::LayerActive { layer_id_hash: calculate_hash(layer_id) }
         }
@@ -83,12 +77,6 @@ fn compile_rule(rule: &FrontendRule) -> CompiledRule {
 
 fn compile_tap_hold_rule(rule: &FrontendRule, timeout_ms: u32) -> CompiledTapHoldRule {
     let conditions = rule.conditions.iter().map(|c| match c {
-        FrontendCondition::ProcessActive { process } => {
-            EngineCondition::ProcessActive { process_hash: calculate_hash(&crate::shared::clean_process_name(process)) }
-        }
-        FrontendCondition::WindowFocused { title } => {
-            EngineCondition::WindowFocused { title_contains: title.to_lowercase() }
-        }
         FrontendCondition::LayerActive { layer_id } => {
             EngineCondition::LayerActive { layer_id_hash: calculate_hash(layer_id) }
         }
@@ -147,7 +135,22 @@ fn compile_action(a: &FrontendAction) -> EngineAction {
         FrontendAction::MediaKey { key } => EngineAction::MediaKey { key: key.clone() },
         FrontendAction::WindowAction { action } => EngineAction::WindowAction { action: action.clone() },
         FrontendAction::LaunchApp { path } => EngineAction::LaunchApp { path: path.clone() },
-        FrontendAction::FocusProcess { process } => EngineAction::FocusProcess { process: crate::shared::clean_process_name(process) },
+        FrontendAction::FocusProcess { process, title } => {
+            // Чистим и фильтруем пустые поля: None вместо пустых строк,
+            // чтобы engine корректно искал по ИЛИ.
+            let clean_process = process
+                .as_deref()
+                .map(|p| crate::shared::clean_process_name(p))
+                .filter(|p| !p.is_empty());
+            let clean_title = title
+                .as_deref()
+                .map(|t| t.trim().to_lowercase())
+                .filter(|t| !t.is_empty());
+            EngineAction::FocusProcess {
+                process: clean_process,
+                title: clean_title,
+            }
+        }
         FrontendAction::Sleep => EngineAction::Sleep,
         FrontendAction::MonitorOff => EngineAction::MonitorOff,
     }

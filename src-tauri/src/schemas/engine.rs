@@ -37,8 +37,6 @@ pub struct CompiledTapHoldRule {
 
 #[derive(Debug, Clone)]
 pub enum EngineCondition {
-    ProcessActive { process_hash: u64 },
-    WindowFocused { title_contains: String },
     LayerActive { layer_id_hash: u64 },
     VirtualDesktop { id: u32 },
     /// Объединённое условие «Активное окно»: срабатывает по ИЛИ.
@@ -75,8 +73,12 @@ pub enum EngineAction {
     MediaKey { key: String },
     WindowAction { action: String },
     LaunchApp { path: String },
-    /// Поднять окно указанного процесса поверх всех окон.
-    FocusProcess { process: String },
+    /// Поднять окно указанного процесса/заголовка поверх всех окон.
+    /// Поиск по ИЛИ: process (точное совпадение clean-имени) ИЛИ title (содержит).
+    FocusProcess {
+        process: Option<String>,
+        title: Option<String>,
+    },
     Sleep,
     MonitorOff,
 }

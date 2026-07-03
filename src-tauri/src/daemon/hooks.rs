@@ -347,9 +347,18 @@ extern "system" fn mouse_hook_callback(
 
     if let Some(s_ref) = state_ref {
         if let Ok(s) = s_ref.read() {
-            // Режим захвата кнопки мыши для KeyPicker: пропускаем событие мимо engine,
-            // чтобы GUI мог записать клик даже если правило его блокирует.
+            // Режим захвата кнопки мыши для KeyPicker: сохраняем код кнопки 1-5
+            // при mouse down (поллинг keycapture.get_captured_mouse заберёт его),
+            // затем пропускаем событие мимо engine, чтобы GUI мог записать клик
+            // даже если правило его блокирует.
+            // Решает проблему X1/X2: WebView2 не передаёт их в JS как mousedown.
             if s.key_capture_active.load(Ordering::Relaxed) {
+                if is_mouse_down && button != 255 {
+                    if let Ok(mut captured) = s.last_captured_mouse.lock() {
+                        *captured = Some(button);
+                        tracing::debug!("Захвачена кнопка мыши для KeyPicker: {}", button);
+                    }
+                }
                 return unsafe { CallNextHookEx(None, code, wparam, lparam) };
             }
 

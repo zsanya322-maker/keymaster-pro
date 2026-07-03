@@ -116,74 +116,13 @@ pub fn run_daemon(parent_pid: Option<u32>) -> Result<(), String> {
         });
     }
 
-    // Запустить автоматическое переключение профилей (profile auto-switcher)
-    let auto_switch_state = state.clone();
-    tokio_rt.spawn(async move {
-        info!("Запущен фоновый мониторинг активного окна для автопереключения профилей");
-        loop {
-            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-            
-            // Если daemon останавливается, выходим
-            {
-                if let Ok(s) = auto_switch_state.read() {
-                    if !s.running {
-                        break;
-                    }
-                }
-            }
-            
-            if let Ok(profile_ids) = crate::shared::persistence::list_profiles() {
-                let mut matched_profile_id = None;
-                let mut default_profile_id = None;
-                
-                let active_process = crate::trackers::context_tracker::get_context()
-                    .and_then(|ctx| ctx.read().ok().map(|c| c.active_process.clone()))
-                    .unwrap_or_default();
-                
-                if !active_process.is_empty() {
-                    for id in &profile_ids {
-                        if let Ok(prof) = crate::shared::persistence::load_profile(id) {
-                            if prof.is_default {
-                                default_profile_id = Some(prof.id.clone());
-                            }
-                            for app in &prof.linked_apps {
-                                if crate::shared::clean_process_name(app) == crate::shared::clean_process_name(&active_process) {
-                                    matched_profile_id = Some(prof.id.clone());
-                                    break;
-                                }
-                            }
-                        }
-                        if matched_profile_id.is_some() {
-                            break;
-                        }
-                    }
-                }
-                
-                let target_profile_id = matched_profile_id.or(default_profile_id);
-                if let Some(target_id) = target_profile_id {
-                    let mut switch = false;
-                    if let Ok(s) = auto_switch_state.read() {
-                        if s.active_profile_id != target_id {
-                            switch = true;
-                        }
-                    }
-                    if switch {
-                        info!("Автоматическое переключение профиля на ID: {}", target_id);
-                        if let Ok(prof) = crate::shared::persistence::load_profile(&target_id) {
-                            if let Ok(mut s) = auto_switch_state.write() {
-                                s.active_profile_id = target_id.clone();
-                                s.active_profile = Some(prof);
-                            }
-                            if let Ok(mut config) = crate::shared::config::load_config() {
-                                config.active_profile_id = target_id.clone();
-                                let _ = crate::shared::config::save_config(&config);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    });
+    // NOTE: Автопереключение профилей по активному окну убрано (раньше каждую секунду
+    // перетирало ручной выбор пользователя, откатывая на профиль с is_default=true).
+    // Профиль выбирается ТОЛЬКО вручную через UI. Последний активный сохраняется в config.
+    //
+    // ROADMAP: вернуть как настраиваемую фичу — галочка в настройках (вкл/выкл),
+    // матчит linked_apps профилей с активным процессом; fallback на дефолт только
+    // при включённой опции и без явного ручного выбора пользователя.
 
     // Запустить фоновый ticker для Tap-Hold (Kanata-style)
     let taphold_state = state.clone();

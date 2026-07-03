@@ -45,8 +45,6 @@ function isInvalidMouseTrigger(trigger: FrontendTrigger): boolean {
 /** Локализованное короткое имя условия для таблицы правил. */
 function formatConditionLabel(c: FrontendCondition, t: (k: string) => string): string {
   switch (c.type) {
-    case 'processActive': return `${t('ruleBuilder.condition_types.processActive')}: ${c.process || '—'}`;
-    case 'windowFocused': return `${t('ruleBuilder.condition_types.windowFocused')}: ${c.title || '—'}`;
     case 'layerActive': return `${t('ruleBuilder.condition_types.layerActive')}: ${c.layerId || '—'}`;
     case 'virtualDesktop': return `VD ${c.id}`;
     case 'windowMatch': {
@@ -71,7 +69,10 @@ function formatActionLabel(a: FrontendAction, t: (k: string) => string): string 
     case 'mediaKey': return `${t('ruleBuilder.action_types.mediaKey')}: ${a.key}`;
     case 'windowAction': return `${t('ruleBuilder.action_types.windowAction')}: ${a.action}`;
     case 'launchApp': return `${t('ruleBuilder.action_types.launchApp')}`;
-    case 'focusProcess': return `${t('ruleBuilder.action_types.focusProcess')}: ${a.process || '—'}`;
+    case 'focusProcess': {
+      const parts = [a.process, a.title].filter(Boolean);
+      return `${t('ruleBuilder.action_types.focusProcess')}: ${parts.join(' / ') || '—'}`;
+    }
     case 'sleep': return t('ruleBuilder.action_types.sleep');
     case 'monitorOff': return t('ruleBuilder.action_types.monitorOff');
   }

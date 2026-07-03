@@ -48,17 +48,6 @@ pub static PENDING_TAP_HOLDS: LazyLock<Mutex<HashMap<u8, PendingTapHold>>> = Laz
 fn check_conditions(conditions: &[EngineCondition], ctx: &crate::context::AppContext) -> bool {
     for cond in conditions {
         match cond {
-            EngineCondition::ProcessActive { process_hash } => {
-                let current_hash = calculate_hash(&ctx.active_process);
-                if *process_hash != current_hash {
-                    return false;
-                }
-            }
-            EngineCondition::WindowFocused { title_contains } => {
-                if !ctx.active_window_title.to_lowercase().contains(title_contains) {
-                    return false;
-                }
-            }
             EngineCondition::LayerActive { layer_id_hash } => {
                 if !ctx.active_layers.contains(layer_id_hash) {
                     return false;
@@ -256,9 +245,9 @@ fn execute_actions(
                     crate::simulator::system::launch_app(path);
                 }
             }
-            EngineAction::FocusProcess { process } => {
+            EngineAction::FocusProcess { process, title } => {
                 if is_down {
-                    crate::simulator::system::focus_process(process);
+                    crate::simulator::system::focus_process(process.as_deref(), title.as_deref());
                 }
             }
             EngineAction::Sleep => {

@@ -195,25 +195,37 @@ export const ActionEditor: React.FC<ActionEditorProps> = ({ action, onChange, on
               <div className="flex gap-2 flex-1 items-center">
                 <input
                   type="text"
-                  value={action.process}
-                  onChange={(e) => onChange({ ...action, process: e.target.value })}
+                  value={action.process ?? ''}
+                  onChange={(e) => onChange({ ...action, process: e.target.value || undefined })}
                   placeholder={t('ruleBuilder.placeholders.process')}
-                  className="bg-app-bg border border-app-border text-xs text-app-text rounded p-1 flex-1"
+                  className="bg-app-bg border border-app-border text-xs text-app-text rounded p-1 flex-1 min-w-0"
+                />
+                <input
+                  type="text"
+                  value={action.title ?? ''}
+                  onChange={(e) => onChange({ ...action, title: e.target.value || undefined })}
+                  placeholder={t('ruleBuilder.placeholders.title', 'Заголовок (содержит)')}
+                  className="bg-app-bg border border-app-border text-xs text-app-text rounded p-1 flex-1 min-w-0"
                 />
                 <button
                   type="button"
                   onClick={async () => {
                     try {
+                      // Даём 3 секунды юзеру переключиться на нужное окно.
+                      await new Promise((r) => setTimeout(r, 3000));
                       const res = await invoke<{ process: string; title: string }>('ipc_call', { method: 'get_active_window' });
-                      if (res.process) {
-                        onChange({ ...action, process: res.process });
-                      }
+                      // Заполняем оба поля — юзер потом решит что оставить пустым.
+                      onChange({
+                        ...action,
+                        process: res.process || action.process,
+                        title: res.title || action.title,
+                      });
                     } catch (e) {
                       console.error('Failed to capture active window', e);
                     }
                   }}
                   className="px-3 h-[26px] flex items-center justify-center text-xs font-semibold bg-app-primary text-white rounded hover:bg-app-primary/80 transition-colors cursor-pointer shrink-0"
-                  title={t('ruleBuilder.hints.capture_window', 'Захватить активное окно')}
+                  title={t('ruleBuilder.hints.capture_window_3s', 'Захват через 3 сек — переключитесь на нужное окно')}
                 >
                   📸 {t('ruleBuilder.buttons.capture', 'Захват')}
                 </button>

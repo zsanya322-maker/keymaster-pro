@@ -51,8 +51,15 @@ pub enum FrontendAction {
     MediaKey { key: String },
     WindowAction { action: String },
     LaunchApp { path: String },
-    /// Поднять окно указанного процесса поверх всех окон (поиск по имени .exe).
-    FocusProcess { process: String },
+    /// Поднять окно указанного процесса/заголовка поверх всех окон.
+    /// Поиск по ИЛИ: если заполнены оба поля — поднимает первое окно,
+    /// где совпал процесс ИЛИ заголовок (содержит). Достаточно одного.
+    FocusProcess {
+        #[serde(default)]
+        process: Option<String>,
+        #[serde(default)]
+        title: Option<String>,
+    },
     Sleep,
     MonitorOff,
 }
@@ -79,8 +86,6 @@ pub struct MacroStep {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum FrontendCondition {
-    ProcessActive { process: String },
-    WindowFocused { title: String },
     LayerActive { layer_id: String },
     VirtualDesktop { id: u32 },
     /// Объединённое условие «Активное окно»: срабатывает, если совпал процесс ИЛИ заголовок.
