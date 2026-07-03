@@ -11,6 +11,7 @@
 [![Сборка: Tauri](https://img.shields.io/badge/Сборка-Tauri%20v2-FFC131.svg)](https://v2.tauri.app)
 [![Rust](https://img.shields.io/badge/Rust-edition%202021-CE422B.svg)](https://www.rust-lang.org)
 [![React](https://img.shields.io/badge/React-19-61DAFB.svg)](https://react.dev)
+[![winget](https://img.shields.io/badge/Установка-winget-0078D4.svg)](https://github.com/microsoft/winget-pkgs/pull/390087)
 
 [📥 Скачать](#-скачать) · [✨ Возможности](#-возможности) · [🛠️ Сборка](#%EF%B8%8F-сборка-из-исходников) · [💬 Telegram-канал](https://t.me/KeyM_Pro) · [🐛 Сообщить о баге](https://github.com/zsanya322-maker/keymaster-pro/issues)
 
@@ -111,15 +112,28 @@ KeyMaster Pro — единственный инструмент для Windows, 
 
 ## 📥 Скачать
 
-### Вариант A: Установщик (рекомендуется для большинства)
+### Вариант A: WinGet (рекомендуется)
 
-➡️ Перейдите в [**Releases**](https://github.com/zsanya322-maker/keymaster-pro/releases) и скачайте `KeyMaster-Pro-Setup-x.x.x.exe`
+Установите KeyMaster Pro одной командой на Windows 10/11:
+
+```bash
+winget install KeyMasterPro.KeyMasterPro
+```
+
+- Автоматическое обновление: `winget upgrade KeyMasterPro.KeyMasterPro`
+- Не нужно ничего скачивать вручную — WinGet всё сделает сам
+
+> Требуется [WinGet](https://github.com/microsoft/winget-cli) (предустановлен на Windows 10 1709+ и Windows 11).
+
+### Вариант B: Установщик
+
+➡️ Перейдите в [**Releases**](https://github.com/zsanya322-maker/keymaster-pro/releases) и скачайте `KeyMaster-Pro_0.1.2_x64-setup.exe`
 
 - **Не нужны** зависимости — просто скачайте и запустите
 - WebView2 Runtime предустановлен на Windows 10/11 (автоскачивание при отсутствии)
 - Установщик поддерживает **автообновление** через GitHub
 
-### Вариант B: Портативная версия
+### Вариант C: Портативная версия
 
 Скоро — портативная версия `.zip` планируется в будущих релизах.
 
@@ -188,9 +202,9 @@ pnpm tauri build
 
 | Статус | Функция |
 |--------|---------|
-| ✅ Готово | Переназначение клавиш/мыши, макросы, слои, текстовые расширения, профили, системный трей, автозапуск с Windows, тёмная тема, сворачивание в трей |
+| ✅ Готово | Переназначение клавиш/мыши, макросы, слои, текстовые расширения, профили, системный трей, автозапуск с Windows, тёмная тема, сворачивание в трей, дистрибуция через winget |
 | 🔄 Далее | Портативная сборка (.zip), сертификат для подписи кода, доработка UI настроек |
-| 📋 В планах | Движок скриптов Rhai, браузерное расширение, система плагинов, дистрибуция через winget |
+| 📋 В планах | Движок скриптов Rhai, браузерное расширение, система плагинов |
 
 ---
 

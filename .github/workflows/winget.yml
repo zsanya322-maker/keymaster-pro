@@ -1,0 +1,28 @@
+name: Publish to WinGet
+
+# Автоматически открывает PR в microsoft/winget-pkgs при публикации релиза.
+# Под капотом используется Komac (через vedantmgoyal9/winget-releaser):
+#   - скачивает .exe из релиза и считает SHA256
+#   - обновляет версию, InstallerUrl и InstallerSha256
+#   - копирует метаданные (Publisher, PackageName) из предыдущей версии
+#   - открывает PR в microsoft/winget-pkgs
+#
+# Требуется секрет WINGET_TOKEN — classic PAT со scope `public_repo`.
+# Создать: GitHub → Settings → Developer settings → Personal access tokens (classic)
+#          → scope: public_repo → Repo → Settings → Secrets and variables → Actions
+
+on:
+  release:
+    types: [released]
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    steps:
+      - name: Publish to winget-pkgs
+        uses: vedantmgoyal9/winget-releaser@main
+        with:
+          identifier: KeyMasterPro.KeyMasterPro
+          token: ${{ secrets.WINGET_TOKEN }}
+          # Только NSIS-инсталлер (.exe), игнорируем .msi и .sig
+          installers-regex: '\.exe$'

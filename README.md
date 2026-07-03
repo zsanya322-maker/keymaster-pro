@@ -11,6 +11,7 @@
 [![Built with Tauri](https://img.shields.io/badge/Built%20with-Tauri%20v2-FFC131.svg)](https://v2.tauri.app)
 [![Rust](https://img.shields.io/badge/Rust-edition%202021-CE422B.svg)](https://www.rust-lang.org)
 [![React](https://img.shields.io/badge/React-19-61DAFB.svg)](https://react.dev)
+[![winget](https://img.shields.io/badge/Install%20with-winget-0078D4.svg)](https://github.com/microsoft/winget-pkgs/pull/390087)
 
 [📥 Download](#-download) · [✨ Features](#-features) · [🛠️ Build](#%EF%B8%8F-build-from-source) · [💬 Telegram (RU)](https://t.me/KeyM_Pro) · [🐛 Report Bug](https://github.com/zsanya322-maker/keymaster-pro/issues)
 
@@ -111,15 +112,28 @@ Automatic profile switching based on the active window.
 
 ## 📥 Download
 
-### Option A: Installer (recommended for most users)
+### Option A: WinGet (recommended)
 
-➡️ Go to [**Releases**](https://github.com/zsanya322-maker/keymaster-pro/releases) and download `KeyMaster-Pro-Setup-x.x.x.exe`
+Install KeyMaster Pro with a single command on Windows 10/11:
+
+```bash
+winget install KeyMasterPro.KeyMasterPro
+```
+
+- Automatically updates with `winget upgrade KeyMasterPro.KeyMasterPro`
+- No manual download needed — WinGet handles everything
+
+> Requires [WinGet](https://github.com/microsoft/winget-cli) (pre-installed on Windows 10 1709+ and Windows 11).
+
+### Option B: Installer
+
+➡️ Go to [**Releases**](https://github.com/zsanya322-maker/keymaster-pro/releases) and download `KeyMaster-Pro_0.1.2_x64-setup.exe`
 
 - No dependencies required — just download and run
 - WebView2 Runtime is pre-installed on Windows 10/11 (auto-downloaded if missing)
 - The installer supports **auto-updates** via GitHub
 
-### Option B: Portable
+### Option C: Portable
 
 Soon — a portable `.zip` version is planned for a future release.
 
@@ -188,9 +202,9 @@ Since KeyMaster Pro uses low-level Win32 APIs to intercept and remap input (`Set
 
 | Status | Feature |
 |--------|---------|
-| ✅ Done | Key/mouse remapping, macro recorder, layers, text expansions, profiles, system tray, auto-start with Windows, dark theme, minimize-to-tray |
+| ✅ Done | Key/mouse remapping, macro recorder, layers, text expansions, profiles, system tray, auto-start with Windows, dark theme, minimize-to-tray, winget distribution |
 | 🔄 Next | Portable .zip build, code signing certificate, settings UI polish |
-| 📋 Planned | Rhai scripting engine, browser extension, plugin system, winget distribution |
+| 📋 Planned | Rhai scripting engine, browser extension, plugin system |
 
 ---
 
