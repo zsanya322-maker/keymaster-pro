@@ -4,7 +4,7 @@
 
 # ⌨️ KeyMaster Pro
 
-**A modern keyboard automation & remapping utility for Windows**
+**A modern keyboard & mouse automation utility for Windows**
 
 [![License: FCL](https://img.shields.io/badge/License-FCL-blue.svg)](LICENSE)
 [![Platform: Windows](https://img.shields.io/badge/Platform-Windows%2010%2F11-0078D4.svg)](https://github.com/zsanya322-maker/keymaster-pro)
@@ -21,92 +21,92 @@
 
 ## 📝 Description
 
-**KeyMaster Pro** is a powerful desktop application for Windows that lets you remap keys, record macros, create text expansions, and automate repetitive tasks — all through a clean, modern interface.
+**KeyMaster Pro** is a powerful desktop application for Windows built around a single idea: **everything is a rule**. Instead of juggling separate screens for remapping, macros, layers, and text expansions, you build one rule at a time in a unified **Rule Builder**:
 
-Built with **Rust + Tauri v2 + React 19**, it runs at the OS level using `SetWindowsHookEx` to intercept and remap input in real time, with **zero input logging** and a tiny memory footprint (~23 MB RAM, <1% CPU).
+```
+[ TRIGGER ]  +  [ CONDITIONS ]  →  [ ACTIONS ]
+```
 
-> Looking for a **free, open-source alternative** to AutoHotkey, PowerToys Keyboard Manager, or Key Manager? You found it.
+A key press, mouse click, typed abbreviation, or tap-hold fires a rule. Optional conditions (active window, active layer) decide whether it runs. Then one or more actions execute — remap a key, run a macro, snap a window, control media, and more.
+
+Built with **Rust + Tauri v2 + React 19**, it runs at the OS level using `SetWindowsHookEx` to intercept and process input in real time, with **zero input logging** and a tiny memory footprint (~23 MB RAM, <1% CPU).
+
+> Looking for a **free, source-available alternative** to AutoHotkey, PowerToys Keyboard Manager, or Key Manager? You found it.
 
 ---
 
 ## ⚖️ How it compares
 
-KeyMaster Pro is the only Windows tool that combines **GUI-driven** key remapping, mouse remapping, macros, layers, text expansion, and per-app profiles in a single app.
+KeyMaster Pro is the only Windows tool that combines a **unified rule system** (trigger → condition → action) with a no-code GUI — covering remapping, macros, layers, text expansion, window management, and per-app profiles in one place.
 
 | Feature | KeyMaster Pro | PowerToys KBM | AutoHotkey | kanata | SharpKeys | Espanso |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|
-| GUI (no code) | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ |
+| Unified Rule Builder (no code) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | Key remapping | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ |
 | Mouse remapping | ✅ | ❌ | ✅ | ⚠️ | ❌ | ❌ |
-| Macro recorder | ✅ | ❌ | ✅ | ⚠️ | ❌ | ❌ |
+| Macro recorder (key + mouse) | ✅ | ❌ | ✅ | ⚠️ | ❌ | ❌ |
 | Text expansions | ✅ | ❌ | ✅ | ❌ | ❌ | ✅ |
-| Layers (QMK-style) | ✅ | ❌ | ⚠️ | ✅ | ❌ | ❌ |
-| Per-app profiles | ✅ | ❌ | ⚠️ | ⚠️ | ❌ | ❌ |
+| Layers (toggle + hold, QMK-style) | ✅ | ❌ | ⚠️ | ✅ | ❌ | ❌ |
+| Tap-Hold (home-row mods) | ✅ | ❌ | ⚠️ | ✅ | ❌ | ❌ |
+| Per-app conditions (window match) | ✅ | ❌ | ⚠️ | ⚠️ | ❌ | ❌ |
+| Window management (snap/min/max) | ✅ | ❌ | ✅ | ❌ | ❌ | ❌ |
+| Media keys & volume control | ✅ | ❌ | ✅ | ❌ | ❌ | ❌ |
+| Launch app / focus window | ✅ | ❌ | ✅ | ❌ | ❌ | ❌ |
+| System actions (sleep, monitor off) | ✅ | ❌ | ✅ | ❌ | ❌ | ❌ |
 | Modern UI (Tauri/React) | ✅ | ✅ | ❌ | ❌ | ⚠️ | ⚠️ |
 | Price | Free | Free | Free | Free | Free | Free → $4/mo |
 
 > [!NOTE]
-> PowerToys users have requested per-app remapping ([#6756](https://github.com/microsoft/PowerToys/issues/6756)), mouse remapping ([#1475](https://github.com/microsoft/PowerToys/issues/1475)), and text expansion ([#5074](https://github.com/microsoft/PowerToys/issues/5074)) for **years** — KeyMaster Pro ships with all three today.
+> PowerToys users have requested per-app remapping ([#6756](https://github.com/microsoft/PowerToys/issues/6756)), mouse remapping ([#1475](https://github.com/microsoft/PowerToys/issues/1475)), and text expansion ([#5074](https://github.com/microsoft/PowerToys/issues/5074)) for **years** — KeyMaster Pro ships with all three today, composable inside a single rule.
 
 ---
 
-## 📸 Screenshot
-
-<div align="center">
-
-![KeyMaster Pro Interface](.github/assets/screenshot.png)
-
-</div>
-
----
+<!-- 📸 Screenshot will be added after the 0.2.0 release -->
 
 ## ✨ Features
 
-### 🎹 Key Remapping
-<!-- TODO: record a 5-10s gif showing a key remap in action and save to .github/assets/remap.gif -->
-![Key Remapping](.github/assets/remap.gif)
+Everything lives inside the **Rule Builder** — a single modal where you compose a rule from three parts. No more flipping between disconnected screens.
 
-Remap any key or shortcut to another key, action, or program launch.
+### 🎯 Triggers (what fires a rule)
+- **Key Down / Key Up** — any keyboard key or shortcut
+- **Mouse Down / Mouse Up** — left, right, middle, X1, X2 buttons
+- **Tap-Hold** — tap for one action, hold for another (home-row mods, kanata-style)
+- **Typed Text** — type an abbreviation to fire an expansion
 
-### 🖱️ Mouse Remapping
-<!-- TODO: record a 5-10s gif showing a mouse button remap and save to .github/assets/mouse.gif -->
-![Mouse Remapping](.github/assets/mouse.gif)
+### ⚡ Actions (what happens when a rule fires)
+| Category | Actions |
+|---|---|
+| **Remap** | Remap Key, Remap Mouse Button |
+| **Input** | Type Text, Run Macro (recorded key + mouse steps with delays) |
+| **Layers** | Toggle Layer, Hold Layer (while key is held) |
+| **System** | Volume (mute / up / down), Media Key (play / next / prev / stop), Sleep, Monitor Off |
+| **Windows** | Snap left / right / center, Minimize, Maximize, Close, Focus Process Window |
+| **Launch** | Launch Application |
 
-Rebind mouse buttons and wheel actions — a feature PowerToys users have [requested for 6 years](https://github.com/microsoft/PowerToys/issues/1475).
-
-### 🔥 Layers
-<!-- TODO: record a 5-10s gif showing a layer toggle changing key behavior and save to .github/assets/layers.gif -->
-![Layers](.github/assets/layers.gif)
-
-Context-aware remapping — like QMK layers for your keyboard.
-
-### ⚡ Macro Recorder
-<!-- TODO: record a 5-10s gif recording and replaying a macro and save to .github/assets/macro.gif -->
-![Macro Recorder](.github/assets/macro.gif)
-
-Record key presses and mouse clicks with delays, replay them anytime.
-
-### 📝 Text Expansions
-<!-- TODO: record a 5-10s gif typing an abbreviation that expands and save to .github/assets/text-expansion.gif -->
-![Text Expansions](.github/assets/text-expansion.gif)
-
-Type abbreviations that expand into full text snippets — a free alternative to TextExpander ($4/mo).
+### 🧩 Conditions (optional — when a rule should apply)
+- **Layer Active** — rule only fires while a specific layer is on
+- **Window Match** — rule only fires when the active window matches a process name and/or window title
+- **Virtual Desktop** — rule scoped to a specific virtual desktop
 
 ### 🔄 Per-App Profiles
-<!-- TODO: record a 5-10s gif switching apps and showing the profile auto-switch and save to .github/assets/profiles.gif -->
-![Per-App Profiles](.github/assets/profiles.gif)
+Group rules into **profiles** that auto-switch based on the focused application's window. Different rules for your editor, browser, and games — automatically.
 
-Automatic profile switching based on the active window.
+### 🔥 Layers (QMK-style)
+Toggle or hold a layer to completely change what your keys do — the same keycap can do different things in different layers. Layers are first-class citizens: toggle them from any rule or hold a key to keep a layer active only while pressed.
+
+### 🚀 Two-Process Architecture
+A lightweight background **daemon** (Rust) handles the low-level input hooks and rule execution, while the **GUI** (React) stays responsive. Kill the UI and your remaps keep working.
 
 ### Plus
 | Feature | Description |
 |---------|-------------|
-| 🚀 **Daemon Architecture** | Lightweight background daemon + GUI (two-process design) |
-| ⚡ **Tap-Hold (Kanata-style)** | Single tap triggers one action, holding down triggers another |
-| 🛡️ **System Actions** | Adjust volume, control media, snap windows, launch apps, sleep or turn off monitor |
+| 🧙 **Onboarding Wizard** | Built-in starter examples for new users — get a working remap in seconds |
 | 📊 **Real-time Stats** | CPU, RAM, latency, and keystroke counter in the status bar |
-| 🎨 **Modern UI** | Clean interface with Radix UI + TailwindCSS |
+| 🔔 **Auto-updates** | Update in-app via Tauri updater (or `winget upgrade`) |
 | 🌐 **Multilingual** | English and Russian interface (i18next) |
+| 🎨 **Modern UI** | Radix UI + TailwindCSS + Lucide icons, dark/light theme |
+| 📝 **Per-session Logs** | Debug logs for diagnosing rule behavior |
+| 🛡️ **System Tray** | Minimize to tray, autostart with Windows |
 
 ---
 
@@ -127,7 +127,7 @@ winget install KeyMasterPro.KeyMasterPro
 
 ### Option B: Installer
 
-➡️ Go to [**Releases**](https://github.com/zsanya322-maker/keymaster-pro/releases) and download `KeyMaster-Pro_0.1.2_x64-setup.exe`
+➡️ Go to [**Releases**](https://github.com/zsanya322-maker/keymaster-pro/releases) and download `KeyMaster-Pro_x.x.x_x64-setup.exe`
 
 - No dependencies required — just download and run
 - WebView2 Runtime is pre-installed on Windows 10/11 (auto-downloaded if missing)
@@ -202,7 +202,7 @@ Since KeyMaster Pro uses low-level Win32 APIs to intercept and remap input (`Set
 
 | Status | Feature |
 |--------|---------|
-| ✅ Done | Key/mouse remapping, macro recorder, layers, text expansions, profiles, system tray, auto-start with Windows, dark theme, minimize-to-tray, winget distribution |
+| ✅ Done | Unified Rules Engine & Rule Builder, key/mouse remapping, macros, layers (toggle/hold), tap-hold, text expansions, per-app profiles, window management, media keys & volume, system actions, onboarding wizard, system tray, autostart, dark/light theme, auto-updates, per-session logs, winget distribution |
 | 🔄 Next | Portable .zip build, code signing certificate, settings UI polish |
 | 📋 Planned | Rhai scripting engine, browser extension, plugin system |
 
