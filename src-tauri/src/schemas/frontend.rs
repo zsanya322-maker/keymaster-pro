@@ -82,6 +82,15 @@ pub struct FrontendRule {
     pub order: i32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum MouseWheelDirection {
+    Up,
+    Down,
+    Left,
+    Right,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum FrontendTrigger {
@@ -95,8 +104,24 @@ pub enum FrontendTrigger {
     },
     MouseDown { code: u8 },
     MouseUp { code: u8 },
+    MouseWheel { direction: MouseWheelDirection },
+    MouseDoubleClick { code: u8 },
+    MouseMove {
+        #[serde(default = "default_mouse_move_distance")]
+        min_distance: u16,
+        #[serde(default = "default_mouse_move_cooldown")]
+        cooldown_ms: u32,
+    },
     TapHoldKeyDown { code: u8, timeout_ms: u32 },
     TypedText { sequence: String },
+}
+
+fn default_mouse_move_distance() -> u16 {
+    24
+}
+
+fn default_mouse_move_cooldown() -> u32 {
+    120
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
