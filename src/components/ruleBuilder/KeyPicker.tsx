@@ -21,12 +21,17 @@ import {
   genericizeModifierMask,
 } from '../../lib/keyCodes';
 
-interface KeyPickerProps {
+type KeyPickerProps = {
   value: KeyChord;
   onChange: (chord: KeyChord) => void;
   className?: string;
   allowModifiers?: boolean;
-}
+} | {
+  value: number;
+  onChange: (code: number) => void;
+  className?: string;
+  allowModifiers?: false;
+};
 
 const LISTEN_TIMEOUT_MS = 10_000;
 const MODIFIERS = [
@@ -42,21 +47,31 @@ const SIDE_MODIFIERS = [
   ['LWin', MOD_LWIN], ['RWin', MOD_RWIN],
 ] as const;
 
-export const KeyPicker: React.FC<KeyPickerProps> = ({
-  value,
-  onChange,
-  className = '',
-  allowModifiers = true,
-}) => {
+export const KeyPicker: React.FC<KeyPickerProps> = (props) => {
   const { t } = useTranslation();
   const [isRecording, setIsRecording] = useState(false);
   const [preserveSides, setPreserveSides] = useState(false);
   const lastFinishTime = useRef(0);
-  const onChangeRef = useRef(onChange);
+  const propsRef = useRef(props);
+  const numericMode = typeof props.value === 'number';
+  const value: KeyChord = numericMode
+    ? { code: props.value as number, modifiers: 0 }
+    : props.value as KeyChord;
+  const allowModifiers = numericMode ? false : (props.allowModifiers ?? true);
+  const className = props.className ?? '';
 
   useEffect(() => {
-    onChangeRef.current = onChange;
-  }, [onChange]);
+    propsRef.current = props;
+  }, [props]);
+
+  const emit = (next: KeyChord) => {
+    const current = propsRef.current;
+    if (typeof current.value === 'number') {
+      (current.onChange as (code: number) => void)(next.code);
+    } else {
+      (current.onChange as (chord: KeyChord) => void)(next);
+    }
+  };
 
   useEffect(() => {
     if (!isRecording) return;
@@ -78,7 +93,7 @@ export const KeyPicker: React.FC<KeyPickerProps> = ({
 
     const finish = (captured: KeyChord) => {
       if (!active) return;
-      const next = {
+      const next: KeyChord = {
         code: captured.code,
         modifiers: allowModifiers
           ? preserveSides
@@ -86,7 +101,7 @@ export const KeyPicker: React.FC<KeyPickerProps> = ({
             : genericizeModifierMask(captured.modifiers)
           : 0,
       };
-      onChangeRef.current(next);
+      emit(next);
       lastFinishTime.current = Date.now();
       setIsRecording(false);
     };
@@ -117,7 +132,7 @@ export const KeyPicker: React.FC<KeyPickerProps> = ({
 
   const toggleModifier = (bit: number) => {
     if (!allowModifiers) return;
-    onChange({ ...value, modifiers: value.modifiers ^ bit });
+    emit({ ...value, modifiers: value.modifiers ^ bit });
   };
 
   return (
@@ -151,7 +166,7 @@ export const KeyPicker: React.FC<KeyPickerProps> = ({
           <div className="flex items-center gap-1.5">
             <select
               value={value.code}
-              onChange={(event) => onChange({ ...value, code: Number.parseInt(event.target.value, 10) || 0 })}
+              onChange={(event) => emit({ ...value, code: Number.parseInt(event.target.value, 10) || 0 })}
               className="h-7 flex-1 min-w-0 border border-app-border bg-app-bg px-2 text-[10px] outline-none focus:border-app-primary"
             >
               <option value={0}>{t('keyPicker.none')}</option>
@@ -159,7 +174,7 @@ export const KeyPicker: React.FC<KeyPickerProps> = ({
             </select>
             <button
               type="button"
-              onClick={() => onChange({ code: 0, modifiers: 0 })}
+              onClick={() => emit({ code: 0, modifiers: 0 })}
               className="h-7 px-2 border border-app-border bg-app-bg text-app-muted hover:bg-app-surface"
             >
               {t('common.reset', { defaultValue: 'Сброс' })}
@@ -191,7 +206,7 @@ export const KeyPicker: React.FC<KeyPickerProps> = ({
                   onChange={(event) => {
                     setPreserveSides(event.target.checked);
                     if (!event.target.checked) {
-                      onChange({ ...value, modifiers: genericizeModifierMask(value.modifiers) });
+                      emit({ ...value, modifiers: genericizeModifierMask(value.modifiers) });
                     }
                   }}
                 />
