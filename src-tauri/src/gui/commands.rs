@@ -1,7 +1,9 @@
 /// Tauri commands (invoke handlers)
 ///
 /// GUI вызывает эти функции через tauri.invoke().
-/// Они перенаправляют запросы в Daemon через Named Pipe IPC.
+/// Большинство runtime-команд перенаправляются в Daemon через Named Pipe IPC,
+/// а GUI-конфигурация читается/пишется напрямую, чтобы настройки сохранялись
+/// даже при остановленном демоне.
 
 use tauri::State;
 use tracing::{info, warn};
@@ -30,16 +32,12 @@ impl Default for GuiState {
     }
 }
 
-/// Запустить daemon-процесс из GUI
-///
-/// GUI spawn'ит себя с флагом `--daemon` как дочерний процесс.
-/// Daemon работает в фоне и общается через Named Pipe.
+/// Запустить daemon-процесс из GUI.
 #[tauri::command]
 pub fn spawn_daemon(state: State<'_, GuiState>) -> Result<serde_json::Value, String> {
     let exe_path = state.exe_path.as_ref()
         .ok_or("Не удалось определить путь к исполняемому файлу")?;
 
-    // Проверяем, не запущен ли уже daemon
     if crate::daemon::runner::is_daemon_running() {
         info!("Daemon уже запущен");
         return Ok(serde_json::json!({
@@ -48,7 +46,6 @@ pub fn spawn_daemon(state: State<'_, GuiState>) -> Result<serde_json::Value, Str
         }));
     }
 
-    // Проверяем атомарный флаг, чтобы избежать двойного запуска из-за StrictMode
     if state.spawning.swap(true, Ordering::SeqCst) {
         info!("Запуск daemon уже выполняется, игнорируем дублирующий вызов");
         return Ok(serde_json::json!({
@@ -62,12 +59,11 @@ pub fn spawn_daemon(state: State<'_, GuiState>) -> Result<serde_json::Value, Str
     info!("Запуск daemon-процесса: {} --daemon --parent-pid {}", exe_path, current_pid);
     info!("Ожидаемый Named Pipe: {}", pipe_path);
 
-    // Spawn daemon как отдельный процесс
     let child = match std::process::Command::new(exe_path)
         .arg("--daemon")
         .arg("--parent-pid")
         .arg(current_pid.to_string())
-        .creation_flags(0x00000008) // DETACHED_PROCESS — без консольного окна
+        .creation_flags(0x00000008)
         .spawn()
     {
         Ok(c) => c,
@@ -87,7 +83,7 @@ pub fn spawn_daemon(state: State<'_, GuiState>) -> Result<serde_json::Value, Str
     }))
 }
 
-/// Остановить daemon-процесс через IPC
+/// Остановить daemon-процесс через IPC.
 #[tauri::command]
 pub async fn stop_daemon() -> Result<serde_json::Value, String> {
     info!("stop_daemon: отправка shutdown через IPC");
@@ -103,11 +99,9 @@ pub async fn stop_daemon() -> Result<serde_json::Value, String> {
     }
 }
 
-/// Получить статус Daemon через IPC
+/// Получить статус Daemon через IPC.
 #[tauri::command]
 pub async fn daemon_status(state: State<'_, GuiState>) -> Result<serde_json::Value, String> {
-    // Запрашиваем статус напрямую через IPC (без предварительной проверки pipe_exists,
-    // чтобы избежать race condition при быстром переподключении Named Pipe)
     match crate::daemon::ipc_client::call("get_status", None).await {
         Ok(status) => Ok(serde_json::json!({
             "connected": true,
@@ -124,31 +118,26 @@ pub async fn daemon_status(state: State<'_, GuiState>) -> Result<serde_json::Val
     }
 }
 
-/// IPC-прокси: отправить произвольный JSON-RPC запрос в Daemon
-///
-/// `params` опционален: фронтенд вызывает методы без параметров (profile.list, get_config,
-/// open_log_folder, macro.start_recording, macro.stop_recording) как
-/// `invoke('ipc_call', { method })` — без поля params. Обязательный аргумент
-/// здесь ломал бы десериализацию Tauri и команда падала бы ДО пайпа.
+/// IPC-прокси: отправить произвольный JSON-RPC запрос в Daemon.
 #[tauri::command]
 pub async fn ipc_call(method: String, params: Option<serde_json::Value>) -> Result<serde_json::Value, String> {
     crate::daemon::ipc_client::call(&method, params).await
 }
 
-/// Тестовая команда
+/// Тестовая команда.
 #[tauri::command]
 pub fn greet(name: &str) -> String {
     format!("Привет, {}! KeyMaster Pro работает 🎉", name)
 }
 
-/// Перезапустить приложение (используется после обновления)
+/// Перезапустить приложение (используется после обновления).
 #[tauri::command]
 pub fn restart_app(app_handle: tauri::AppHandle) {
     info!("restart_app: перезапуск приложения");
     app_handle.restart();
 }
 
-/// Перезапустить приложение от имени Администратора (UAC)
+/// Перезапустить приложение от имени Администратора (UAC).
 #[tauri::command]
 pub fn restart_as_admin(state: State<'_, GuiState>) -> Result<(), String> {
     #[cfg(target_os = "windows")]
@@ -180,7 +169,7 @@ pub fn restart_as_admin(state: State<'_, GuiState>) -> Result<(), String> {
     }
 }
 
-/// Проверить, запущено ли приложение с правами Администратора (UAC)
+/// Проверить, запущено ли приложение с правами Администратора (UAC).
 #[tauri::command]
 pub fn is_elevated() -> bool {
     #[cfg(target_os = "windows")]
@@ -211,9 +200,42 @@ pub fn is_elevated() -> bool {
     }
 }
 
-/// Загрузить конфигурацию приложения напрямую из config.json (без IPC с демоном)
+/// Загрузить конфигурацию приложения напрямую из config.json.
 #[tauri::command]
 pub fn get_gui_config() -> Result<serde_json::Value, String> {
     let config = crate::shared::config::load_config()?;
-    Ok(serde_json::to_value(config).unwrap())
+    serde_json::to_value(config).map_err(|e| format!("Ошибка сериализации config: {}", e))
+}
+
+/// Частично обновить GUI-конфигурацию напрямую в config.json.
+///
+/// Patch сначала сливается с текущей конфигурацией, затем весь результат
+/// десериализуется обратно в AppConfig. Поэтому неизвестные типы/некорректные
+/// значения не могут тихо записать повреждённый config.json.
+#[tauri::command]
+pub fn update_gui_config(patch: serde_json::Value) -> Result<serde_json::Value, String> {
+    let current = crate::shared::config::load_config()?;
+    let mut merged = serde_json::to_value(current)
+        .map_err(|e| format!("Ошибка сериализации текущего config: {}", e))?;
+
+    let patch_object = patch
+        .as_object()
+        .ok_or_else(|| "Patch конфигурации должен быть JSON-объектом".to_string())?;
+    let merged_object = merged
+        .as_object_mut()
+        .ok_or_else(|| "Текущая конфигурация не является JSON-объектом".to_string())?;
+
+    for (key, value) in patch_object {
+        if !merged_object.contains_key(key) {
+            return Err(format!("Неизвестное поле конфигурации: {}", key));
+        }
+        merged_object.insert(key.clone(), value.clone());
+    }
+
+    let validated: crate::shared::types::AppConfig = serde_json::from_value(merged)
+        .map_err(|e| format!("Некорректное значение конфигурации: {}", e))?;
+    crate::shared::config::save_config(&validated)?;
+
+    serde_json::to_value(validated)
+        .map_err(|e| format!("Ошибка сериализации сохранённого config: {}", e))
 }
