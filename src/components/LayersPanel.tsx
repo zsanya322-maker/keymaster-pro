@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Check, Edit2, Layers, Plus, Trash2, X } from 'lucide-react';
 import { useProfileStore } from '../store/profileStore';
-import { useAppStore } from '../stores/app-store';
+import { useAppStore } from '../store/appStore';
 import type { LayerMeta } from '../lib/types';
 import { ConfirmDialog } from './ConfirmDialog';
 
