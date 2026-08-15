@@ -1,1 +1,1 @@
-checkpoint-12: frontend architecture cleanup + simulator queue isolation tests
+checkpoint-13: final store cleanup + app shell split + simulator non-blocking contract
