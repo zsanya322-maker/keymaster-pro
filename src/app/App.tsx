@@ -260,12 +260,30 @@ function App() {
       return
     }
 
-    if (intent.type === 'restartAdmin') {
-      await invoke('restart_as_admin')
-      return
-    }
+    try {
+      // Любой системный переход обязан сначала дописать последний debounced
+      // пакет scale/fontSize/rowPadding. Так tray/крестик имеют ту же гарантию,
+      // что и Restart из Settings.
+      await useAppStore.getState().flushConfig()
 
-    await invoke('quit_app')
+      if (intent.type === 'restartAdmin') {
+        await invoke('restart_as_admin')
+        return
+      }
+
+      await invoke('quit_app')
+    } catch (error) {
+      const message = errorMessage(error)
+      showToast(
+        intent.type === 'restartAdmin'
+          ? t('settings.toast_admin_restart_failed', {
+              error: message,
+              defaultValue: `Не удалось перезапустить от Администратора: ${message}`,
+            })
+          : `Не удалось завершить приложение: ${message}`,
+        'error',
+      )
+    }
   }
 
   const requestShellIntent = (intent: ShellIntent) => {
