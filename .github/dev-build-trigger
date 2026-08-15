@@ -1,1 +1,1 @@
-checkpoint-6: atomic profiles, backend mutation guards, profile tests, IPC timeout, deterministic settings restart
+checkpoint-7: shutdown ack ordering, default-profile invariants, safe startup profile recovery
