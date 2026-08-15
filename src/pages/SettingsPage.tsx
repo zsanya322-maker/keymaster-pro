@@ -158,7 +158,14 @@ export function SettingsPage() {
 
       setUpdateStatus(t('settings.updater_installed'));
       window.setTimeout(() => {
-        invoke('restart_app').catch(() => triggerToast(t('settings.toast_restart_failed'), 'error'));
+        void (async () => {
+          try {
+            await useAppStore.getState().flushConfig();
+            await invoke('restart_app');
+          } catch {
+            triggerToast(t('settings.toast_restart_failed'), 'error');
+          }
+        })();
       }, 1500);
     } catch (error: unknown) {
       triggerToast(t('settings.toast_install_failed'), 'error');
@@ -173,8 +180,11 @@ export function SettingsPage() {
     setDaemonBusy(true);
     try {
       if (daemonConnected) {
-        await invoke('stop_daemon');
-        await new Promise((resolve) => window.setTimeout(resolve, 450));
+        const stopped = await invoke<{ success?: boolean; message?: string }>('stop_daemon');
+        if (stopped?.success === false) {
+          triggerToast(stopped.message || t('rules.toast_daemon_stop_failed'), 'error');
+          return;
+        }
       }
       await invoke('spawn_daemon');
       triggerToast(t('settings.toast_daemon_start_requested'), 'success');
@@ -187,6 +197,7 @@ export function SettingsPage() {
 
   const handleRestartAsAdmin = async () => {
     try {
+      await useAppStore.getState().flushConfig();
       await invoke('restart_as_admin');
     } catch (error: unknown) {
       triggerToast(t('settings.toast_admin_restart_failed', { error: String(error) }), 'error');
