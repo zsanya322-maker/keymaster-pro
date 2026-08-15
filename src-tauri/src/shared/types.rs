@@ -36,7 +36,7 @@ impl Default for AppConfig {
     fn default() -> Self {
         Self {
             language: "en".to_string(),
-            theme: "dark".to_string(),
+            theme: "light".to_string(),
             autostart: false,
             minimize_to_tray: true,
             kb_hook_enabled: true,
