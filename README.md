@@ -4,248 +4,266 @@
 
 # ⌨️ KeyMaster Pro
 
-**A modern keyboard & mouse automation utility for Windows**
+**Keyboard and mouse remapping, macros, layers and text expansion for Windows**
 
 [![License: FCL](https://img.shields.io/badge/License-FCL-blue.svg)](LICENSE)
 [![Platform: Windows](https://img.shields.io/badge/Platform-Windows%2010%2F11-0078D4.svg)](https://github.com/zsanya322-maker/keymaster-pro)
-[![Built with Tauri](https://img.shields.io/badge/Built%20with-Tauri%20v2-FFC131.svg)](https://v2.tauri.app)
-[![Rust](https://img.shields.io/badge/Rust-edition%202021-CE422B.svg)](https://www.rust-lang.org)
-[![React](https://img.shields.io/badge/React-19-61DAFB.svg)](https://react.dev)
-[![winget](https://img.shields.io/badge/Install%20with-winget-0078D4.svg)](https://github.com/microsoft/winget-pkgs/pull/390087)
+[![Current stable](https://img.shields.io/badge/stable-v0.2.4-2f855a.svg)](https://github.com/zsanya322-maker/keymaster-pro/releases/latest)
+[![Built with Tauri](https://img.shields.io/badge/Tauri-v2-FFC131.svg)](https://v2.tauri.app)
 
-[📥 Download](#-download) · [✨ Features](#-features) · [🛠️ Build](#%EF%B8%8F-build-from-source) · [💬 Telegram (RU)](https://t.me/KeyM_Pro) · [🐛 Report Bug](https://github.com/zsanya322-maker/keymaster-pro/issues)
+[📥 Download](#download) · [✅ Current capabilities](#current-capabilities-v024) · [🗺️ Roadmap](ROADMAP.md) · [📝 Changelog](CHANGELOG.md) · [🐛 Issues](https://github.com/zsanya322-maker/keymaster-pro/issues)
 
 </div>
 
 ---
 
-## 📝 Description
+## What is KeyMaster Pro?
 
-**KeyMaster Pro** is a powerful desktop application for Windows built around a single idea: **everything is a rule**. Instead of juggling separate screens for remapping, macros, layers, and text expansions, you build one rule at a time in a unified **Rule Builder**:
+KeyMaster Pro is a Windows desktop input-automation utility built around one rule model:
 
+```text
+TRIGGER + CONDITIONS -> ACTIONS
 ```
-[ TRIGGER ]  +  [ CONDITIONS ]  →  [ ACTIONS ]
+
+A rule can react to a keyboard key, supported mouse button, Tap-Hold gesture or typed text. Conditions can limit it to an active layer or foreground window. Actions can remap input, type text, run a recorded macro, control layers, manage windows/media/system actions, or launch/focus an application.
+
+The application uses a **Rust daemon** for low-level Windows hooks and rule execution, with a **Tauri + React** GUI for editing profiles and rules. The GUI and daemon communicate through Named Pipes / JSON-RPC.
+
+> **Documentation rule:** this README describes the current stable release only. Planned features and partially implemented ideas belong in [`ROADMAP.md`](ROADMAP.md).
+
+---
+
+## Current capabilities (v0.2.4)
+
+### Triggers
+
+- **Keyboard Key Down / Key Up** — one Windows virtual-key code per trigger.
+- **Mouse Button Down / Up** — Left, Right, Middle, X1 and X2.
+- **Tap-Hold** — one action set for tap and another for hold, with per-rule timeout.
+- **Typed Text** — static abbreviation/sequence matching.
+
+### Conditions
+
+- **Layer Active**.
+- **Window Match** by foreground process name and/or window-title substring.
+  - When both fields are present in the current schema, matching uses **OR / ANY** semantics.
+
+### Actions
+
+- remap a keyboard key;
+- remap a supported mouse button;
+- type text;
+- run a recorded keyboard/mouse macro;
+- toggle or hold a layer;
+- volume mute/up/down;
+- media play/pause/next/previous/stop;
+- window snap/minimize/maximize/close;
+- launch an application;
+- focus a process/window by process name or title;
+- sleep the PC or turn the monitor off.
+
+### Macros
+
+- keyboard and mouse recording;
+- mouse movement and scroll steps;
+- per-step recorded delays;
+- optional cursor-position restore after playback;
+- macro playback runs on a separate worker/queue so a long macro `Delay` does **not** block ordinary immediate remaps.
+
+### Layers and profiles
+
+- create and use toggle/hold layers;
+- add `Layer Active` conditions to rules;
+- create, rename/save, delete, import, export and manually activate profiles;
+- safe profile/config persistence with schema versioning, migration, backups, atomic writes and damaged-profile recovery.
+
+### Desktop application
+
+- compact classic-style Windows shell with inline rule editor;
+- Russian and English UI;
+- light/dark themes;
+- system tray and Windows autostart;
+- in-app signed updater through GitHub Releases;
+- guarded unsaved-rule drafts during navigation, exit, restart and update;
+- single-instance GUI and hardened daemon lifecycle/IPC.
+
+---
+
+## Important current limitations
+
+The following items are **planned, not shipped as complete features in v0.2.4**:
+
+- first-class modifier combinations such as `Ctrl + Shift + F2`;
+- combination-to-combination remaps such as `Ctrl+Shift+F2 -> Alt+Tab`;
+- complete friendly naming/picking for the practical Windows VK set;
+- mouse wheel / horizontal wheel / double-click as rule triggers;
+- macro speed, repeat count, repeat-while-held, cancel/emergency-stop and editor test playback;
+- automatic app-based profile switching and manual-lock behavior;
+- Virtual Desktop matching;
+- date/time/clipboard variables, delimiters and undo in Text Expansion;
+- folders/groups/tree organization for rules.
+
+### Virtual Desktop compatibility note
+
+`VirtualDesktop` still exists in the serialized schema so older/imported profiles can be read, but the runtime matcher is not implemented. The normal editor does not offer it as a new condition. Legacy Virtual Desktop conditions compile **fail-closed** rather than silently becoming global rules.
+
+See [`ROADMAP.md`](ROADMAP.md) for the implementation order, data-model direction, migrations and acceptance criteria for these features.
+
+---
+
+## Architecture
+
+```text
+┌─────────────────────────────┐
+│ GUI: Tauri + React/TypeScript│
+│ rules, profiles, settings   │
+└──────────────┬──────────────┘
+               │ Named Pipes / JSON-RPC
+┌──────────────▼──────────────┐
+│ Rust daemon                 │
+│ compiler + engine + context │
+└───────────┬─────────┬───────┘
+            │         │
+       keyboard     mouse
+       LL hook       LL hook
+            │         │
+       immediate   macro worker
+       simulator   (isolated delays)
 ```
 
-A key press, mouse click, typed abbreviation, or tap-hold fires a rule. Optional conditions (active window, active layer) decide whether it runs. Then one or more actions execute — remap a key, run a macro, snap a window, control media, and more.
+Key architectural guarantees carried forward from v0.2.4:
 
-Built with **Rust + Tauri v2 + React 19**, it runs at the OS level using `SetWindowsHookEx` to intercept and process input in real time, with **zero input logging** and a tiny memory footprint (~23 MB RAM, <1% CPU).
-
-> Looking for a **free, source-available alternative** to AutoHotkey, PowerToys Keyboard Manager, or Key Manager? You found it.
-
----
-
-## ⚖️ How it compares
-
-KeyMaster Pro is the only Windows tool that combines a **unified rule system** (trigger → condition → action) with a no-code GUI — covering remapping, macros, layers, text expansion, window management, and per-app profiles in one place.
-
-| Feature | KeyMaster Pro | PowerToys KBM | AutoHotkey | kanata | SharpKeys | Espanso |
-|---|:---:|:---:|:---:|:---:|:---:|:---:|
-| Unified Rule Builder (no code) | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
-| Key remapping | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ |
-| Mouse remapping | ✅ | ❌ | ✅ | ⚠️ | ❌ | ❌ |
-| Macro recorder (key + mouse) | ✅ | ❌ | ✅ | ⚠️ | ❌ | ❌ |
-| Text expansions | ✅ | ❌ | ✅ | ❌ | ❌ | ✅ |
-| Layers (toggle + hold, QMK-style) | ✅ | ❌ | ⚠️ | ✅ | ❌ | ❌ |
-| Tap-Hold (home-row mods) | ✅ | ❌ | ⚠️ | ✅ | ❌ | ❌ |
-| Per-app conditions (window match) | ✅ | ❌ | ⚠️ | ⚠️ | ❌ | ❌ |
-| Window management (snap/min/max) | ✅ | ❌ | ✅ | ❌ | ❌ | ❌ |
-| Media keys & volume control | ✅ | ❌ | ✅ | ❌ | ❌ | ❌ |
-| Launch app / focus window | ✅ | ❌ | ✅ | ❌ | ❌ | ❌ |
-| System actions (sleep, monitor off) | ✅ | ❌ | ✅ | ❌ | ❌ | ❌ |
-| Modern UI (Tauri/React) | ✅ | ✅ | ❌ | ❌ | ⚠️ | ⚠️ |
-| Price | Free | Free | Free | Free | Free | Free → $4/mo |
-
-> [!NOTE]
-> PowerToys users have requested per-app remapping ([#6756](https://github.com/microsoft/PowerToys/issues/6756)), mouse remapping ([#1475](https://github.com/microsoft/PowerToys/issues/1475)), and text expansion ([#5074](https://github.com/microsoft/PowerToys/issues/5074)) for **years** — KeyMaster Pro ships with all three today, composable inside a single rule.
+- one daemon owns the Named Pipe/input engines at a time;
+- unsupported conditions must not fail open;
+- low-level hooks stay free of slow file/network work;
+- macro delays do not block the immediate-remap queue;
+- profile/config migrations are non-destructive and reject unsupported future schemas.
 
 ---
 
-<!-- 📸 Screenshot will be added after the 0.2.0 release -->
+## Download
 
-## ✨ Features
+### Installer (recommended)
 
-Everything lives inside the **Rule Builder** — a single modal where you compose a rule from three parts. No more flipping between disconnected screens.
+Open [**GitHub Releases**](https://github.com/zsanya322-maker/keymaster-pro/releases/latest) and download:
 
-### 🎯 Triggers (what fires a rule)
-- **Key Down / Key Up** — any keyboard key or shortcut
-- **Mouse Down / Mouse Up** — left, right, middle, X1, X2 buttons
-- **Tap-Hold** — tap for one action, hold for another (home-row mods, kanata-style)
-- **Typed Text** — type an abbreviation to fire an expansion
+```text
+KeyMaster-Pro_<version>_x64-setup.exe
+```
 
-### ⚡ Actions (what happens when a rule fires)
-| Category | Actions |
-|---|---|
-| **Remap** | Remap Key, Remap Mouse Button |
-| **Input** | Type Text, Run Macro (recorded key + mouse steps with delays) |
-| **Layers** | Toggle Layer, Hold Layer (while key is held) |
-| **System** | Volume (mute / up / down), Media Key (play / next / prev / stop), Sleep, Monitor Off |
-| **Windows** | Snap left / right / center, Minimize, Maximize, Close, Focus Process Window |
-| **Launch** | Launch Application |
+The installed application can then update itself through the built-in signed updater.
 
-### 🧩 Conditions (optional — when a rule should apply)
-- **Layer Active** — rule only fires while a specific layer is on
-- **Window Match** — rule only fires when the active window matches a process name and/or window title
-- **Virtual Desktop** — rule scoped to a specific virtual desktop
+### MSI
 
-### 🔄 Per-App Profiles
-Group rules into **profiles** that auto-switch based on the focused application's window. Different rules for your editor, browser, and games — automatically.
+An x64 MSI is also attached to public releases for users who prefer MSI deployment.
 
-### 🔥 Layers (QMK-style)
-Toggle or hold a layer to completely change what your keys do — the same keycap can do different things in different layers. Layers are first-class citizens: toggle them from any rule or hold a key to keep a layer active only while pressed.
+### WinGet
 
-### 🚀 Two-Process Architecture
-A lightweight background **daemon** (Rust) handles the low-level input hooks and rule execution, while the **GUI** (React) stays responsive. Kill the UI and your remaps keep working.
+The repository contains a WinGet publishing workflow. If the package is available in your WinGet source, the package ID is:
 
-### Plus
-| Feature | Description |
-|---------|-------------|
-| 🧙 **Onboarding Wizard** | Built-in starter examples for new users — get a working remap in seconds |
-| 📊 **Real-time Stats** | CPU, RAM, latency, and keystroke counter in the status bar |
-| 🔔 **Auto-updates** | Update in-app via Tauri updater (or `winget upgrade`) |
-| 🌐 **Multilingual** | English and Russian interface (i18next) |
-| 🎨 **Modern UI** | Radix UI + TailwindCSS + Lucide icons, dark/light theme |
-| 📝 **Per-session Logs** | Debug logs for diagnosing rule behavior |
-| 🛡️ **System Tray** | Minimize to tray, autostart with Windows |
-
----
-
-## 📥 Download
-
-### Option A: WinGet (recommended)
-
-Install KeyMaster Pro with a single command on Windows 10/11:
-
-```bash
+```powershell
 winget install KeyMasterPro.KeyMasterPro
 ```
 
-- Automatically updates with `winget upgrade KeyMasterPro.KeyMasterPro`
-- No manual download needed — WinGet handles everything
+### Portable build
 
-> Requires [WinGet](https://github.com/microsoft/winget-cli) (pre-installed on Windows 10 1709+ and Windows 11).
-
-### Option B: Installer
-
-➡️ Go to [**Releases**](https://github.com/zsanya322-maker/keymaster-pro/releases) and download `KeyMaster-Pro_x.x.x_x64-setup.exe`
-
-- No dependencies required — just download and run
-- WebView2 Runtime is pre-installed on Windows 10/11 (auto-downloaded if missing)
-- The installer supports **auto-updates** via GitHub
-
-### Option C: Portable
-
-Soon — a portable `.zip` version is planned for a future release.
+A deliberate public portable ZIP is still planned. Dev/checkpoint standalone binaries are **not** treated as the stable portable distribution yet.
 
 ---
 
-## 🛠️ Build from Source
+## Build from source
 
 ### Prerequisites
 
-1. **Node.js** 18+ and **pnpm** (`npm i -g pnpm`)
-2. **Rust** 1.70+ ([rustup.rs](https://rustup.rs))
-3. **Visual Studio Build Tools** — workload: `Microsoft.VisualStudio.Workload.VCTools`
-   - Download: https://visualstudio.microsoft.com/visual-cpp-build-tools/
+- Windows 10/11 x64;
+- Node.js 22 recommended;
+- pnpm 9+;
+- current stable Rust toolchain (MSVC target);
+- Visual Studio Build Tools with C++ build tools.
 
-### Steps
+### Commands
 
-```bash
-# Clone
+```powershell
 git clone https://github.com/zsanya322-maker/keymaster-pro.git
 cd keymaster-pro
-
-# Install frontend dependencies
 pnpm install
-
-# Run in dev mode
 pnpm tauri dev
+```
 
-# Build production binary (.exe)
+Production build:
+
+```powershell
 pnpm tauri build
 ```
 
-The built installer will appear in `src-tauri/target/release/bundle/nsis/`.
+The Windows bundles are generated under:
+
+```text
+src-tauri/target/release/bundle/
+```
+
+Repository validation used for release candidates includes:
+
+```powershell
+pnpm build
+pnpm lint
+cargo check --manifest-path src-tauri/Cargo.toml
+cargo test --manifest-path src-tauri/Cargo.toml
+```
 
 ---
 
-## 🏗️ Tech Stack
+## Technology stack
 
 | Layer | Technology |
-|-------|-----------|
-| **Backend** | Rust + Tauri v2 |
-| **Frontend** | React 19 + TypeScript 5 + Vite 6 |
-| **UI** | Radix UI + TailwindCSS 4 + Lucide Icons |
-| **State** | Zustand 5 |
-| **i18n** | i18next (EN + RU) |
-| **Input Hooks** | SetWindowsHookEx (`WH_KEYBOARD_LL`, `WH_MOUSE_LL`) via windows-rs |
-| **IPC** | Named Pipes + JSON-RPC 2.0 |
-| **Storage** | Local JSON files (`%APPDATA%\KeyMaster Pro\`) |
+|---|---|
+| Backend / desktop shell | Rust + Tauri v2 |
+| Frontend | React 19 + TypeScript + Vite 6 |
+| UI styling/icons | Tailwind CSS 4 + Lucide |
+| State | Zustand |
+| i18n | i18next (EN + RU) |
+| Input hooks | `SetWindowsHookEx` (`WH_KEYBOARD_LL`, `WH_MOUSE_LL`) via windows-rs |
+| Context tracking | foreground-window WinEvent hook |
+| IPC | Named Pipes + JSON-RPC 2.0 |
+| Storage | local JSON profile/config files |
 
 ---
 
-## 🛡️ Security & False Positives
+## Privacy and input handling
 
-Since KeyMaster Pro uses low-level Win32 APIs to intercept and remap input (`SetWindowsHookEx`), some antivirus software may flag it as a potential keylogger or input injection tool. **This is a false positive.**
+KeyMaster Pro needs low-level keyboard and mouse hooks to remap input. That can look suspicious to security software because the same Windows APIs can also be used by keyloggers.
 
-**Our security commitments:**
+The project is designed to process input events in memory for matching/remapping. It does not intentionally persist a keystroke history. Profiles and settings are local JSON files; the built-in updater contacts GitHub Releases when checking/downloading updates.
 
-1. **No input logging** — The app **does not save, record, or transmit** your keystrokes. All processing happens in real time, in memory.
-2. **Offline-first** — All configurations are stored locally as JSON in `%APPDATA%`. No cloud, no telemetry.
-3. **No hidden network activity** — The only network request is checking for updates via HTTPS to GitHub.
-
-*If Windows Defender or your antivirus blocks the app, add `KeyMasterPro.exe` to the exclusions list.*
+Because low-level input interception and synthetic input are core functionality, antivirus false positives are possible. Review the source and release artifacts if that matters for your environment.
 
 ---
 
-## 🗺️ Roadmap
+## Development roadmap
 
-| Status | Feature |
-|--------|---------|
-| ✅ Done | Unified Rules Engine & Rule Builder, key/mouse remapping, macros, layers (toggle/hold), tap-hold, text expansions, per-app profiles, window management, media keys & volume, system actions, onboarding wizard, system tray, autostart, dark/light theme, auto-updates, per-session logs, winget distribution |
-| 🔄 Next | Portable .zip build, code signing certificate, settings UI polish |
-| 📋 Planned | Rhai scripting engine, browser extension, plugin system |
+The next core-completion sequence is maintained in [`ROADMAP.md`](ROADMAP.md):
 
----
+- **0.3.0** — modifier/key combinations, rule-model v2, full key picker, tree foundation;
+- **0.3.1** — mouse trigger completion and macro playback/control;
+- **0.3.2** — profiles/auto-switch/manual lock, richer context rules, Virtual Desktop;
+- **0.3.3** — Text Expansion completion;
+- **0.4.0** — Leader Keys, Sequences, ordinary-key Chords and Mouse Gestures.
 
-## 🤝 Contributing
-
-Contributions are welcome! Here's how you can help:
-
-1. Fork the repo
-2. Create a feature branch: `git checkout -b feature/amazing-feature`
-3. Commit: `git commit -m 'Add amazing feature'`
-4. Push: `git push origin feature/amazing-feature`
-5. Open a Pull Request
-
-Found a bug? [Open an issue](https://github.com/zsanya322-maker/keymaster-pro/issues).
+Scripting, browser automation, plugins, cloud sync, AI and marketplace work are intentionally deferred until the core input model is complete and stable.
 
 ---
 
-## 💬 Community
+## Contributing / bugs
 
-- 📱 **Telegram:** [@KeyM_Pro](https://t.me/KeyM_Pro)
-- 🐛 **Bug reports:** [GitHub Issues](https://github.com/zsanya322-maker/keymaster-pro/issues)
-- 💬 **Discussions:** [GitHub Discussions](https://github.com/zsanya322-maker/keymaster-pro/discussions)
+- Bugs: [GitHub Issues](https://github.com/zsanya322-maker/keymaster-pro/issues)
+- Roadmap: [`ROADMAP.md`](ROADMAP.md)
+- Shipped changes: [`CHANGELOG.md`](CHANGELOG.md)
+- Telegram (RU): [@KeyM_Pro](https://t.me/KeyM_Pro)
 
----
-
-## 📜 License
-
-This project is licensed under the **Fair Core License (FCL)** — the source code is open, but protected from competitive use. See [LICENSE](LICENSE) for details.
-
-On January 1, 2030, the license automatically converts to MIT.
+When contributing a feature that changes rules or profiles, treat **schema + migration + compiler/runtime + UI + tests** as one unit. A UI control alone does not make a feature complete.
 
 ---
 
-<div align="center">
+## License
 
-<sub>Built with ❤️ using Rust, Tauri, and React</sub>
-
-<sub>
-
-**Keywords:** keyboard remapping Windows, key rebinding tool, AutoHotkey alternative, PowerToys alternative, macro recorder, text expansion, input automation, Tauri desktop app, Rust Windows utility, keyboard macro, mouse remapping, key mapping software
-
-</sub>
-
-</div>
+KeyMaster Pro is licensed under the **Fair Core License (FCL)**. See [`LICENSE`](LICENSE) for the exact terms and conversion date.
