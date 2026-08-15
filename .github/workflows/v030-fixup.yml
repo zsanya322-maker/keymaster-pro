@@ -1,0 +1,127 @@
+name: v0.3.0 Compatibility Fixup
+
+on:
+  push:
+    branches:
+      - dev/v0.3.0-rule-model-v2
+
+permissions:
+  contents: write
+
+jobs:
+  fixup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply asserted fixups
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace(path, old, new, count=None):
+              p = Path(path)
+              text = p.read_text(encoding='utf-8')
+              found = text.count(old)
+              if count is not None and found != count:
+                  raise SystemExit(f'{path}: expected {count} matches, got {found}')
+              if found == 0:
+                  raise SystemExit(f'{path}: pattern not found: {old[:100]!r}')
+              p.write_text(text.replace(old, new), encoding='utf-8')
+
+          replace(
+              'src/pages/RulesPage.tsx',
+              "function isInvalidMouseTrigger(trigger: FrontendTrigger): boolean {\n  return isMouseTrigger(trigger) && (trigger.code < 1 || trigger.code > 5);\n}",
+              "function isInvalidMouseTrigger(trigger: FrontendTrigger): boolean {\n  return (trigger.type === 'mouseDown' || trigger.type === 'mouseUp')\n    && (trigger.code < 1 || trigger.code > 5);\n}",
+              1,
+          )
+          replace(
+              'src/pages/RulesPage.tsx',
+              """                        onChange={(chord) => setDraftRule({
+                          ...draftRule,
+                          trigger: { ...draftRule.trigger, ...chord },
+                        })}""",
+              """                        onChange={(chord) => setDraftRule({
+                          ...draftRule,
+                          trigger: {
+                            type: draftRule.trigger.type,
+                            code: chord.code,
+                            modifiers: chord.modifiers,
+                          },
+                        })}""",
+              1,
+          )
+          replace(
+              'src/pages/RulesPage.tsx',
+              """                          onChange={(chord) => setDraftRule({
+                            ...draftRule,
+                            trigger: { ...draftRule.trigger, code: chord.code },
+                          })}""",
+              """                          onChange={(chord) => setDraftRule({
+                            ...draftRule,
+                            trigger: {
+                              type: 'tapHoldKeyDown',
+                              code: chord.code,
+                              timeoutMs: draftRule.trigger.type === 'tapHoldKeyDown'
+                                ? draftRule.trigger.timeoutMs
+                                : 200,
+                            },
+                          })}""",
+              1,
+          )
+          replace(
+              'src/pages/RulesPage.tsx',
+              """                        onChange={(event) => setDraftRule({
+                          ...draftRule,
+                          trigger: { ...draftRule.trigger, code: Number.parseInt(event.target.value, 10) || 1 },
+                        })}""",
+              """                        onChange={(event) => setDraftRule({
+                          ...draftRule,
+                          trigger: {
+                            type: draftRule.trigger.type,
+                            code: Number.parseInt(event.target.value, 10) || 1,
+                          },
+                        })}""",
+              1,
+          )
+
+          replace(
+              'src-tauri/src/daemon/runner.rs',
+              """            rules: vec![],
+            layers: vec![],
+        };""",
+              """            rules: vec![],
+            layers: vec![],
+            folders: vec![],
+        };""",
+              1,
+          )
+
+          replace(
+              'src-tauri/src/shared/persistence.rs',
+              """            rules: vec![],
+            layers: vec![],
+        };""",
+              """            rules: vec![],
+            layers: vec![],
+            folders: vec![],
+        };""",
+              2,
+          )
+          replace(
+              'src-tauri/src/shared/persistence.rs',
+              'Some(1)',
+              'Some(PROFILE_SCHEMA_VERSION as u64)',
+              2,
+          )
+          PY
+      - name: Commit fixups
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src src-tauri
+          git commit -m "fix(0.3.0): complete schema v2 compatibility [v030-fixup]"
+          git push origin HEAD:dev/v0.3.0-rule-model-v2
