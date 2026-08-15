@@ -17,6 +17,17 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: dev/v0.3.1-mouse-macros
+      - name: Adapt staging script to current ActionEditor
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('scripts/v031_macro_model.py')
+          s = p.read_text(encoding='utf-8')
+          old = '''    "    case 'runMacro': return { type, steps: [] };\\n",\n    "    case 'runMacro': return { type, steps: [], playback: { speed: 1, repeatCount: 1, repeatWhileHeld: false } };\\n",\n'''
+          new = '''    "      onChange({ type, steps: [] });\\n",\n    "      onChange({ type, steps: [], playback: { speed: 1, repeatCount: 1, repeatWhileHeld: false } });\\n",\n'''
+          if old not in s:
+              raise SystemExit('staging ActionEditor marker block not found')
+          p.write_text(s.replace(old, new, 1), encoding='utf-8')
       - run: python scripts/v031_macro_model.py
       - shell: bash
         run: |
