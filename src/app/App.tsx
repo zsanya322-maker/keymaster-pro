@@ -15,7 +15,6 @@ import {
   Layers,
   PanelLeft,
   PanelLeftClose,
-  Pencil,
   Play,
   Plus,
   Search,
@@ -33,8 +32,9 @@ import { LayersPanel } from '../components/LayersPanel'
 import { UpdateBanner } from '../components/UpdateBanner'
 import { OnboardingWizard } from '../components/OnboardingWizard'
 import { ConfirmDialog } from '../components/ConfirmDialog'
+import { TextPromptDialog } from '../components/TextPromptDialog'
 
-const APP_VERSION = '0.2.0'
+const APP_VERSION = '0.2.1'
 
 interface DaemonStatus {
   connected: boolean
@@ -82,6 +82,8 @@ function App() {
   const [activeMenu, setActiveMenu] = useState<string | null>(null)
   const [isInitialized, setIsInitialized] = useState(false)
   const [profileToDelete, setProfileToDelete] = useState<{ id: string; name: string } | null>(null)
+  const [createProfileOpen, setCreateProfileOpen] = useState(false)
+  const [clearRulesOpen, setClearRulesOpen] = useState(false)
   const [toasts, setToasts] = useState<Toast[]>([])
   const [lastConnectionState, setLastConnectionState] = useState<boolean | null>(null)
   const [shellSearch, setShellSearch] = useState('')
@@ -115,9 +117,7 @@ function App() {
   useEffect(() => {
     const handleToastEvent = (event: Event) => {
       const customEvent = event as CustomEvent<{ message: string; type: Toast['type'] }>
-      if (customEvent.detail) {
-        showToast(customEvent.detail.message, customEvent.detail.type)
-      }
+      if (customEvent.detail) showToast(customEvent.detail.message, customEvent.detail.type)
     }
     window.addEventListener('keymaster-toast', handleToastEvent)
     return () => window.removeEventListener('keymaster-toast', handleToastEvent)
@@ -148,90 +148,89 @@ function App() {
     const init = async () => {
       await loadConfig()
       const savedLang = useAppStore.getState().config.language
-      if (savedLang && savedLang !== i18n.language) {
-        await i18n.changeLanguage(savedLang)
-      }
+      if (savedLang && savedLang !== i18n.language) await i18n.changeLanguage(savedLang)
       setIsInitialized(true)
     }
     void init()
   }, [loadConfig, i18n])
 
   useEffect(() => {
-    let retryCount = 0
-    const maxRetries = 5
+    let disposed = false
+    let pollTimer: number | null = null
 
     async function ensureProfilesLoaded() {
       const state = useProfileStore.getState()
-      if (state.profiles.length === 0 || !state.activeProfileId) {
-        await state.loadProfiles()
+      if (state.profiles.length === 0 || !state.activeProfileId) await state.loadProfiles()
+    }
+
+    async function refreshDaemonStatus(): Promise<boolean> {
+      try {
+        const status = await invoke<DaemonStatus>('daemon_status')
+        if (disposed) return false
+
+        const connected = Boolean(status?.connected)
+        setDaemonConnected(connected)
+
+        if (!connected) return false
+
+        await ensureProfilesLoaded()
+        if (disposed) return false
+
+        const details = status.details
+        if (details) {
+          useAppStore.setState({
+            diagnostics: {
+              keystrokes: details.keystrokes_processed || 0,
+              cpu: details.cpu_usage || 0,
+              ram: details.memory_usage_mb || 0,
+              latency: (details.last_latency_us || 0) / 1000,
+            },
+          })
+
+          if (details.active_profile_id) {
+            const currentActive = useProfileStore.getState().activeProfileId
+            if (currentActive !== details.active_profile_id) {
+              useProfileStore.setState({ activeProfileId: details.active_profile_id })
+            }
+          }
+        }
+        return true
+      } catch {
+        if (!disposed) setDaemonConnected(false)
+        return false
       }
     }
 
-    async function checkDaemon() {
-      try {
-        const status = await invoke<DaemonStatus>('daemon_status')
-        if (status?.connected) {
-          setDaemonConnected(true)
-          await ensureProfilesLoaded()
-          return true
-        }
-      } catch {
-        // Retry below.
-      }
-      return false
+    async function poll() {
+      await refreshDaemonStatus()
+      if (!disposed) pollTimer = window.setTimeout(() => void poll(), 3000)
     }
 
     async function initialConnect() {
-      if (await checkDaemon()) return
+      if (await refreshDaemonStatus()) {
+        if (!disposed) pollTimer = window.setTimeout(() => void poll(), 3000)
+        return
+      }
 
-      while (retryCount < maxRetries) {
-        retryCount += 1
+      for (let attempt = 0; attempt < 5 && !disposed; attempt += 1) {
         try {
           await invoke('spawn_daemon')
         } catch {
-          // Retry after a short wait.
+          // Retry below.
         }
         await new Promise(resolve => setTimeout(resolve, 1500))
-        if (await checkDaemon()) return
+        if (await refreshDaemonStatus()) break
       }
-      setDaemonConnected(false)
+
+      if (!disposed) pollTimer = window.setTimeout(() => void poll(), 3000)
     }
 
     void initialConnect()
 
-    const interval = setInterval(async () => {
-      try {
-        const status = await invoke<DaemonStatus>('daemon_status')
-        const connected = Boolean(status?.connected)
-        setDaemonConnected(connected)
-
-        if (connected) {
-          await ensureProfilesLoaded()
-          const details = status.details
-          if (details) {
-            useAppStore.setState({
-              diagnostics: {
-                keystrokes: details.keystrokes_processed || 0,
-                cpu: details.cpu_usage || 0,
-                ram: details.memory_usage_mb || 0,
-                latency: (details.last_latency_us || 0) / 1000,
-              },
-            })
-
-            if (details.active_profile_id) {
-              const currentActive = useProfileStore.getState().activeProfileId
-              if (currentActive !== details.active_profile_id) {
-                useProfileStore.setState({ activeProfileId: details.active_profile_id })
-              }
-            }
-          }
-        }
-      } catch {
-        setDaemonConnected(false)
-      }
-    }, 3000)
-
-    return () => clearInterval(interval)
+    return () => {
+      disposed = true
+      if (pollTimer !== null) window.clearTimeout(pollTimer)
+    }
   }, [setDaemonConnected])
 
   useEffect(() => {
@@ -291,12 +290,6 @@ function App() {
       showToast(`Профиль “${activeProfile.name}” экспортирован`, 'success')
     } catch (error) {
       showToast(`Ошибка экспорта: ${errorMessage(error)}`, 'error')
-    }
-  }
-
-  const handleClearMappings = () => {
-    if (activeProfile && confirm('Удалить все правила активного профиля?')) {
-      void useProfileStore.getState().saveProfile({ ...activeProfile, rules: [] })
     }
   }
 
@@ -365,11 +358,10 @@ function App() {
   const menuButtonClass = 'px-2.5 h-7 text-[12px] text-app-text hover:bg-app-surface-hover cursor-pointer'
   const menuPanelClass = 'absolute left-0 top-full mt-px min-w-44 bg-app-bg border border-app-border shadow-lg py-1 z-50'
   const menuItemClass = 'block w-full px-3 py-1.5 text-left text-xs text-app-text hover:bg-app-surface-hover cursor-pointer'
-  const toolButtonClass = 'h-8 w-8 border border-app-border bg-app-bg rounded-md flex items-center justify-center text-app-muted hover:text-app-text hover:bg-app-surface cursor-pointer disabled:opacity-35 disabled:cursor-default'
+  const toolButtonClass = 'h-8 w-8 border border-app-border bg-app-bg flex items-center justify-center text-app-muted hover:text-app-text hover:bg-app-surface cursor-pointer disabled:opacity-35 disabled:cursor-default'
 
   return (
     <div className="flex flex-col h-screen bg-app-bg text-app-text select-none font-sans overflow-hidden" style={rootStyle}>
-      {/* Classic compact menu bar */}
       <div className="h-8 flex items-center px-2 bg-app-bg border-b border-app-border relative z-50 shrink-0">
         <div className="relative" onClick={event => event.stopPropagation()}>
           <button className={menuButtonClass} onClick={() => setActiveMenu(activeMenu === 'file' ? null : 'file')}>
@@ -391,8 +383,8 @@ function App() {
           </button>
           {activeMenu === 'edit' && (
             <div className={menuPanelClass}>
-              <button className={menuItemClass} onClick={() => { if (isRulesWorkspace) emitRuleCommand('edit'); setActiveMenu(null) }}>{t('rules.edit_rule', 'Редактировать правило')}</button>
-              <button className={`${menuItemClass} text-app-danger`} onClick={() => { if (isRulesWorkspace) emitRuleCommand('delete'); setActiveMenu(null) }}>{t('rules.delete_rule', 'Удалить правило')}</button>
+              <button className={menuItemClass} disabled={!isRulesWorkspace} onClick={() => { if (isRulesWorkspace) emitRuleCommand('add'); setActiveMenu(null) }}>{t('rules.add_rule', 'Добавить правило')}</button>
+              <button className={`${menuItemClass} text-app-danger disabled:opacity-40`} disabled={!isRulesWorkspace} onClick={() => { if (isRulesWorkspace) emitRuleCommand('delete'); setActiveMenu(null) }}>{t('rules.delete_rule', 'Удалить правило')}</button>
             </div>
           )}
         </div>
@@ -418,11 +410,7 @@ function App() {
             <div className={`${menuPanelClass} min-w-52`}>
               <button
                 className={`${menuItemClass} text-app-primary font-semibold flex items-center gap-2`}
-                onClick={async () => {
-                  const name = prompt(t('profiles_menu.new_profile_prompt', 'Введите имя нового профиля:'), 'Новый профиль')
-                  if (name?.trim()) await useProfileStore.getState().createProfile({ name: name.trim() })
-                  setActiveMenu(null)
-                }}
+                onClick={() => { setCreateProfileOpen(true); setActiveMenu(null) }}
               >
                 <Plus size={13} /> {t('profiles_menu.create_profile', 'Создать профиль')}
               </button>
@@ -459,7 +447,11 @@ function App() {
               <button className={menuItemClass} onClick={() => { void handleToggleDaemon(); setActiveMenu(null) }}>
                 {daemonConnected ? t('footer.daemon_stop', 'Остановить демон') : t('footer.daemon_start', 'Запустить демон')}
               </button>
-              <button className={`${menuItemClass} text-app-danger`} onClick={() => { handleClearMappings(); setActiveMenu(null) }}>
+              <button
+                className={`${menuItemClass} text-app-danger disabled:opacity-40`}
+                disabled={!activeProfile || activeProfile.rules.length === 0}
+                onClick={() => { setClearRulesOpen(true); setActiveMenu(null) }}
+              >
                 {t('menu.clear_mappings', 'Очистить правила')}
               </button>
             </div>
@@ -480,47 +472,43 @@ function App() {
         </div>
       </div>
 
-      {/* Reduced toolbar: only actions that are currently real */}
-      <div className="h-12 px-3 flex items-center gap-2 border-b border-app-border bg-app-surface/35 shrink-0">
+      <div className="h-11 px-3 flex items-center gap-1.5 border-b border-app-border bg-app-surface/35 shrink-0">
         <button className={toolButtonClass} onClick={toggleSidebar} title={sidebarOpen ? 'Скрыть панель' : 'Показать панель'}>
           {sidebarOpen ? <PanelLeftClose size={15} /> : <PanelLeft size={15} />}
         </button>
         <div className="w-px h-6 bg-app-border mx-0.5" />
         <button className={toolButtonClass} disabled={!isRulesWorkspace} onClick={() => emitRuleCommand('add')} title="Добавить правило">
-          <Plus size={16} className="text-app-success" />
-        </button>
-        <button className={toolButtonClass} disabled={!isRulesWorkspace} onClick={() => emitRuleCommand('edit')} title="Редактировать правило">
-          <Pencil size={14} />
+          <Plus size={15} className="text-app-success" />
         </button>
         <button className={toolButtonClass} disabled={!isRulesWorkspace} onClick={() => emitRuleCommand('delete')} title="Удалить правило">
-          <Trash2 size={14} className="text-app-danger" />
+          <Trash2 size={13} className="text-app-danger" />
         </button>
         <div className="w-px h-6 bg-app-border mx-0.5" />
         <button className={toolButtonClass} onClick={() => void handleToggleDaemon()} title={daemonConnected ? 'Остановить демон' : 'Запустить демон'}>
-          {daemonConnected ? <Square size={12} fill="currentColor" /> : <Play size={14} className="text-app-success" fill="currentColor" />}
+          {daemonConnected ? <Square size={11} fill="currentColor" /> : <Play size={13} className="text-app-success" fill="currentColor" />}
         </button>
         <button className={toolButtonClass} onClick={() => setActiveCategory('settings')} title="Настройки">
-          <Settings size={15} />
+          <Settings size={14} />
         </button>
 
         <div className="ml-auto flex items-center gap-2 min-w-0">
-          <span className="text-xs text-app-muted hidden xl:inline">{t('footer.active_profile', 'Профиль')}:</span>
+          <span className="text-[11px] text-app-muted hidden xl:inline">{t('footer.active_profile', 'Профиль')}:</span>
           <select
             value={activeProfileId ?? ''}
             onChange={event => { if (event.target.value) void activateProfile(event.target.value) }}
-            className="h-8 w-48 max-w-[22vw] px-2 text-xs bg-app-bg border border-app-border rounded-md outline-none"
+            className="h-7 w-48 max-w-[22vw] px-2 text-[11px] bg-app-bg border border-app-border outline-none"
           >
             {profiles.map(profile => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
           </select>
 
           <label className="relative w-56 max-w-[25vw]">
-            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-app-muted pointer-events-none" />
+            <Search size={13} className="absolute left-2 top-1/2 -translate-y-1/2 text-app-muted pointer-events-none" />
             <input
               value={shellSearch}
               onChange={event => handleShellSearch(event.target.value)}
               disabled={!isRulesWorkspace}
-              placeholder="Поиск (Ctrl+F)"
-              className="h-8 w-full pl-8 pr-2 text-xs bg-app-bg border border-app-border rounded-md outline-none focus:border-app-primary disabled:opacity-40"
+              placeholder={t('rules.search_placeholder', 'Поиск правил')}
+              className="h-7 w-full pl-7 pr-2 text-[11px] bg-app-bg border border-app-border outline-none focus:border-app-primary disabled:opacity-40"
             />
           </label>
         </div>
@@ -529,7 +517,7 @@ function App() {
       <div className="flex-1 min-h-0 flex overflow-hidden">
         {sidebarOpen && (
           <aside className="w-40 shrink-0 border-r border-app-border bg-app-surface/30 flex flex-col">
-            <nav className="py-2">
+            <nav className="py-1.5">
               {sidebarLinks.map(link => {
                 const Icon = link.icon
                 const active = activeCategory === link.id
@@ -537,13 +525,13 @@ function App() {
                   <button
                     key={link.id}
                     onClick={() => { setActiveCategory(link.id); setShellSearch(''); emitRuleSearch('') }}
-                    className={`w-full h-11 px-3 flex items-center gap-3 text-left text-xs border-l-2 transition-colors ${
+                    className={`w-full h-10 px-3 flex items-center gap-2.5 text-left text-[11px] border-l-2 transition-colors ${
                       active
                         ? 'border-app-primary bg-app-primary/9 text-app-primary font-semibold'
                         : 'border-transparent text-app-text hover:bg-app-surface-hover'
                     }`}
                   >
-                    <Icon size={17} className={active ? 'text-app-primary' : 'text-app-muted'} />
+                    <Icon size={15} className={active ? 'text-app-primary' : 'text-app-muted'} />
                     <span>{link.label}</span>
                   </button>
                 )
@@ -556,28 +544,28 @@ function App() {
           {activeCategory === 'rules' && <RulesPage mode="all" />}
           {activeCategory === 'macros' && <RulesPage mode="macros" />}
           {activeCategory === 'text' && <RulesPage mode="text" />}
-          {activeCategory === 'layers' && <div className="h-full overflow-y-auto p-4"><LayersPanel /></div>}
-          {activeCategory === 'settings' && <div className="h-full overflow-y-auto p-4"><SettingsPage /></div>}
+          {activeCategory === 'layers' && <div className="h-full overflow-y-auto p-3"><LayersPanel /></div>}
+          {activeCategory === 'settings' && <SettingsPage />}
         </main>
       </div>
 
-      <footer className="h-9 px-3 flex items-center border-t border-app-border bg-app-surface/45 text-[11px] text-app-muted shrink-0">
+      <footer className="h-8 px-3 flex items-center border-t border-app-border bg-app-surface/45 text-[10px] text-app-muted shrink-0">
         <div className="flex items-center gap-2 min-w-28">
           <span className={`h-2 w-2 rounded-full ${daemonConnected ? 'bg-app-success' : 'bg-app-danger'}`} />
           <span>{daemonConnected ? t('status.ready', 'Готово') : t('status.daemon_disconnected', 'Демон отключён')}</span>
         </div>
-        <div className="h-5 w-px bg-app-border mx-3" />
+        <div className="h-4 w-px bg-app-border mx-3" />
         <span>{t('nav.rules', 'Правила')}: <strong className="text-app-text">{activeProfile?.rules.length ?? 0}</strong></span>
-        <div className="h-5 w-px bg-app-border mx-3" />
+        <div className="h-4 w-px bg-app-border mx-3" />
         <span>{t('nav.macros', 'Макросы')}: <strong className="text-app-text">{macroCount}</strong></span>
-        <div className="h-5 w-px bg-app-border mx-3" />
+        <div className="h-4 w-px bg-app-border mx-3" />
         <span>{t('nav.layers', 'Слои')}: <strong className="text-app-text">{activeProfile?.layers.length ?? 0}</strong></span>
-        <div className="h-5 w-px bg-app-border mx-3" />
+        <div className="h-4 w-px bg-app-border mx-3" />
         <span>{t('nav.text', 'Текст')}: <strong className="text-app-text">{textRuleCount}</strong></span>
         <span className="ml-auto truncate max-w-[35vw]">{t('footer.active_profile', 'Профиль')}: <strong className="text-app-text">{activeProfileName}</strong></span>
       </footer>
 
-      <div className="fixed bottom-12 right-4 z-[9999] flex flex-col gap-2 pointer-events-none max-w-sm w-full">
+      <div className="fixed bottom-10 right-3 z-[9999] flex flex-col gap-2 pointer-events-none max-w-sm w-full">
         {toasts.map(toast => {
           const Icon = {
             success: CheckCircle,
@@ -607,6 +595,34 @@ function App() {
       <UpdateBanner />
       <OnboardingWizard />
 
+      <TextPromptDialog
+        open={createProfileOpen}
+        title={t('profiles_menu.create_profile', 'Создать профиль')}
+        label={t('profiles_menu.new_profile_prompt', 'Введите имя нового профиля:')}
+        initialValue="Новый профиль"
+        confirmLabel={t('profiles_menu.create_profile', 'Создать')}
+        cancelLabel={t('common.cancel', 'Отмена')}
+        onCancel={() => setCreateProfileOpen(false)}
+        onConfirm={async name => {
+          await useProfileStore.getState().createProfile({ name })
+          setCreateProfileOpen(false)
+        }}
+      />
+
+      <ConfirmDialog
+        open={clearRulesOpen}
+        title={t('menu.clear_mappings', 'Очистить правила')}
+        message={t('rules.confirm_clear_all', 'Удалить все правила активного профиля?')}
+        danger
+        confirmLabel={t('menu.clear_mappings', 'Очистить')}
+        onCancel={() => setClearRulesOpen(false)}
+        onConfirm={async () => {
+          setClearRulesOpen(false)
+          const profile = useProfileStore.getState().profiles.find(item => item.id === useProfileStore.getState().activeProfileId)
+          if (profile) await useProfileStore.getState().saveProfile({ ...profile, rules: [] })
+        }}
+      />
+
       <ConfirmDialog
         open={profileToDelete !== null}
         title={t('profiles_menu.delete_title', 'Удалить профиль')}
@@ -615,10 +631,7 @@ function App() {
         confirmLabel={t('profiles_menu.delete_btn', 'Удалить')}
         onCancel={() => setProfileToDelete(null)}
         onConfirm={async () => {
-          if (profileToDelete) {
-            await useProfileStore.getState().deleteProfile(profileToDelete.id)
-            await useProfileStore.getState().loadProfiles()
-          }
+          if (profileToDelete) await useProfileStore.getState().deleteProfile(profileToDelete.id)
           setProfileToDelete(null)
           setActiveMenu(null)
         }}
