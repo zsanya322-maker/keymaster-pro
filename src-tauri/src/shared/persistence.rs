@@ -40,15 +40,37 @@ fn backups_dir() -> Result<PathBuf, String> {
     Ok(dir)
 }
 
+/// Возвращает путь профиля, не позволяя ID выйти за пределы `profiles`.
+///
+/// Старые ID остаются допустимыми (включая `1`, UUID и произвольный текст),
+/// запрещаются только пустые значения, разделители пути, `.`/`..` и NUL.
+fn profile_path(id: &str) -> Result<PathBuf, String> {
+    if id.trim().is_empty()
+        || id == "."
+        || id == ".."
+        || id.contains('/')
+        || id.contains('\\')
+        || id.contains('\0')
+    {
+        return Err(format!("Недопустимый ID профиля: {:?}", id));
+    }
+
+    Ok(profiles_dir()?.join(format!("{}.json", id)))
+}
+
 fn migrate_profile_value(mut value: Value) -> Result<(Value, bool), String> {
     let object = value
         .as_object_mut()
         .ok_or_else(|| "Корень профиля должен быть JSON-объектом".to_string())?;
 
-    let mut version = object
-        .get("schemaVersion")
-        .and_then(Value::as_u64)
-        .unwrap_or(0) as u32;
+    let mut version = match object.get("schemaVersion") {
+        None => 0,
+        Some(value) => value
+            .as_u64()
+            .ok_or_else(|| "schemaVersion должна быть целым неотрицательным числом".to_string())?
+            .try_into()
+            .map_err(|_| "schemaVersion выходит за диапазон u32".to_string())?,
+    };
 
     if version > PROFILE_SCHEMA_VERSION {
         return Err(format!(
@@ -121,8 +143,7 @@ fn existing_profile_is_safe(path: &PathBuf) -> Result<bool, String> {
 /// Создаётся защитный бэкап, а runtime получает временный пустой recovery-профиль
 /// с заметным именем. Исходный файл остаётся на месте.
 pub fn load_profile(id: &str) -> Result<Profile, String> {
-    let dir = profiles_dir()?;
-    let path = dir.join(format!("{}.json", id));
+    let path = profile_path(id)?;
 
     if !path.exists() {
         return Err(format!("Профиль '{}' не найден", id));
@@ -176,6 +197,19 @@ pub fn load_profile(id: &str) -> Result<Profile, String> {
         }
     };
 
+    if profile.id != id {
+        error!(
+            "ID внутри профиля {} ({}) не совпадает с именем файла ({}). Файл НЕ перезаписывается.",
+            path.display(),
+            profile.id,
+            id
+        );
+        if let Err(backup_err) = backup_file(&path) {
+            warn!("Не удалось создать защитный бэкап профиля с неверным ID: {}", backup_err);
+        }
+        return Ok(recovery_profile(id));
+    }
+
     if was_migrated {
         if let Err(e) = backup_file(&path) {
             warn!("Не удалось создать бэкап перед миграцией {}: {}", path.display(), e);
@@ -192,8 +226,7 @@ pub fn load_profile(id: &str) -> Result<Profile, String> {
 
 /// Сохранить профиль в JSON файл (с бэкапом).
 pub fn save_profile(profile: &Profile) -> Result<(), String> {
-    let dir = profiles_dir()?;
-    let path = dir.join(format!("{}.json", profile.id));
+    let path = profile_path(&profile.id)?;
 
     if path.exists() {
         if !existing_profile_is_safe(&path)? {
@@ -241,8 +274,7 @@ pub fn list_profiles() -> Result<Vec<String>, String> {
 }
 
 pub fn delete_profile(id: &str) -> Result<(), String> {
-    let dir = profiles_dir()?;
-    let path = dir.join(format!("{}.json", id));
+    let path = profile_path(id)?;
 
     if !path.exists() {
         return Err(format!("Профиль '{}' не найден", id));
@@ -385,5 +417,70 @@ mod tests {
         assert_eq!(saved.get("schemaVersion").and_then(Value::as_u64), Some(1));
 
         let _ = delete_profile("test_rt");
+    }
+
+    #[test]
+    fn test_profile_path_rejects_traversal() {
+        assert!(profile_path("../outside").is_err());
+        assert!(profile_path("..\\outside").is_err());
+        assert!(profile_path("folder/name").is_err());
+        assert!(profile_path("").is_err());
+        assert!(profile_path("1").is_ok());
+        assert!(profile_path("550e8400-e29b-41d4-a716-446655440000").is_ok());
+    }
+
+    #[test]
+    fn test_future_or_malformed_schema_is_not_overwritten() {
+        let dir = profiles_dir().unwrap();
+
+        for (id, schema_version) in [
+            ("test_future_schema", json!(PROFILE_SCHEMA_VERSION + 1)),
+            ("test_bad_schema", json!("1")),
+        ] {
+            let path = dir.join(format!("{}.json", id));
+            let original = json!({
+                "schemaVersion": schema_version,
+                "id": id,
+                "name": "Protected",
+                "isDefault": false,
+                "linkedApps": [],
+                "rules": [],
+                "layers": []
+            });
+            let original_text = serde_json::to_string_pretty(&original).unwrap();
+            fs::write(&path, &original_text).unwrap();
+
+            let recovery = load_profile(id).unwrap();
+            assert!(recovery.name.contains("Ошибка загрузки"));
+            assert_eq!(fs::read_to_string(&path).unwrap(), original_text);
+            assert!(save_profile(&recovery).is_err());
+            assert_eq!(fs::read_to_string(&path).unwrap(), original_text);
+
+            let _ = fs::remove_file(&path);
+        }
+    }
+
+    #[test]
+    fn test_mismatched_internal_id_is_not_migrated_over_source() {
+        let dir = profiles_dir().unwrap();
+        let id = "test_id_mismatch";
+        let path = dir.join(format!("{}.json", id));
+        let original = json!({
+            "id": "different-id",
+            "name": "Mismatch",
+            "isDefault": false,
+            "linkedApps": [],
+            "rules": [],
+            "layers": []
+        });
+        let original_text = serde_json::to_string_pretty(&original).unwrap();
+        fs::write(&path, &original_text).unwrap();
+
+        let recovery = load_profile(id).unwrap();
+        assert_eq!(recovery.id, id);
+        assert!(recovery.name.contains("Ошибка загрузки"));
+        assert_eq!(fs::read_to_string(&path).unwrap(), original_text);
+
+        let _ = fs::remove_file(&path);
     }
 }
