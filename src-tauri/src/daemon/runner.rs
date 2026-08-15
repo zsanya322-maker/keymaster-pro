@@ -476,21 +476,20 @@ pub fn is_daemon_running() -> bool {
     #[cfg(target_os = "windows")]
     {
         use windows::core::HSTRING;
-        use windows::Win32::Foundation::{ERROR_PIPE_BUSY, ERROR_SEM_TIMEOUT};
+        use windows::Win32::Foundation::{GetLastError, ERROR_PIPE_BUSY, ERROR_SEM_TIMEOUT};
         use windows::Win32::System::Pipes::WaitNamedPipeW;
 
         let pipe_name = HSTRING::from(constants::IPC_PIPE_NAME);
         unsafe {
-            match WaitNamedPipeW(&pipe_name, 0) {
-                Ok(()) => true,
-                Err(e) => {
-                    let code = e.code();
-                    // Timeout/busy означает, что pipe существует, просто сейчас
-                    // нет свободного instance. Это всё ещё "daemon running".
-                    code == ERROR_SEM_TIMEOUT.to_hresult()
-                        || code == ERROR_PIPE_BUSY.to_hresult()
-                }
+            let ready = WaitNamedPipeW(&pipe_name, 0);
+            if ready.as_bool() {
+                return true;
             }
+
+            let error = GetLastError();
+            // Timeout/busy означает, что pipe существует, просто сейчас нет
+            // свободного instance. Это всё ещё "daemon running".
+            error == ERROR_SEM_TIMEOUT || error == ERROR_PIPE_BUSY
         }
     }
 
