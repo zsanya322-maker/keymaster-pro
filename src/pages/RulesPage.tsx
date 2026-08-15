@@ -2,15 +2,12 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   ChevronRight,
-  Filter,
+  FileText,
   Keyboard,
   ListPlus,
   Mouse,
   Pencil,
-  Play,
   Search,
-  Settings2,
-  Square,
   Trash2,
 } from 'lucide-react';
 import { useProfileStore } from '../store/profileStore';
@@ -18,6 +15,17 @@ import { useAppStore } from '../stores/app-store';
 import { RuleBuilderModal } from '../components/RuleBuilderModal';
 import type { FrontendAction, FrontendCondition, FrontendRule, FrontendTrigger } from '../lib/types';
 import { vkToName } from '../lib/keyCodes';
+import {
+  RULE_COMMAND_EVENT,
+  RULE_SEARCH_EVENT,
+  type RuleCommand,
+} from '../lib/uiEvents';
+
+export type RulesViewMode = 'all' | 'macros' | 'text';
+
+interface RulesPageProps {
+  mode?: RulesViewMode;
+}
 
 function formatTriggerKey(trigger: FrontendTrigger): string {
   switch (trigger.type) {
@@ -94,7 +102,13 @@ function formatRuleSummary(rule: FrontendRule, t: (key: string) => string): stri
   return rule.actions.length > 1 ? `${first} +${rule.actions.length - 1}` : first;
 }
 
-export const RulesPage: React.FC = () => {
+function matchesMode(rule: FrontendRule, mode: RulesViewMode): boolean {
+  if (mode === 'all') return true;
+  if (mode === 'macros') return rule.actions.some(action => action.type === 'runMacro');
+  return rule.trigger.type === 'typedText' || rule.actions.some(action => action.type === 'typeText');
+}
+
+export const RulesPage: React.FC<RulesPageProps> = ({ mode = 'all' }) => {
   const { t } = useTranslation();
   const { profiles, activeProfileId, saveProfile } = useProfileStore();
   const daemonConnected = useAppStore(state => state.daemonConnected);
@@ -105,24 +119,21 @@ export const RulesPage: React.FC = () => {
   const [selectedRuleId, setSelectedRuleId] = useState<string | null>(null);
   const [query, setQuery] = useState('');
 
-  useEffect(() => {
-    if (!activeProfile) {
-      setSelectedRuleId(null);
-      return;
-    }
+  const modeRules = useMemo(
+    () => activeProfile?.rules.filter(rule => matchesMode(rule, mode)) ?? [],
+    [activeProfile, mode],
+  );
 
-    const stillExists = activeProfile.rules.some(rule => rule.id === selectedRuleId);
-    if (!stillExists) {
-      setSelectedRuleId(activeProfile.rules[0]?.id ?? null);
-    }
-  }, [activeProfile, selectedRuleId]);
+  useEffect(() => {
+    const stillVisible = modeRules.some(rule => rule.id === selectedRuleId);
+    if (!stillVisible) setSelectedRuleId(modeRules[0]?.id ?? null);
+  }, [modeRules, selectedRuleId]);
 
   const filteredRules = useMemo(() => {
-    if (!activeProfile) return [];
     const needle = query.trim().toLocaleLowerCase();
-    if (!needle) return activeProfile.rules;
+    if (!needle) return modeRules;
 
-    return activeProfile.rules.filter(rule => {
+    return modeRules.filter(rule => {
       const haystack = [
         rule.name ?? '',
         formatTriggerKey(rule.trigger),
@@ -131,7 +142,7 @@ export const RulesPage: React.FC = () => {
       ].join(' ').toLocaleLowerCase();
       return haystack.includes(needle);
     });
-  }, [activeProfile, query, t]);
+  }, [modeRules, query, t]);
 
   const selectedRule = activeProfile?.rules.find(rule => rule.id === selectedRuleId) ?? null;
 
@@ -151,7 +162,8 @@ export const RulesPage: React.FC = () => {
     const nextRules = activeProfile.rules.filter(rule => rule.id !== ruleId);
     await saveProfile({ ...activeProfile, rules: nextRules });
     if (selectedRuleId === ruleId) {
-      setSelectedRuleId(nextRules[0]?.id ?? null);
+      const nextVisible = nextRules.filter(rule => matchesMode(rule, mode));
+      setSelectedRuleId(nextVisible[0]?.id ?? null);
     }
   };
 
@@ -165,6 +177,30 @@ export const RulesPage: React.FC = () => {
     setSelectedRuleId(rule.id);
     setIsModalOpen(false);
   };
+
+  useEffect(() => {
+    const onSearch = (event: Event) => {
+      setQuery((event as CustomEvent<string>).detail ?? '');
+    };
+    window.addEventListener(RULE_SEARCH_EVENT, onSearch);
+    return () => window.removeEventListener(RULE_SEARCH_EVENT, onSearch);
+  }, []);
+
+  useEffect(() => {
+    const onCommand = (event: Event) => {
+      const command = (event as CustomEvent<RuleCommand>).detail;
+      if (command === 'add') {
+        handleAddRule();
+      } else if (command === 'edit' && selectedRule) {
+        handleEditRule(selectedRule);
+      } else if (command === 'delete' && selectedRule) {
+        void handleDeleteRule(selectedRule.id);
+      }
+    };
+
+    window.addEventListener(RULE_COMMAND_EVENT, onCommand);
+    return () => window.removeEventListener(RULE_COMMAND_EVENT, onCommand);
+  }, [selectedRule, activeProfile, mode]);
 
   if (!activeProfile) {
     if (!daemonConnected) {
@@ -188,17 +224,22 @@ export const RulesPage: React.FC = () => {
     );
   }
 
+  const viewTitle = mode === 'macros'
+    ? t('nav.macros', 'Макросы')
+    : mode === 'text'
+      ? t('nav.text', 'Текст')
+      : t('rules.title', 'Список правил');
+
   return (
     <div className="h-full min-h-0 flex bg-app-bg overflow-hidden">
-      {/* Compact rule list */}
       <section className="w-[43%] min-w-[360px] max-w-[620px] flex flex-col border-r border-app-border bg-app-bg min-h-0">
         <div className="h-11 px-4 flex items-center border-b border-app-border bg-app-surface/45 shrink-0">
-          <h2 className="text-sm font-semibold text-app-text">{t('rules.title', 'Список правил')}</h2>
-          <span className="ml-auto text-[11px] text-app-muted">{activeProfile.rules.length}</span>
+          <h2 className="text-sm font-semibold text-app-text">{viewTitle}</h2>
+          <span className="ml-auto text-[11px] text-app-muted">{modeRules.length}</span>
         </div>
 
-        <div className="px-3 py-2.5 flex items-center gap-2 border-b border-app-border/70 shrink-0">
-          <label className="relative flex-1 min-w-0">
+        <div className="px-3 py-2.5 border-b border-app-border/70 shrink-0">
+          <label className="relative block min-w-0">
             <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-app-muted pointer-events-none" />
             <input
               value={query}
@@ -207,20 +248,17 @@ export const RulesPage: React.FC = () => {
               className="w-full h-8 pl-8 pr-3 text-xs bg-app-bg border border-app-border rounded-md outline-none focus:border-app-primary"
             />
           </label>
-          <button
-            type="button"
-            className="h-8 w-8 border border-app-border rounded-md text-app-muted hover:text-app-text hover:bg-app-surface flex items-center justify-center"
-            title={t('rules.filter', 'Фильтр')}
-          >
-            <Filter size={14} />
-          </button>
         </div>
 
         <div className="flex-1 min-h-0 overflow-y-auto">
           {filteredRules.map(rule => {
             const selected = rule.id === selectedRuleId;
             const invalidMouse = isInvalidMouseTrigger(rule.trigger);
-            const TriggerIcon = isMouseTrigger(rule.trigger) ? Mouse : Keyboard;
+            const TriggerIcon = rule.trigger.type === 'typedText'
+              ? FileText
+              : isMouseTrigger(rule.trigger)
+                ? Mouse
+                : Keyboard;
 
             return (
               <button
@@ -270,11 +308,10 @@ export const RulesPage: React.FC = () => {
         </div>
 
         <div className="h-9 px-4 flex items-center border-t border-app-border bg-app-surface/35 text-[11px] text-app-muted shrink-0">
-          {t('rules.total_rules', 'Всего правил')}: {activeProfile.rules.length}
+          {t('rules.total_rules', 'Всего правил')}: {modeRules.length}
         </div>
       </section>
 
-      {/* Inspector / rule editor shell */}
       <section className="flex-1 min-w-0 flex flex-col bg-app-bg min-h-0">
         <div className="h-11 px-4 flex items-center border-b border-app-border bg-app-surface/45 shrink-0">
           <h2 className="text-sm font-semibold text-app-text">{t('rules.editor_title', 'Редактор правила')}</h2>
@@ -307,28 +344,15 @@ export const RulesPage: React.FC = () => {
         ) : (
           <div className="flex-1 min-h-0 overflow-y-auto p-4">
             <div className="max-w-4xl space-y-4">
-              <div className="flex items-center gap-2">
-                <button type="button" className="h-8 w-8 rounded border border-app-border bg-app-surface text-app-success flex items-center justify-center" title={t('rules.preview', 'Проверить')}>
-                  <Play size={14} fill="currentColor" />
-                </button>
-                <button type="button" className="h-8 w-8 rounded border border-app-border bg-app-surface text-app-muted flex items-center justify-center" title={t('rules.stop', 'Остановить')}>
-                  <Square size={12} fill="currentColor" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleEditRule(selectedRule)}
-                  className="h-8 w-8 rounded border border-app-border bg-app-surface text-app-muted hover:text-app-primary flex items-center justify-center"
-                  title={t('rules.edit_rule', 'Редактировать')}
-                >
-                  <Settings2 size={14} />
-                </button>
-              </div>
-
               <div className="border border-app-border rounded-md overflow-hidden bg-app-surface/20">
                 <div className="grid grid-cols-[140px_1fr] border-b border-app-border min-h-11">
                   <div className="px-3 py-2.5 text-[11px] text-app-muted bg-app-surface/55">{t('ruleBuilder.trigger')}</div>
                   <div className="px-3 py-2.5 text-xs text-app-text flex items-center gap-2">
-                    {isMouseTrigger(selectedRule.trigger) ? <Mouse size={14} /> : <Keyboard size={14} />}
+                    {selectedRule.trigger.type === 'typedText'
+                      ? <FileText size={14} />
+                      : isMouseTrigger(selectedRule.trigger)
+                        ? <Mouse size={14} />
+                        : <Keyboard size={14} />}
                     <strong>{formatTriggerKey(selectedRule.trigger)}</strong>
                     <span className="text-app-muted">{formatTriggerType(selectedRule.trigger, t)}</span>
                   </div>
