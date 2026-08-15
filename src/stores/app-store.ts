@@ -10,6 +10,7 @@ interface AppState {
   config: AppConfig
   setConfig: (config: Partial<AppConfig>) => void
   loadConfig: () => Promise<void>
+  flushConfig: () => Promise<void>
 
   profiles: Profile[]
   activeProfileId: Uuid | null
@@ -51,25 +52,49 @@ let pendingConfigUpdate: Partial<AppConfig> = {}
 let configUpdateTimer: ReturnType<typeof setTimeout> | null = null
 let configUpdateInFlight: Promise<unknown> = Promise.resolve()
 
+function persistConfigPatch(payload: Partial<AppConfig>): Promise<unknown> {
+  if (Object.keys(payload).length === 0) return configUpdateInFlight
+
+  configUpdateInFlight = configUpdateInFlight
+    .catch(() => undefined)
+    .then(() => invoke<AppConfig>('update_gui_config', { patch: payload }))
+    .catch((error) => {
+      console.error('Failed to persist GUI config', error)
+      throw error
+    })
+
+  return configUpdateInFlight
+}
+
+function takePendingConfigUpdate(): Partial<AppConfig> {
+  const payload = pendingConfigUpdate
+  pendingConfigUpdate = {}
+  if (configUpdateTimer) {
+    clearTimeout(configUpdateTimer)
+    configUpdateTimer = null
+  }
+  return payload
+}
+
 function queueConfigUpdate(partial: Partial<AppConfig>) {
   pendingConfigUpdate = { ...pendingConfigUpdate, ...partial }
 
   if (configUpdateTimer) clearTimeout(configUpdateTimer)
   configUpdateTimer = setTimeout(() => {
-    const payload = pendingConfigUpdate
-    pendingConfigUpdate = {}
-    configUpdateTimer = null
-
-    // Сериализуем записи: следующий пакет отправляется только после предыдущего,
-    // поэтому старое значение не может завершиться позже нового и затереть его.
-    // Запись идёт напрямую через Tauri в config.json и не зависит от Daemon.
-    configUpdateInFlight = configUpdateInFlight
-      .catch(() => undefined)
-      .then(() => invoke<AppConfig>('update_gui_config', { patch: payload }))
-      .catch((error) => {
-        console.error('Failed to persist GUI config', error)
-      })
+    const payload = takePendingConfigUpdate()
+    void persistConfigPatch(payload).catch(() => {
+      // Ошибка уже залогирована; UI остаётся доступным.
+    })
   }, 150)
+}
+
+async function flushPendingConfig(): Promise<void> {
+  const payload = takePendingConfigUpdate()
+  if (Object.keys(payload).length > 0) {
+    await persistConfigPatch(payload)
+  } else {
+    await configUpdateInFlight
+  }
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -86,6 +111,7 @@ export const useAppStore = create<AppState>((set) => ({
       // Offline/browser fallback.
     }
   },
+  flushConfig: flushPendingConfig,
 
   profiles: [],
   activeProfileId: null,
