@@ -166,6 +166,14 @@ export const MacroEditor: React.FC<MacroEditorProps> = ({ steps, onChange }) => 
     onChange(next);
   };
 
+  const moveStepTo = (fromIndex: number, targetIndex: number) => {
+    if (fromIndex < 0 || fromIndex >= steps.length || targetIndex < 0 || targetIndex >= steps.length || fromIndex === targetIndex) return;
+    const next = [...steps];
+    const [moved] = next.splice(fromIndex, 1);
+    next.splice(targetIndex, 0, moved);
+    onChange(next);
+  };
+
   const createDefaultAction = (type: MacroAction['type']): MacroAction => {
     if (type === 'mouseMove') return { type, dx: 0, dy: 0 };
     if (type === 'mouseScroll' || type === 'mouseHScroll') return { type, delta: 0 };
@@ -378,7 +386,28 @@ export const MacroEditor: React.FC<MacroEditorProps> = ({ steps, onChange }) => 
           {steps.map((step, index) => (
             <div
               key={index}
-              className="min-h-10 px-1.5 py-1.5 flex items-center gap-1.5 border-b last:border-b-0 border-app-border/55 hover:bg-app-surface/20"
+              draggable={!isRecording}
+              onDragStart={(event) => {
+                event.dataTransfer.effectAllowed = 'move';
+                event.dataTransfer.setData('application/x-keymaster-macro-step', String(index));
+              }}
+              onDragOver={(event) => {
+                if (!isRecording) {
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = 'move';
+                }
+              }}
+              onDrop={(event) => {
+                if (isRecording) return;
+                event.preventDefault();
+                const fromIndex = Number.parseInt(
+                  event.dataTransfer.getData('application/x-keymaster-macro-step'),
+                  10,
+                );
+                if (Number.isInteger(fromIndex)) moveStepTo(fromIndex, index);
+              }}
+              className={`min-h-10 px-1.5 py-1.5 flex items-center gap-1.5 border-b last:border-b-0 border-app-border/55 hover:bg-app-surface/20 ${isRecording ? '' : 'cursor-move'}`}
+              title={isRecording ? undefined : t('macro.drag_reorder', { defaultValue: 'Перетащите для изменения порядка' })}
             >
               <div className="w-5 shrink-0 flex flex-col items-center">
                 <button
