@@ -84,19 +84,36 @@ pub fn spawn_daemon(state: State<'_, GuiState>) -> Result<serde_json::Value, Str
 }
 
 /// Остановить daemon-процесс через IPC.
+/// Возвращаем успех только когда Named Pipe действительно исчез. Это делает
+/// последовательность stop -> spawn детерминированной и не требует угадывать
+/// задержку завершения daemon в GUI.
 #[tauri::command]
 pub async fn stop_daemon() -> Result<serde_json::Value, String> {
     info!("stop_daemon: отправка shutdown через IPC");
-    match crate::daemon::ipc_client::call("shutdown", None).await {
-        Ok(result) => Ok(result),
-        Err(e) => {
-            warn!("stop_daemon: не удалось отправить команду: {}", e);
-            Ok(serde_json::json!({
-                "success": false,
-                "message": format!("IPC error: {}", e)
-            }))
-        }
+    if let Err(e) = crate::daemon::ipc_client::call("shutdown", None).await {
+        warn!("stop_daemon: не удалось отправить команду: {}", e);
+        return Ok(serde_json::json!({
+            "success": false,
+            "message": format!("IPC error: {}", e)
+        }));
     }
+
+    for _ in 0..30 {
+        if !crate::daemon::runner::is_daemon_running() {
+            info!("stop_daemon: daemon полностью остановлен");
+            return Ok(serde_json::json!({
+                "success": true,
+                "message": "Daemon stopped"
+            }));
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+
+    warn!("stop_daemon: timeout ожидания завершения daemon");
+    Ok(serde_json::json!({
+        "success": false,
+        "message": "Daemon shutdown timeout"
+    }))
 }
 
 /// Получить статус Daemon через IPC.
