@@ -1,30 +1,12 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useAppStore } from '../stores/app-store'
+import { Shield } from 'lucide-react'
+
+import { useAppStore } from '../store/appStore'
 import { useProfileStore } from '../store/profileStore'
 import { useKeyMasterStore, type Category } from '../store/keyMasterStore'
 import { invoke } from '../lib/ipc'
 import { emitRuleCommand, emitRuleSearch } from '../lib/uiEvents'
-import {
-  Activity,
-  AlertTriangle,
-  CheckCircle,
-  FileText,
-  Info,
-  Keyboard,
-  Layers,
-  PanelLeft,
-  PanelLeftClose,
-  Play,
-  Plus,
-  Search,
-  Settings,
-  Shield,
-  Square,
-  Trash2,
-  X,
-  XCircle,
-} from 'lucide-react'
 
 import { RulesPage } from '../pages/RulesPage'
 import { SettingsPage } from '../pages/SettingsPage'
@@ -33,34 +15,18 @@ import { UpdateBanner } from '../components/UpdateBanner'
 import { OnboardingWizard } from '../components/OnboardingWizard'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { TextPromptDialog } from '../components/TextPromptDialog'
-
-const APP_VERSION = '0.2.2'
-
-interface DaemonStatus {
-  connected: boolean
-  status: string
-  details?: {
-    running?: boolean
-    hooks_installed?: boolean
-    kb_hook_enabled?: boolean
-    mouse_hook_enabled?: boolean
-    active_profile_id?: string
-    cpu_usage?: number
-    memory_usage_mb?: number
-    keystrokes_processed?: number
-    last_latency_us?: number
-  }
-}
-
-interface Toast {
-  id: string
-  message: string
-  type: 'success' | 'error' | 'info' | 'warning'
-}
+import { ShellMenuBar } from './ShellMenuBar'
+import { ShellToolbar } from './ShellToolbar'
+import { ShellSidebar } from './ShellSidebar'
+import { ShellStatusBar } from './ShellStatusBar'
+import { ToastViewport } from './ToastViewport'
+import { useToastQueue } from './useToastQueue'
+import { useDaemonConnection, type DaemonStatus } from './useDaemonConnection'
 
 interface ImportedProfileMeta {
   id?: string
   name?: string
+  isDefault?: boolean
   [key: string]: unknown
 }
 
@@ -79,30 +45,23 @@ function App() {
   const { config, daemonConnected, setDaemonConnected, loadConfig, sidebarOpen, toggleSidebar } = useAppStore()
   const { activeCategory, setActiveCategory, rulesDirty, setRulesDirty } = useKeyMasterStore()
   const { profiles, activeProfileId, activateProfile } = useProfileStore()
+  const { toasts, showToast, dismissToast } = useToastQueue()
 
-  const activeProfile = profiles.find(profile => profile.id === activeProfileId)
+  useDaemonConnection()
+
+  const activeProfile = profiles.find((profile) => profile.id === activeProfileId)
   const activeProfileName = activeProfile?.name ?? 'Default'
   const theme = config.theme
   const scale = config.scale || 0.85
 
-  const [activeMenu, setActiveMenu] = useState<string | null>(null)
   const [isInitialized, setIsInitialized] = useState(false)
   const [profileToDelete, setProfileToDelete] = useState<{ id: string; name: string } | null>(null)
   const [createProfileOpen, setCreateProfileOpen] = useState(false)
   const [clearRulesOpen, setClearRulesOpen] = useState(false)
   const [pendingShellIntent, setPendingShellIntent] = useState<ShellIntent | null>(null)
-  const [toasts, setToasts] = useState<Toast[]>([])
   const [lastConnectionState, setLastConnectionState] = useState<boolean | null>(null)
   const [shellSearch, setShellSearch] = useState('')
   const recoveryNotified = useRef(new Set<string>())
-
-  const showToast = (message: string, type: Toast['type'] = 'info') => {
-    const id = Math.random().toString(36).substring(2, 9)
-    setToasts(previous => [...previous, { id, message, type }])
-    window.setTimeout(() => {
-      setToasts(previous => previous.filter(toast => toast.id !== id))
-    }, 4000)
-  }
 
   useEffect(() => {
     if (lastConnectionState === null) {
@@ -117,16 +76,7 @@ function App() {
       )
       setLastConnectionState(daemonConnected)
     }
-  }, [daemonConnected, lastConnectionState, t])
-
-  useEffect(() => {
-    const handleToastEvent = (event: Event) => {
-      const customEvent = event as CustomEvent<{ message: string; type: Toast['type'] }>
-      if (customEvent.detail) showToast(customEvent.detail.message, customEvent.detail.type)
-    }
-    window.addEventListener('keymaster-toast', handleToastEvent)
-    return () => window.removeEventListener('keymaster-toast', handleToastEvent)
-  }, [])
+  }, [daemonConnected, lastConnectionState, showToast, t])
 
   useEffect(() => {
     for (const profile of profiles) {
@@ -138,7 +88,7 @@ function App() {
         )
       }
     }
-  }, [profiles])
+  }, [profiles, showToast])
 
   useEffect(() => {
     if (theme === 'light') document.documentElement.classList.add('light')
@@ -158,90 +108,6 @@ function App() {
     }
     void init()
   }, [loadConfig, i18n])
-
-  useEffect(() => {
-    let disposed = false
-    let pollTimer: number | null = null
-
-    async function ensureProfilesLoaded() {
-      const state = useProfileStore.getState()
-      if (state.profiles.length === 0 || !state.activeProfileId) await state.loadProfiles()
-    }
-
-    async function refreshDaemonStatus(): Promise<boolean> {
-      try {
-        const status = await invoke<DaemonStatus>('daemon_status')
-        if (disposed) return false
-
-        const connected = Boolean(status?.connected)
-        setDaemonConnected(connected)
-        if (!connected) return false
-
-        await ensureProfilesLoaded()
-        if (disposed) return false
-
-        const details = status.details
-        if (details) {
-          useAppStore.setState({
-            diagnostics: {
-              keystrokes: details.keystrokes_processed || 0,
-              cpu: details.cpu_usage || 0,
-              ram: details.memory_usage_mb || 0,
-              latency: (details.last_latency_us || 0) / 1000,
-            },
-          })
-
-          if (details.active_profile_id && !useKeyMasterStore.getState().rulesDirty) {
-            const currentActive = useProfileStore.getState().activeProfileId
-            if (currentActive !== details.active_profile_id) {
-              useProfileStore.setState({ activeProfileId: details.active_profile_id })
-            }
-          }
-        }
-        return true
-      } catch {
-        if (!disposed) setDaemonConnected(false)
-        return false
-      }
-    }
-
-    async function poll() {
-      await refreshDaemonStatus()
-      if (!disposed) pollTimer = window.setTimeout(() => void poll(), 3000)
-    }
-
-    async function initialConnect() {
-      if (await refreshDaemonStatus()) {
-        if (!disposed) pollTimer = window.setTimeout(() => void poll(), 3000)
-        return
-      }
-
-      for (let attempt = 0; attempt < 5 && !disposed; attempt += 1) {
-        try {
-          await invoke('spawn_daemon')
-        } catch {
-          // Retry below.
-        }
-        await new Promise(resolve => window.setTimeout(resolve, 1500))
-        if (await refreshDaemonStatus()) break
-      }
-
-      if (!disposed) pollTimer = window.setTimeout(() => void poll(), 3000)
-    }
-
-    void initialConnect()
-
-    return () => {
-      disposed = true
-      if (pollTimer !== null) window.clearTimeout(pollTimer)
-    }
-  }, [setDaemonConnected])
-
-  useEffect(() => {
-    const closeMenus = () => setActiveMenu(null)
-    window.addEventListener('click', closeMenus)
-    return () => window.removeEventListener('click', closeMenus)
-  }, [])
 
   const performShellIntent = async (intent: ShellIntent) => {
     if (intent.type === 'category') {
@@ -335,7 +201,7 @@ function App() {
         return
       }
 
-      if (useProfileStore.getState().profiles.some(profile => profile.id === profileData.id)) {
+      if (useProfileStore.getState().profiles.some((profile) => profile.id === profileData.id)) {
         profileData.id = crypto.randomUUID()
         profileData.isDefault = false
       }
@@ -400,19 +266,10 @@ function App() {
     }
   }
 
-  const macroCount = activeProfile?.rules.filter(rule => rule.actions.some(action => action.type === 'runMacro')).length ?? 0
+  const macroCount = activeProfile?.rules.filter((rule) => rule.actions.some((action) => action.type === 'runMacro')).length ?? 0
   const textRuleCount = activeProfile?.rules.filter(
-    rule => rule.trigger.type === 'typedText' || rule.actions.some(action => action.type === 'typeText'),
+    (rule) => rule.trigger.type === 'typedText' || rule.actions.some((action) => action.type === 'typeText'),
   ).length ?? 0
-
-  const sidebarLinks = [
-    { id: 'rules' as const, label: t('nav.rules'), icon: Keyboard },
-    { id: 'layers' as const, label: t('nav.layers'), icon: Layers },
-    { id: 'macros' as const, label: t('nav.macros'), icon: Activity },
-    { id: 'text' as const, label: t('nav.text'), icon: FileText },
-    { id: 'settings' as const, label: t('nav.settings'), icon: Settings },
-  ]
-
   const isRulesWorkspace = activeCategory === 'rules' || activeCategory === 'macros' || activeCategory === 'text'
 
   const handleShellSearch = (value: string) => {
@@ -436,191 +293,52 @@ function App() {
     '--table-row-padding': `${config.rowPadding || 8}px`,
   } as CSSProperties
 
-  const menuButtonClass = 'px-2 h-7 text-[11px] text-app-text hover:bg-app-surface-hover cursor-pointer'
-  const menuPanelClass = 'absolute left-0 top-full mt-px min-w-44 bg-app-bg border border-app-border shadow-lg py-1 z-50'
-  const menuItemClass = 'block w-full px-3 py-1.5 text-left text-[11px] text-app-text hover:bg-app-surface-hover cursor-pointer disabled:opacity-40 disabled:cursor-default'
-  const toolButtonClass = 'h-7 w-7 border border-transparent bg-transparent flex items-center justify-center text-app-muted hover:text-app-text hover:bg-app-surface hover:border-app-border cursor-pointer disabled:opacity-30 disabled:cursor-default'
-
   return (
     <div className="flex flex-col h-screen bg-app-bg text-app-text select-none font-sans overflow-hidden" style={rootStyle}>
-      <div className="h-8 flex items-center px-1.5 bg-app-bg border-b border-app-border relative z-50 shrink-0">
-        <div className="relative" onClick={event => event.stopPropagation()}>
-          <button className={menuButtonClass} onClick={() => setActiveMenu(activeMenu === 'file' ? null : 'file')}>
-            {t('menu.file')}
-          </button>
-          {activeMenu === 'file' && (
-            <div className={menuPanelClass}>
-              <button className={menuItemClass} onClick={() => { void handleImportProfile(); setActiveMenu(null) }}>{t('menu.import_profile')}</button>
-              <button className={menuItemClass} onClick={() => { void handleExportProfile(); setActiveMenu(null) }}>{t('menu.export_profile')}</button>
-              <div className="my-1 border-t border-app-border" />
-              <button className={menuItemClass} onClick={() => { requestShellIntent({ type: 'quit' }); setActiveMenu(null) }}>{t('menu.exit')}</button>
-            </div>
-          )}
-        </div>
+      <ShellMenuBar
+        profiles={profiles}
+        activeProfileId={activeProfileId}
+        activeProfileRulesCount={activeProfile?.rules.length ?? 0}
+        daemonConnected={daemonConnected}
+        rulesDirty={rulesDirty}
+        isRulesWorkspace={isRulesWorkspace}
+        sidebarOpen={sidebarOpen}
+        onImportProfile={() => void handleImportProfile()}
+        onExportProfile={() => void handleExportProfile()}
+        onQuit={() => requestShellIntent({ type: 'quit' })}
+        onAddRule={() => { if (isRulesWorkspace) emitRuleCommand('add') }}
+        onDeleteRule={() => { if (isRulesWorkspace) emitRuleCommand('delete') }}
+        onToggleSidebar={toggleSidebar}
+        onCreateProfile={() => setCreateProfileOpen(true)}
+        onSelectProfile={(id) => requestShellIntent({ type: 'profile', id })}
+        onDeleteProfile={setProfileToDelete}
+        onToggleDaemon={() => void handleToggleDaemon()}
+        onClearRules={() => setClearRulesOpen(true)}
+        showToast={showToast}
+      />
 
-        <div className="relative" onClick={event => event.stopPropagation()}>
-          <button className={menuButtonClass} onClick={() => setActiveMenu(activeMenu === 'edit' ? null : 'edit')}>
-            {t('menu.edit')}
-          </button>
-          {activeMenu === 'edit' && (
-            <div className={menuPanelClass}>
-              <button className={menuItemClass} disabled={!isRulesWorkspace} onClick={() => { if (isRulesWorkspace) emitRuleCommand('add'); setActiveMenu(null) }}>{t('rules.add_rule')}</button>
-              <button className={`${menuItemClass} text-app-danger`} disabled={!isRulesWorkspace} onClick={() => { if (isRulesWorkspace) emitRuleCommand('delete'); setActiveMenu(null) }}>{t('rules.delete_rule')}</button>
-            </div>
-          )}
-        </div>
-
-        <div className="relative" onClick={event => event.stopPropagation()}>
-          <button className={menuButtonClass} onClick={() => setActiveMenu(activeMenu === 'view' ? null : 'view')}>
-            {t('menu.view')}
-          </button>
-          {activeMenu === 'view' && (
-            <div className={menuPanelClass}>
-              <button className={menuItemClass} onClick={() => { toggleSidebar(); setActiveMenu(null) }}>
-                {sidebarOpen ? t('menu.hide_sidebar') : t('menu.show_sidebar')}
-              </button>
-            </div>
-          )}
-        </div>
-
-        <div className="relative" onClick={event => event.stopPropagation()}>
-          <button className={menuButtonClass} onClick={() => setActiveMenu(activeMenu === 'profiles' ? null : 'profiles')}>
-            {t('menu.profiles')}
-          </button>
-          {activeMenu === 'profiles' && (
-            <div className={`${menuPanelClass} min-w-52`}>
-              <button
-                className={`${menuItemClass} text-app-primary font-semibold flex items-center gap-2`}
-                onClick={() => { setCreateProfileOpen(true); setActiveMenu(null) }}
-              >
-                <Plus size={12} /> {t('profiles_menu.create_profile')}
-              </button>
-              <div className="my-1 border-t border-app-border" />
-              {profiles.map(profile => (
-                <div key={profile.id} className="flex items-center hover:bg-app-surface-hover group">
-                  <button
-                    className={`flex-1 px-3 py-1.5 text-left text-[11px] truncate ${activeProfileId === profile.id ? 'text-app-primary font-semibold' : 'text-app-text'}`}
-                    onClick={() => { requestShellIntent({ type: 'profile', id: profile.id }); setActiveMenu(null) }}
-                  >
-                    {profile.name}
-                  </button>
-                  {!profile.isDefault && profile.id !== activeProfileId && (
-                    <button
-                      className="mr-2 p-1 text-app-muted hover:text-app-danger opacity-0 group-hover:opacity-100"
-                      onClick={event => { event.stopPropagation(); setProfileToDelete({ id: profile.id, name: profile.name }) }}
-                      title={t('profiles_menu.delete_title')}
-                    >
-                      <Trash2 size={11} />
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <div className="relative" onClick={event => event.stopPropagation()}>
-          <button className={menuButtonClass} onClick={() => setActiveMenu(activeMenu === 'tools' ? null : 'tools')}>
-            {t('menu.tools')}
-          </button>
-          {activeMenu === 'tools' && (
-            <div className={menuPanelClass}>
-              <button className={menuItemClass} onClick={() => { void handleToggleDaemon(); setActiveMenu(null) }}>
-                {daemonConnected ? t('footer.daemon_stop') : t('footer.daemon_start')}
-              </button>
-              <button
-                className={`${menuItemClass} text-app-danger`}
-                disabled={!activeProfile || activeProfile.rules.length === 0 || rulesDirty}
-                title={rulesDirty ? t('rules.unsaved') : undefined}
-                onClick={() => { setClearRulesOpen(true); setActiveMenu(null) }}
-              >
-                {t('menu.clear_mappings')}
-              </button>
-            </div>
-          )}
-        </div>
-
-        <div className="relative" onClick={event => event.stopPropagation()}>
-          <button className={menuButtonClass} onClick={() => setActiveMenu(activeMenu === 'help' ? null : 'help')}>
-            {t('menu.help')}
-          </button>
-          {activeMenu === 'help' && (
-            <div className={menuPanelClass}>
-              <button className={menuItemClass} onClick={() => { showToast(`KeyMaster Pro v${APP_VERSION}`, 'info'); setActiveMenu(null) }}>
-                {t('menu.about')}
-              </button>
-            </div>
-          )}
-        </div>
-      </div>
-
-      <div className="h-9 px-2 flex items-center gap-0.5 border-b border-app-border bg-app-surface/25 shrink-0">
-        <button className={toolButtonClass} onClick={toggleSidebar} title={sidebarOpen ? t('menu.hide_sidebar') : t('menu.show_sidebar')}>
-          {sidebarOpen ? <PanelLeftClose size={14} /> : <PanelLeft size={14} />}
-        </button>
-        <div className="w-px h-5 bg-app-border mx-1" />
-        <button className={toolButtonClass} disabled={!isRulesWorkspace} onClick={() => emitRuleCommand('add')} title={t('rules.add_rule')}>
-          <Plus size={14} className="text-app-success" />
-        </button>
-        <button className={toolButtonClass} disabled={!isRulesWorkspace} onClick={() => emitRuleCommand('delete')} title={t('rules.delete_rule')}>
-          <Trash2 size={12} className="text-app-danger" />
-        </button>
-        <div className="w-px h-5 bg-app-border mx-1" />
-        <button className={toolButtonClass} onClick={() => void handleToggleDaemon()} title={daemonConnected ? t('footer.daemon_stop') : t('footer.daemon_start')}>
-          {daemonConnected ? <Square size={10} fill="currentColor" /> : <Play size={12} className="text-app-success" fill="currentColor" />}
-        </button>
-        <button className={toolButtonClass} onClick={() => requestShellIntent({ type: 'category', category: 'settings' })} title={t('nav.settings')}>
-          <Settings size={13} />
-        </button>
-
-        <div className="ml-auto flex items-center gap-1.5 min-w-0">
-          <select
-            value={activeProfileId ?? ''}
-            onChange={event => { if (event.target.value) requestShellIntent({ type: 'profile', id: event.target.value }) }}
-            aria-label={t('footer.active_profile')}
-            className="h-7 w-44 max-w-[22vw] px-2 text-[10px] bg-app-bg border border-app-border outline-none focus:border-app-primary"
-          >
-            {profiles.map(profile => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
-          </select>
-
-          <label className="relative w-52 max-w-[25vw]">
-            <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-app-muted pointer-events-none" />
-            <input
-              value={shellSearch}
-              onChange={event => handleShellSearch(event.target.value)}
-              disabled={!isRulesWorkspace}
-              placeholder={t('rules.search_placeholder')}
-              className="h-7 w-full pl-7 pr-2 text-[10px] bg-app-bg border border-app-border outline-none focus:border-app-primary disabled:opacity-35"
-            />
-          </label>
-        </div>
-      </div>
+      <ShellToolbar
+        sidebarOpen={sidebarOpen}
+        isRulesWorkspace={isRulesWorkspace}
+        daemonConnected={daemonConnected}
+        profiles={profiles}
+        activeProfileId={activeProfileId}
+        search={shellSearch}
+        onToggleSidebar={toggleSidebar}
+        onAddRule={() => emitRuleCommand('add')}
+        onDeleteRule={() => emitRuleCommand('delete')}
+        onToggleDaemon={() => void handleToggleDaemon()}
+        onOpenSettings={() => requestShellIntent({ type: 'category', category: 'settings' })}
+        onSelectProfile={(id) => requestShellIntent({ type: 'profile', id })}
+        onSearchChange={handleShellSearch}
+      />
 
       <div className="flex-1 min-h-0 flex overflow-hidden">
-        {sidebarOpen && (
-          <aside className="w-[148px] shrink-0 border-r border-app-border bg-app-surface/20 flex flex-col">
-            <nav className="py-1">
-              {sidebarLinks.map(link => {
-                const Icon = link.icon
-                const active = activeCategory === link.id
-                return (
-                  <button
-                    key={link.id}
-                    onClick={() => requestShellIntent({ type: 'category', category: link.id })}
-                    className={`w-full h-9 px-2.5 flex items-center gap-2 text-left text-[10px] border-l-2 transition-colors ${
-                      active
-                        ? 'border-app-primary bg-app-primary/10 text-app-primary font-semibold'
-                        : 'border-transparent text-app-text hover:bg-app-surface-hover/55'
-                    }`}
-                  >
-                    <Icon size={14} className={active ? 'text-app-primary' : 'text-app-muted'} />
-                    <span>{link.label}</span>
-                  </button>
-                )
-              })}
-            </nav>
-          </aside>
-        )}
+        <ShellSidebar
+          open={sidebarOpen}
+          activeCategory={activeCategory}
+          onNavigate={(category) => requestShellIntent({ type: 'category', category })}
+        />
 
         <main className="flex-1 min-w-0 min-h-0 overflow-hidden bg-app-bg">
           {activeCategory === 'rules' && <RulesPage mode="all" />}
@@ -631,50 +349,17 @@ function App() {
         </main>
       </div>
 
-      <footer className="h-7 px-2.5 flex items-center border-t border-app-border bg-app-surface/35 text-[9px] text-app-muted shrink-0">
-        <div className="flex items-center gap-1.5 min-w-24">
-          <span className={`h-1.5 w-1.5 rounded-full ${daemonConnected ? 'bg-app-success' : 'bg-app-danger'}`} />
-          <span>{daemonConnected ? t('status.ready') : t('status.daemon_disconnected')}</span>
-        </div>
-        <div className="h-3.5 w-px bg-app-border mx-2.5" />
-        <span>{t('nav.rules')}: <strong className="text-app-text">{activeProfile?.rules.length ?? 0}</strong></span>
-        <div className="h-3.5 w-px bg-app-border mx-2.5" />
-        <span>{t('nav.macros')}: <strong className="text-app-text">{macroCount}</strong></span>
-        <div className="h-3.5 w-px bg-app-border mx-2.5" />
-        <span>{t('nav.layers')}: <strong className="text-app-text">{activeProfile?.layers.length ?? 0}</strong></span>
-        <div className="h-3.5 w-px bg-app-border mx-2.5" />
-        <span>{t('nav.text')}: <strong className="text-app-text">{textRuleCount}</strong></span>
-        {rulesDirty && <span className="ml-2.5 text-app-warning">● {t('rules.unsaved')}</span>}
-        <span className="ml-auto truncate max-w-[32vw]">{t('footer.active_profile')}: <strong className="text-app-text">{activeProfileName}</strong></span>
-      </footer>
+      <ShellStatusBar
+        daemonConnected={daemonConnected}
+        rulesCount={activeProfile?.rules.length ?? 0}
+        macroCount={macroCount}
+        layersCount={activeProfile?.layers.length ?? 0}
+        textRuleCount={textRuleCount}
+        rulesDirty={rulesDirty}
+        activeProfileName={activeProfileName}
+      />
 
-      <div className="fixed bottom-9 right-2.5 z-[9999] flex flex-col gap-2 pointer-events-none max-w-sm w-full">
-        {toasts.map(toast => {
-          const Icon = {
-            success: CheckCircle,
-            error: XCircle,
-            warning: AlertTriangle,
-            info: Info,
-          }[toast.type]
-          const accent = {
-            success: 'text-app-success',
-            error: 'text-app-danger',
-            warning: 'text-app-warning',
-            info: 'text-app-primary',
-          }[toast.type]
-
-          return (
-            <div key={toast.id} className="flex items-center gap-3 px-3 py-2.5 bg-app-bg border border-app-border shadow-lg pointer-events-auto">
-              <Icon size={15} className={`shrink-0 ${accent}`} />
-              <p className="text-xs text-app-text flex-1 select-text">{toast.message}</p>
-              <button onClick={() => setToasts(previous => previous.filter(item => item.id !== toast.id))} className="text-app-muted hover:text-app-text">
-                <X size={13} />
-              </button>
-            </div>
-          )
-        })}
-      </div>
-
+      <ToastViewport toasts={toasts} onDismiss={dismissToast} />
       <UpdateBanner />
       <OnboardingWizard />
 
@@ -686,7 +371,7 @@ function App() {
         confirmLabel={t('profiles_menu.create_profile')}
         cancelLabel={t('common.cancel')}
         onCancel={() => setCreateProfileOpen(false)}
-        onConfirm={async name => {
+        onConfirm={async (name) => {
           const created = await useProfileStore.getState().createProfile({ name })
           if (created) setCreateProfileOpen(false)
         }}
@@ -716,9 +401,10 @@ function App() {
         confirmLabel={t('menu.clear_mappings')}
         onCancel={() => setClearRulesOpen(false)}
         onConfirm={async () => {
-          const profile = useProfileStore.getState().profiles.find(item => item.id === useProfileStore.getState().activeProfileId)
+          const state = useProfileStore.getState()
+          const profile = state.profiles.find((item) => item.id === state.activeProfileId)
           if (!profile) return
-          const saved = await useProfileStore.getState().saveProfile({ ...profile, rules: [] })
+          const saved = await state.saveProfile({ ...profile, rules: [] })
           if (saved) setClearRulesOpen(false)
         }}
       />
@@ -734,7 +420,6 @@ function App() {
           if (!profileToDelete) return
           const deleted = await useProfileStore.getState().deleteProfile(profileToDelete.id)
           if (deleted) setProfileToDelete(null)
-          setActiveMenu(null)
         }}
       />
     </div>
