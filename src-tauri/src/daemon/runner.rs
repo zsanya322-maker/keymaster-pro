@@ -146,15 +146,12 @@ pub fn run_daemon(parent_pid: Option<u32>) -> Result<(), String> {
         let _ = windows::Win32::UI::WindowsAndMessaging::SetProcessDPIAware();
     }
 
-    // Initialize logger
     logging::init_logging()?;
     info!(
         "KeyMaster Pro Daemon v{} starting...",
         env!("CARGO_PKG_VERSION")
     );
 
-    // Save main thread ID and create its message queue before any background
-    // task can call request_shutdown().
     #[cfg(target_os = "windows")]
     unsafe {
         MAIN_THREAD_ID.store(
@@ -164,6 +161,20 @@ pub fn run_daemon(parent_pid: Option<u32>) -> Result<(), String> {
         prepare_main_thread_message_queue();
     }
 
+    // Создаём runtime и резервируем first pipe instance ПЕРЕД чтением/миграцией
+    // persistence и перед любыми background engines. Это настоящий startup gate:
+    // второй daemon завершается до simulator/context/global hooks.
+    let tokio_rt = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(4)
+        .thread_name("km-daemon")
+        .enable_all()
+        .build()
+        .map_err(|e| format!("Failed to create tokio runtime: {}", e))?;
+
+    let first_ipc_server = tokio_rt.block_on(async {
+        crate::daemon::ipc::reserve_first_pipe_instance()
+    })?;
+
     // load_config сам безопасно восстанавливает повреждённый legacy config, но
     // future schema / I/O failure считаются fatal: старый daemon не имеет права
     // запускаться с дефолтами и затем случайно перезаписать более новый config.
@@ -172,45 +183,30 @@ pub fn run_daemon(parent_pid: Option<u32>) -> Result<(), String> {
     info!("Configuration loaded. Language: {}", app_config.language);
     let loaded_profile = resolve_startup_profile(&mut app_config)?;
 
-    // Create shared state
     let state = DaemonState::from_config(&app_config).into_ref();
 
-    // Start Simulator Actor
+    // С этого места единственный daemon ownership уже подтверждён.
     let simulator_tx = crate::simulator::spawn_simulator_thread();
     if let Ok(mut s) = state.write() {
         s.simulator = Some(simulator_tx);
     }
 
-    // Start Context Tracker
     crate::trackers::context_tracker::spawn_context_tracker(
         crate::context::AppContextState::default(),
     );
 
-    // Start Tokio runtime for IPC and background tasks
-    let tokio_rt = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(4)
-        .thread_name("km-daemon")
-        .enable_all()
-        .build()
-        .map_err(|e| format!("Failed to create tokio runtime: {}", e))?;
-
     let _ = TOKIO_HANDLE.set(tokio_rt.handle().clone());
 
-    // Clone state for tokio tasks
     let ipc_state = state.clone();
     let shutdown_state = state.clone();
 
-    // Start IPC server in Tokio. start_ipc_server enforces ownership of the
-    // first pipe instance, so a duplicate daemon exits instead of installing a
-    // second global hook engine against the same IPC name.
     tokio_rt.spawn(async move {
-        if let Err(e) = crate::daemon::ipc::start_ipc_server(ipc_state).await {
+        if let Err(e) = crate::daemon::ipc::start_ipc_server(ipc_state, first_ipc_server).await {
             error!("IPC server stopped with error: {}", e);
             request_shutdown();
         }
     });
 
-    // Запустить мониторинг родительского процесса (watchdog)
     if let Some(pid) = parent_pid {
         tokio_rt.spawn(async move {
             info!("Запущен мониторинг родительского процесса PID: {}", pid);
@@ -304,7 +300,6 @@ pub fn run_daemon(parent_pid: Option<u32>) -> Result<(), String> {
     // матчит linked_apps профилей с активным процессом; fallback на дефолт только
     // при включённой опции и без явного ручного выбора пользователя.
 
-    // Запустить фоновый ticker для Tap-Hold (Kanata-style)
     let taphold_state = state.clone();
     tokio_rt.spawn(async move {
         info!("Запущен фоновый ticker для Tap-Hold маппингов");
@@ -321,7 +316,6 @@ pub fn run_daemon(parent_pid: Option<u32>) -> Result<(), String> {
         }
     });
 
-    // Compile the already-resolved startup profile into runtime state.
     {
         if let Ok(mut s) = state.write() {
             let frontend_config = crate::schemas::frontend::FrontendConfig {
@@ -335,7 +329,6 @@ pub fn run_daemon(parent_pid: Option<u32>) -> Result<(), String> {
         }
     }
 
-    // Install hooks (keyboard + mouse)
     crate::daemon::hooks::install_hooks(state.clone())?;
 
     {
@@ -350,7 +343,6 @@ pub fn run_daemon(parent_pid: Option<u32>) -> Result<(), String> {
 
     run_message_loop(&state);
 
-    // Graceful shutdown
     info!("Daemon shutting down...");
     DAEMON_RUNNING.store(false, Ordering::SeqCst);
 
@@ -378,8 +370,6 @@ fn run_message_loop(_state: &DaemonStateRef) {
     {
         use windows::Win32::UI::WindowsAndMessaging::{GetMessageW, MSG};
 
-        // Если startup-задача уже запросила shutdown (например duplicate daemon
-        // не смог получить first pipe instance), не блокируемся в GetMessage.
         if !DAEMON_RUNNING.load(Ordering::SeqCst) {
             return;
         }
@@ -487,8 +477,6 @@ pub fn is_daemon_running() -> bool {
             }
 
             let error = GetLastError();
-            // Timeout/busy означает, что pipe существует, просто сейчас нет
-            // свободного instance. Это всё ещё "daemon running".
             error == ERROR_SEM_TIMEOUT || error == ERROR_PIPE_BUSY
         }
     }
