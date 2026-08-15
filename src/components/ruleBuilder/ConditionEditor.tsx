@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
-import { Crosshair, Trash2 } from 'lucide-react';
+import { AlertTriangle, Crosshair, Trash2 } from 'lucide-react';
 import type { FrontendCondition } from '../../lib/types';
 import { useProfileStore } from '../../store/profileStore';
 
@@ -63,20 +63,19 @@ export const ConditionEditor: React.FC<ConditionEditorProps> = ({ condition, onC
         <select
           value={condition.type}
           onChange={(event) => {
-            const type = event.target.value as FrontendCondition['type'];
-            if (type === 'layerActive') {
-              onChange({ type, layerId: '' });
-            } else if (type === 'virtualDesktop') {
-              onChange({ type, id: 0 });
-            } else {
-              onChange({ type: 'windowMatch', process: '', title: '' });
-            }
+            const type = event.target.value;
+            if (type === 'layerActive') onChange({ type: 'layerActive', layerId: '' });
+            else onChange({ type: 'windowMatch', process: '', title: '' });
           }}
-          className="h-7 w-36 shrink-0 border border-app-border bg-app-surface/55 px-1.5 text-[11px] text-app-text outline-none focus:border-app-primary"
+          className="h-7 w-40 shrink-0 border border-app-border bg-app-surface/55 px-1.5 text-[11px] text-app-text outline-none focus:border-app-primary"
         >
           <option value="windowMatch">{t('ruleBuilder.condition_types.windowMatch')}</option>
           <option value="layerActive">{t('ruleBuilder.condition_types.layerActive')}</option>
-          <option value="virtualDesktop">{t('ruleBuilder.condition_types.virtualDesktop', 'Виртуальный рабочий стол')}</option>
+          {condition.type === 'virtualDesktop' && (
+            <option value="virtualDesktop" disabled>
+              {t('ruleBuilder.condition_types.virtualDesktop', { defaultValue: 'Виртуальный рабочий стол' })}
+            </option>
+          )}
         </select>
 
         <div className="flex-1 min-w-0">
@@ -93,7 +92,7 @@ export const ConditionEditor: React.FC<ConditionEditorProps> = ({ condition, onC
                 type="text"
                 value={condition.title || ''}
                 onChange={(event) => onChange({ ...condition, title: event.target.value })}
-                placeholder={t('ruleBuilder.placeholders.title', 'Заголовок окна')}
+                placeholder={t('ruleBuilder.placeholders.title', { defaultValue: 'Заголовок окна' })}
                 className="h-7 min-w-0 border border-app-border bg-app-bg px-2 text-[11px] text-app-text outline-none focus:border-app-primary"
               />
               <button
@@ -105,12 +104,12 @@ export const ConditionEditor: React.FC<ConditionEditorProps> = ({ condition, onC
                     ? 'border-amber-500/60 bg-amber-500/10 text-amber-500 cursor-not-allowed'
                     : 'border-app-border bg-app-surface text-app-text hover:bg-app-surface-hover'
                 }`}
-                title={t('ruleBuilder.hints.capture_window', 'Захватить активное окно')}
+                title={t('ruleBuilder.hints.capture_window', { defaultValue: 'Захватить активное окно' })}
               >
                 <Crosshair size={11} />
                 {isCapturing
-                  ? t('ruleBuilder.buttons.capturing', 'Захват через {{seconds}}...', { seconds: countdown })
-                  : t('ruleBuilder.buttons.capture', 'Захват')}
+                  ? t('ruleBuilder.buttons.capturing', { defaultValue: 'Захват через {{seconds}}...', seconds: countdown })
+                  : t('ruleBuilder.buttons.capture', { defaultValue: 'Захват' })}
               </button>
               <div className="col-span-3 text-[10px] leading-4 text-app-muted">
                 {t('ruleBuilder.hints.windowMatch_or')}
@@ -136,20 +135,12 @@ export const ConditionEditor: React.FC<ConditionEditorProps> = ({ condition, onC
           )}
 
           {condition.type === 'virtualDesktop' && (
-            <div className="flex items-center gap-2">
-              <input
-                type="number"
-                min={0}
-                step={1}
-                value={condition.id}
-                onChange={(event) => onChange({
-                  type: 'virtualDesktop',
-                  id: Math.max(0, Number.parseInt(event.target.value, 10) || 0),
+            <div className="min-h-7 flex items-center gap-2 border border-app-warning/40 bg-app-warning/5 px-2 text-[10px] text-app-warning">
+              <AlertTriangle size={12} className="shrink-0" />
+              <span>
+                {t('ruleBuilder.hints.virtual_desktop_unsupported', {
+                  defaultValue: 'Это условие есть в старой схеме, но движок его ещё не реализует. Выберите поддерживаемое условие или удалите строку.',
                 })}
-                className="h-7 w-24 border border-app-border bg-app-bg px-2 text-[11px] font-mono text-app-text outline-none focus:border-app-primary"
-              />
-              <span className="text-[10px] text-app-muted">
-                {t('ruleBuilder.hints.virtual_desktop_id', 'ID рабочего стола')}
               </span>
             </div>
           )}
