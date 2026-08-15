@@ -5,9 +5,9 @@
 /// а GUI-конфигурация читается/пишется напрямую, чтобы настройки сохранялись
 /// даже при остановленном демоне.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::State;
 use tracing::{info, warn};
-use std::sync::atomic::{AtomicBool, Ordering};
 
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
@@ -89,6 +89,13 @@ pub fn spawn_daemon(state: State<'_, GuiState>) -> Result<serde_json::Value, Str
 /// задержку завершения daemon в GUI.
 #[tauri::command]
 pub async fn stop_daemon() -> Result<serde_json::Value, String> {
+    if !crate::daemon::runner::is_daemon_running() {
+        return Ok(serde_json::json!({
+            "success": true,
+            "message": "Daemon already stopped"
+        }));
+    }
+
     info!("stop_daemon: отправка shutdown через IPC");
     if let Err(e) = crate::daemon::ipc_client::call("shutdown", None).await {
         warn!("stop_daemon: не удалось отправить команду: {}", e);
@@ -114,6 +121,17 @@ pub async fn stop_daemon() -> Result<serde_json::Value, String> {
         "success": false,
         "message": "Daemon shutdown timeout"
     }))
+}
+
+async fn stop_daemon_before_process_transition(reason: &str) {
+    match stop_daemon().await {
+        Ok(result) => {
+            if result.get("success").and_then(|v| v.as_bool()) == Some(false) {
+                warn!("{}: daemon не подтвердил остановку: {}", reason, result);
+            }
+        }
+        Err(error) => warn!("{}: ошибка остановки daemon: {}", reason, error),
+    }
 }
 
 /// Получить статус Daemon через IPC.
@@ -153,44 +171,55 @@ pub fn greet(name: &str) -> String {
     format!("Привет, {}! KeyMaster Pro работает 🎉", name)
 }
 
-/// Полностью завершить GUI. В отличие от закрытия окна, эта команда всегда
-/// означает явный пункт меню «Выход» и не должна превращаться в hide-to-tray.
+/// Полностью завершить GUI. Перед выходом штатно останавливаем daemon;
+/// parent-PID watchdog остаётся аварийной страховкой, а не основным способом.
 #[tauri::command]
-pub fn quit_app(app_handle: tauri::AppHandle) {
+pub async fn quit_app(app_handle: tauri::AppHandle) {
     info!("quit_app: explicit application exit");
+    stop_daemon_before_process_transition("quit_app").await;
     app_handle.exit(0);
 }
 
 /// Перезапустить приложение (используется после обновления).
+/// Сначала полностью останавливаем daemon, чтобы новый GUI не успел подключиться
+/// к daemon, привязанному watchdog'ом к PID старого GUI.
 #[tauri::command]
-pub fn restart_app(app_handle: tauri::AppHandle) {
+pub async fn restart_app(app_handle: tauri::AppHandle) {
     info!("restart_app: перезапуск приложения");
+    stop_daemon_before_process_transition("restart_app").await;
     app_handle.restart();
 }
 
 /// Перезапустить приложение от имени Администратора (UAC).
 #[tauri::command]
-pub fn restart_as_admin(state: State<'_, GuiState>) -> Result<(), String> {
+pub async fn restart_as_admin(state: State<'_, GuiState>) -> Result<(), String> {
     #[cfg(target_os = "windows")]
-    unsafe {
+    {
         use windows::Win32::UI::Shell::ShellExecuteW;
         use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
         use windows::core::HSTRING;
 
-        let exe_path = state.exe_path.as_ref()
+        let exe_path = state.exe_path.clone()
             .ok_or("Не удалось определить путь к исполняемому файлу")?;
+
+        // Закрываем старый daemon до старта elevated GUI. Иначе новый GUI может
+        // кратко подключиться к daemon старого parent PID, который затем умрёт
+        // по watchdog и оставит новое окно без engine.
+        stop_daemon_before_process_transition("restart_as_admin").await;
 
         let verb = HSTRING::from("runas");
         let file = HSTRING::from(exe_path);
 
-        let _ = ShellExecuteW(
-            None,
-            &verb,
-            &file,
-            None,
-            None,
-            SW_SHOWNORMAL,
-        );
+        unsafe {
+            let _ = ShellExecuteW(
+                None,
+                &verb,
+                &file,
+                None,
+                None,
+                SW_SHOWNORMAL,
+            );
+        }
         std::process::exit(0);
     }
 
