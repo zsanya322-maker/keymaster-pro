@@ -13,13 +13,23 @@ pub mod simulator;
 
 use gui::commands::GuiState;
 use tauri::{Emitter, Manager};
-use tracing::{info, error};
+use tracing::{error, info};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     info!("Starting GUI process");
 
     tauri::Builder::default()
+        // Tauri рекомендует регистрировать single-instance первым. Повторный
+        // запуск не создаёт вторую оболочку/второй GUI lifecycle — вместо этого
+        // поднимаем уже существующее окно из tray.
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.unminimize();
+                let _ = window.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
@@ -58,7 +68,7 @@ pub fn run() {
                 loop {
                     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
                     let pipe_path = crate::shared::constants::IPC_PIPE_NAME;
-                    
+
                     let mut pipe = match ClientOptions::new().open(pipe_path) {
                         Ok(p) => {
                             tracing::info!("GUI event listener connected to Named Pipe: {}", pipe_path);
