@@ -1,18 +1,30 @@
 use std::collections::HashMap;
 
 use crate::schemas::engine::{
-    CompiledRule, CompiledTapHoldRule, EngineAction, EngineCondition, EngineSchema,
-    SimulatorCommand,
+    CompiledMouseMoveRule, CompiledRule, CompiledTapHoldRule, EngineAction, EngineCondition,
+    EngineSchema, SimulatorCommand,
 };
 use crate::schemas::frontend::{
     FrontendAction, FrontendCondition, FrontendConfig, FrontendRule, FrontendTrigger,
-    MacroAction,
+    MacroAction, MouseWheelDirection,
 };
 use crate::shared::calculate_hash;
+
+fn wheel_key(direction: MouseWheelDirection) -> i8 {
+    match direction {
+        MouseWheelDirection::Up => 1,
+        MouseWheelDirection::Down => -1,
+        MouseWheelDirection::Right => 2,
+        MouseWheelDirection::Left => -2,
+    }
+}
 
 pub fn compile_schema(frontend: &FrontendConfig) -> EngineSchema {
     let mut keyboard_map: HashMap<u8, Vec<CompiledRule>> = HashMap::new();
     let mut mouse_map: HashMap<u8, Vec<CompiledRule>> = HashMap::new();
+    let mut mouse_wheel_map: HashMap<i8, Vec<CompiledRule>> = HashMap::new();
+    let mut mouse_double_click_map: HashMap<u8, Vec<CompiledRule>> = HashMap::new();
+    let mut mouse_move_rules: Vec<CompiledMouseMoveRule> = Vec::new();
     let mut tap_hold_map: HashMap<u8, Vec<CompiledTapHoldRule>> = HashMap::new();
     let mut text_expansion_map: HashMap<String, Vec<CompiledRule>> = HashMap::new();
 
@@ -42,6 +54,28 @@ pub fn compile_schema(frontend: &FrontendConfig) -> EngineSchema {
                     .or_default()
                     .push(compile_rule(rule, 0, false));
             }
+            FrontendTrigger::MouseWheel { direction } => {
+                mouse_wheel_map
+                    .entry(wheel_key(*direction))
+                    .or_default()
+                    .push(compile_rule(rule, 0, true));
+            }
+            FrontendTrigger::MouseDoubleClick { code } => {
+                mouse_double_click_map
+                    .entry(*code)
+                    .or_default()
+                    .push(compile_rule(rule, 0, true));
+            }
+            FrontendTrigger::MouseMove {
+                min_distance,
+                cooldown_ms,
+            } => {
+                mouse_move_rules.push(compile_mouse_move_rule(
+                    rule,
+                    *min_distance,
+                    *cooldown_ms,
+                ));
+            }
             FrontendTrigger::TapHoldKeyDown { code, timeout_ms } => {
                 tap_hold_map
                     .entry(*code)
@@ -63,6 +97,13 @@ pub fn compile_schema(frontend: &FrontendConfig) -> EngineSchema {
     for rules in mouse_map.values_mut() {
         rules.sort_by(|a, b| b.priority.cmp(&a.priority));
     }
+    for rules in mouse_wheel_map.values_mut() {
+        rules.sort_by(|a, b| b.priority.cmp(&a.priority));
+    }
+    for rules in mouse_double_click_map.values_mut() {
+        rules.sort_by(|a, b| b.priority.cmp(&a.priority));
+    }
+    mouse_move_rules.sort_by(|a, b| b.priority.cmp(&a.priority));
     for rules in tap_hold_map.values_mut() {
         rules.sort_by(|a, b| b.priority.cmp(&a.priority));
     }
@@ -73,6 +114,9 @@ pub fn compile_schema(frontend: &FrontendConfig) -> EngineSchema {
     EngineSchema {
         keyboard_map,
         mouse_map,
+        mouse_wheel_map,
+        mouse_double_click_map,
+        mouse_move_rules,
         tap_hold_map,
         text_expansion_map,
     }
@@ -118,6 +162,20 @@ fn compile_rule(
         trigger_on_down,
         conditions,
         actions,
+    }
+}
+
+fn compile_mouse_move_rule(
+    rule: &FrontendRule,
+    min_distance: u16,
+    cooldown_ms: u32,
+) -> CompiledMouseMoveRule {
+    CompiledMouseMoveRule {
+        priority: rule.priority,
+        min_distance: min_distance.max(1),
+        cooldown_ms,
+        conditions: rule.conditions.iter().map(compile_condition).collect(),
+        actions: rule.actions.iter().map(compile_action).collect(),
     }
 }
 
@@ -209,7 +267,7 @@ mod tests {
     use super::*;
     use crate::schemas::frontend::{
         key_modifiers, FrontendAction, FrontendConfig, FrontendRule, FrontendTrigger,
-        KeyChord,
+        KeyChord, MouseWheelDirection,
     };
 
     fn rule(id: &str, priority: i32, trigger: FrontendTrigger, action: FrontendAction) -> FrontendRule {
@@ -228,7 +286,7 @@ mod tests {
     }
 
     #[test]
-    fn test_compile_schema_distribution_modifiers_and_edges() {
+    fn test_compile_schema_distribution_modifiers_edges_and_mouse_types() {
         let rules = vec![
             rule(
                 "1",
@@ -288,6 +346,29 @@ mod tests {
                     text: "result".into(),
                 },
             ),
+            rule(
+                "6",
+                30,
+                FrontendTrigger::MouseWheel {
+                    direction: MouseWheelDirection::Up,
+                },
+                FrontendAction::TypeText { text: "up".into() },
+            ),
+            rule(
+                "7",
+                25,
+                FrontendTrigger::MouseDoubleClick { code: 4 },
+                FrontendAction::TypeText { text: "x1x2".into() },
+            ),
+            rule(
+                "8",
+                2,
+                FrontendTrigger::MouseMove {
+                    min_distance: 32,
+                    cooldown_ms: 150,
+                },
+                FrontendAction::TypeText { text: "move".into() },
+            ),
         ];
 
         let config = FrontendConfig {
@@ -299,6 +380,9 @@ mod tests {
         let schema = compile_schema(&config);
         assert_eq!(schema.keyboard_map.len(), 1);
         assert_eq!(schema.mouse_map.len(), 1);
+        assert_eq!(schema.mouse_wheel_map.len(), 1);
+        assert_eq!(schema.mouse_double_click_map.len(), 1);
+        assert_eq!(schema.mouse_move_rules.len(), 1);
         assert_eq!(schema.tap_hold_map.len(), 1);
         assert_eq!(schema.text_expansion_map.len(), 1);
 
@@ -312,6 +396,10 @@ mod tests {
             kb_rules[1].required_modifiers,
             key_modifiers::CTRL | key_modifiers::SHIFT
         );
+        assert_eq!(schema.mouse_wheel_map.get(&1).unwrap()[0].priority, 30);
+        assert_eq!(schema.mouse_double_click_map.get(&4).unwrap()[0].priority, 25);
+        assert_eq!(schema.mouse_move_rules[0].min_distance, 32);
+        assert_eq!(schema.mouse_move_rules[0].cooldown_ms, 150);
     }
 
     #[test]
@@ -334,6 +422,17 @@ mod tests {
             tap_hold_timeout_ms: 200,
         });
         assert!(schema.keyboard_map.is_empty());
+        assert!(schema.mouse_wheel_map.is_empty());
+        assert!(schema.mouse_double_click_map.is_empty());
+        assert!(schema.mouse_move_rules.is_empty());
+    }
+
+    #[test]
+    fn test_wheel_direction_keys_are_stable() {
+        assert_eq!(wheel_key(MouseWheelDirection::Up), 1);
+        assert_eq!(wheel_key(MouseWheelDirection::Down), -1);
+        assert_eq!(wheel_key(MouseWheelDirection::Right), 2);
+        assert_eq!(wheel_key(MouseWheelDirection::Left), -2);
     }
 
     #[test]
