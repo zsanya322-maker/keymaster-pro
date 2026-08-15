@@ -147,13 +147,6 @@ function formatActionLabel(action: FrontendAction, t: TFunction): string {
   }
 }
 
-function formatRuleSummary(rule: FrontendRule, t: TFunction): string {
-  const firstAction = rule.actions[0];
-  if (!firstAction) return '—';
-  const first = formatActionLabel(firstAction, t);
-  return rule.actions.length > 1 ? `${first}  +${rule.actions.length - 1}` : first;
-}
-
 function matchesMode(rule: FrontendRule, mode: RulesViewMode): boolean {
   if (mode === 'all') return true;
   if (mode === 'macros') return rule.actions.some((action) => action.type === 'runMacro');
