@@ -1,0 +1,51 @@
+name: v0.3.1 Macro Controls
+
+on:
+  push:
+    branches:
+      - dev/v0.3.1-mouse-macros
+    paths:
+      - scripts/v031_macro_controls.py
+      - .github/workflows/v031-macro-controls.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dev/v0.3.1-mouse-macros
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Apply v0.3.1 completion
+        run: python scripts/v031_macro_controls.py
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Frontend build
+        run: pnpm build
+      - name: Rust check
+        working-directory: src-tauri
+        run: cargo check --all-targets
+      - name: Rust tests
+        working-directory: src-tauri
+        run: cargo test
+      - name: Commit validated v0.3.1
+        shell: pwsh
+        run: |
+          Remove-Item scripts/v031_macro_controls.py -Force
+          Remove-Item .github/workflows/v031-macro-controls.yml -Force
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "feat(0.3.1): complete mouse triggers and macro playback controls"
+          git push origin HEAD:dev/v0.3.1-mouse-macros
