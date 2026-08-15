@@ -103,6 +103,8 @@ export const KeyPicker: React.FC<KeyPickerProps> = ({ value, onChange, className
     };
   }, [isRecording]);
 
+  const keyName = value === 0 ? t('keyPicker.none') : vkToName(value);
+
   return (
     <button
       ref={buttonRef}
@@ -111,18 +113,18 @@ export const KeyPicker: React.FC<KeyPickerProps> = ({ value, onChange, className
         if (Date.now() - lastFinishTime.current < 100) return;
         setIsRecording((current) => !current);
       }}
-      className={`h-7 min-w-[110px] px-2 border text-[11px] font-medium text-center select-none transition-colors ${
+      className={`h-7 min-w-[100px] px-2 border text-[11px] text-left select-none transition-colors ${
         isRecording
-          ? 'border-app-primary bg-app-primary/10 text-app-primary'
-          : 'border-app-border bg-app-bg text-app-text hover:bg-app-surface-hover'
+          ? 'border-app-primary bg-app-primary/8 text-app-primary'
+          : 'border-app-border bg-app-bg text-app-text hover:bg-app-surface'
       } ${className}`}
-      title={isRecording ? t('keyPicker.listening_tooltip') : t('keyPicker.capture_tooltip')}
-    >
-      {isRecording
-        ? t('keyPicker.press_key')
+      title={isRecording
+        ? t('keyPicker.listening_tooltip')
         : value === 0
-          ? t('keyPicker.none', 'None')
-          : `${vkToName(value)} (${value})`}
+          ? t('keyPicker.capture_tooltip')
+          : `${t('keyPicker.capture_tooltip')} · VK ${value}`}
+    >
+      {isRecording ? t('keyPicker.press_key') : keyName}
     </button>
   );
 };
