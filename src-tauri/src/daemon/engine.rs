@@ -1,11 +1,12 @@
 use std::collections::HashMap;
-use std::sync::{Mutex, LazyLock};
-use std::sync::RwLockReadGuard;
+use std::sync::{LazyLock, Mutex, RwLockReadGuard};
 use std::time::Instant;
+
 use tracing::error;
+
 use crate::context::AppContext;
 use crate::daemon::state::DaemonStateRef;
-use crate::schemas::engine::{EngineCondition, EngineAction, SimulatorCommand};
+use crate::schemas::engine::{EngineAction, EngineCondition, SimulatorCommand};
 use crate::shared::calculate_hash;
 
 /// Тип результата обработки события
@@ -26,9 +27,6 @@ fn try_read_ctx(ctx_arc: &crate::context::AppContextState) -> Option<RwLockReadG
         Ok(guard) => Some(guard),
         Err(poisoned) => {
             error!("AppContext RwLock отравлен, пропускаем обработку правила");
-            // Достаём гварда из отравленного замка — данные внутри консистентны,
-            // просто паника произошла в другом потоке. Возвращаем, чтобы обработка
-            // продолжалась на «последнем корректном» состоянии, а не падал daemon.
             Some(poisoned.into_inner())
         }
     }
@@ -43,7 +41,8 @@ pub struct PendingTapHold {
     pub is_held: bool,
 }
 
-pub static PENDING_TAP_HOLDS: LazyLock<Mutex<HashMap<u8, PendingTapHold>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+pub static PENDING_TAP_HOLDS: LazyLock<Mutex<HashMap<u8, PendingTapHold>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 fn check_conditions(conditions: &[EngineCondition], ctx: &crate::context::AppContext) -> bool {
     for cond in conditions {
@@ -54,12 +53,12 @@ fn check_conditions(conditions: &[EngineCondition], ctx: &crate::context::AppCon
                 }
             }
             EngineCondition::VirtualDesktop { .. } => {
-                // Not implemented yet
+                // Not implemented yet. Не расширяем функциональность в v0.3 UI/stability.
             }
-            EngineCondition::WindowMatch { process_hash, title_contains } => {
-                // ИЛИ: совпадает процесс ИЛИ совпадает заголовок.
-                // Если оба None (пустое условие) — считаем, что не сработало,
-                // чтобы правило без данных не матчило всё подряд.
+            EngineCondition::WindowMatch {
+                process_hash,
+                title_contains,
+            } => {
                 let process_ok = match process_hash {
                     Some(h) => calculate_hash(&ctx.active_process) == *h,
                     None => false,
@@ -103,50 +102,59 @@ fn notify_layer_change(state: Option<&DaemonStateRef>, layer_id_hash: u64, activ
 }
 
 fn execute_actions(
-    actions: &[EngineAction], 
-    simulator: &crate::simulator::SimulatorSender, 
-    ctx_arc: &std::sync::Arc<std::sync::RwLock<crate::context::AppContext>>, 
+    actions: &[EngineAction],
+    simulator: &crate::simulator::SimulatorSender,
+    ctx_arc: &std::sync::Arc<std::sync::RwLock<crate::context::AppContext>>,
     is_down: bool,
     state: Option<&DaemonStateRef>,
 ) -> EventAction {
     for action in actions {
         match action {
             EngineAction::RemapKey { code } => {
-                if is_down { let _ = simulator.send(SimulatorCommand::PressKey(*code)); }
-                else { let _ = simulator.send(SimulatorCommand::ReleaseKey(*code)); }
+                if is_down {
+                    let _ = simulator.send(SimulatorCommand::PressKey(*code));
+                } else {
+                    let _ = simulator.send(SimulatorCommand::ReleaseKey(*code));
+                }
             }
             EngineAction::RemapMouse { code } => {
-                if is_down { let _ = simulator.send(SimulatorCommand::MousePress(*code)); }
-                else { let _ = simulator.send(SimulatorCommand::MouseRelease(*code)); }
+                if is_down {
+                    let _ = simulator.send(SimulatorCommand::MousePress(*code));
+                } else {
+                    let _ = simulator.send(SimulatorCommand::MouseRelease(*code));
+                }
             }
             EngineAction::TypeText { text } => {
-                if is_down { let _ = simulator.send(SimulatorCommand::TypeString(text.clone())); }
+                if is_down {
+                    let _ = simulator.send(SimulatorCommand::TypeString(text.clone()));
+                }
             }
             EngineAction::MacroCommands { commands } => {
                 if is_down {
-                    let mut restore_pos = None;
+                    let mut macro_commands = commands.clone();
+
+                    // Позицию курсора фиксируем в момент запуска макроса, но команду
+                    // возврата добавляем в КОНЕЦ macro-job. Раньше все команды, включая
+                    // Delay, шли в общую очередь и могли задерживать обычный remap.
                     #[cfg(target_os = "windows")]
                     {
-                        if let Some(s_ref) = state {
-                            if let Ok(s) = s_ref.read() {
+                        if let Some(state_ref) = state {
+                            if let Ok(s) = state_ref.read() {
                                 if s.restore_mouse_after_macro {
                                     let mut point = windows::Win32::Foundation::POINT { x: 0, y: 0 };
                                     unsafe {
                                         let _ = windows::Win32::UI::WindowsAndMessaging::GetCursorPos(&mut point);
                                     }
-                                    restore_pos = Some((point.x, point.y));
+                                    macro_commands.push(SimulatorCommand::MouseAbsolute {
+                                        x: point.x,
+                                        y: point.y,
+                                    });
                                 }
                             }
                         }
                     }
 
-                    for cmd in commands { 
-                        let _ = simulator.send(cmd.clone()); 
-                    }
-
-                    if let Some((rx, ry)) = restore_pos {
-                        let _ = simulator.send(SimulatorCommand::MouseAbsolute { x: rx, y: ry });
-                    }
+                    let _ = simulator.send_macro(macro_commands);
                 }
             }
             EngineAction::ToggleLayer { layer_id_hash } => {
@@ -157,7 +165,6 @@ fn execute_actions(
                         state_changed = true;
                         if wctx.active_layers.contains(layer_id_hash) {
                             wctx.active_layers.remove(layer_id_hash);
-                            became_active = false;
                         } else {
                             wctx.active_layers.insert(*layer_id_hash);
                             became_active = true;
@@ -209,9 +216,9 @@ fn execute_actions(
             EngineAction::SystemVolume { action } => {
                 if is_down {
                     let vk = match action.as_str() {
-                        "mute" => 0xAD, // VK_VOLUME_MUTE
-                        "down" => 0xAE, // VK_VOLUME_DOWN
-                        "up" => 0xAF,   // VK_VOLUME_UP
+                        "mute" => 0xAD,
+                        "down" => 0xAE,
+                        "up" => 0xAF,
                         _ => 0,
                     };
                     if vk != 0 {
@@ -223,10 +230,10 @@ fn execute_actions(
             EngineAction::MediaKey { key } => {
                 if is_down {
                     let vk = match key.as_str() {
-                        "play_pause" => 0xB3, // VK_MEDIA_PLAY_PAUSE
-                        "next" => 0xB0,       // VK_MEDIA_NEXT_TRACK
-                        "prev" => 0xB1,       // VK_MEDIA_PREV_TRACK
-                        "stop" => 0xB2,       // VK_MEDIA_STOP
+                        "play_pause" => 0xB3,
+                        "next" => 0xB0,
+                        "prev" => 0xB1,
+                        "stop" => 0xB2,
                         _ => 0,
                     };
                     if vk != 0 {
@@ -265,13 +272,12 @@ fn execute_actions(
     EventAction::Block
 }
 
-
 pub fn tick_tap_holds(state: Option<&DaemonStateRef>) {
     let now = Instant::now();
     let mut to_trigger_hold = Vec::new();
-    
+
     if let Ok(mut pending) = PENDING_TAP_HOLDS.lock() {
-        for (_vk, info) in pending.iter_mut() {
+        for info in pending.values_mut() {
             if !info.is_held && now.duration_since(info.down_time).as_millis() as u32 >= info.timeout_ms {
                 info.is_held = true;
                 to_trigger_hold.push(info.hold_actions.clone());
@@ -332,7 +338,7 @@ pub fn process_keyboard_event(
             if let Ok(mut buf) = s.typed_buffer.lock() {
                 buf.clear();
             }
-        } else if vk_code == 0x08 { // Backspace
+        } else if vk_code == 0x08 {
             if let Ok(mut buf) = s.typed_buffer.lock() {
                 buf.pop();
             }
@@ -341,10 +347,9 @@ pub fn process_keyboard_event(
             if let Some(c) = vk_to_char(vk_code, shift) {
                 let mut matched_rule = None;
                 let mut matched_sequence = String::new();
-                
+
                 if let Ok(mut buf) = s.typed_buffer.lock() {
                     buf.push(c);
-                    // Keep buffer under reasonable size
                     let char_count = buf.chars().count();
                     if char_count > 30 {
                         let skip_chars = char_count - 30;
@@ -352,8 +357,7 @@ pub fn process_keyboard_event(
                             buf.drain(0..byte_idx);
                         }
                     }
-                    
-                    // Search for match in text_expansion_map
+
                     let Some(ctx) = try_read_ctx(&ctx_arc) else {
                         return EventAction::PassThrough;
                     };
@@ -371,32 +375,26 @@ pub fn process_keyboard_event(
                             break;
                         }
                     }
-                    
-                    // If matched, clear buffer
+
                     if matched_rule.is_some() {
                         buf.clear();
                     }
                 }
-                
+
                 if let Some(rule) = matched_rule {
-                    // Send backspaces to delete typed letters (excluding the blocked one)
-                    let backspaces = matched_sequence.chars().count() - 1;
+                    let backspaces = matched_sequence.chars().count().saturating_sub(1);
                     for _ in 0..backspaces {
                         let _ = simulator.send(SimulatorCommand::PressKey(0x08));
                         let _ = simulator.send(SimulatorCommand::ReleaseKey(0x08));
                     }
-                    
-                    // Execute expansion actions
+
                     execute_actions(&rule.actions, simulator, &ctx_arc, true, state);
                     execute_actions(&rule.actions, simulator, &ctx_arc, false, state);
-                    
+
                     return EventAction::Block;
                 }
-            } else {
-                // Non-printable character typed (e.g. Enter, Escape, Arrow key) -> clear buffer
-                if let Ok(mut buf) = s.typed_buffer.lock() {
-                    buf.clear();
-                }
+            } else if let Ok(mut buf) = s.typed_buffer.lock() {
+                buf.clear();
             }
         }
     }
@@ -406,8 +404,7 @@ pub fn process_keyboard_event(
         let mut early_trigger = Vec::new();
         if let Ok(mut pending) = PENDING_TAP_HOLDS.lock() {
             if !pending.contains_key(&vk_code) {
-                // Another key pressed while holds are pending! Resolve all holds immediately.
-                for (_, info) in pending.iter_mut() {
+                for info in pending.values_mut() {
                     if !info.is_held {
                         info.is_held = true;
                         early_trigger.push(info.hold_actions.clone());
@@ -419,34 +416,33 @@ pub fn process_keyboard_event(
             execute_actions(&actions, simulator, &ctx_arc, true, state);
         }
 
-        // Now check if this new key down matches a TapHold rule
-        let tap_rules_opt = engine_schema.tap_hold_map.get(&vk_code);
-        if let Some(rules) = tap_rules_opt {
+        if let Some(rules) = engine_schema.tap_hold_map.get(&vk_code) {
             let Some(ctx) = try_read_ctx(&ctx_arc) else {
                 return EventAction::PassThrough;
             };
             for rule in rules {
                 if check_conditions(&rule.conditions, &ctx) {
                     if let Ok(mut pending) = PENDING_TAP_HOLDS.lock() {
-                        pending.insert(vk_code, PendingTapHold {
+                        pending.insert(
                             vk_code,
-                            tap_actions: rule.tap_actions.clone(),
-                            hold_actions: rule.hold_actions.clone(),
-                            down_time: Instant::now(),
-                            timeout_ms: rule.timeout_ms,
-                            is_held: false,
-                        });
+                            PendingTapHold {
+                                vk_code,
+                                tap_actions: rule.tap_actions.clone(),
+                                hold_actions: rule.hold_actions.clone(),
+                                down_time: Instant::now(),
+                                timeout_ms: rule.timeout_ms,
+                                is_held: false,
+                            },
+                        );
                     }
                     return EventAction::Block;
                 }
             }
         }
-
     } else {
-        // KeyUp
         let mut tap_actions = None;
         let mut hold_actions = None;
-        
+
         if let Ok(mut pending) = PENDING_TAP_HOLDS.lock() {
             if let Some(info) = pending.remove(&vk_code) {
                 if info.is_held {
@@ -456,21 +452,18 @@ pub fn process_keyboard_event(
                 }
             }
         }
-        
+
         if let Some(actions) = tap_actions {
-            // TAP! Execute press and release immediately
             execute_actions(&actions, simulator, &ctx_arc, true, state);
             execute_actions(&actions, simulator, &ctx_arc, false, state);
             return EventAction::Block;
         } else if let Some(actions) = hold_actions {
-            // Release the hold actions
             execute_actions(&actions, simulator, &ctx_arc, false, state);
             return EventAction::Block;
         }
     }
 
-    let rules_opt = engine_schema.keyboard_map.get(&vk_code);
-    if let Some(rules) = rules_opt {
+    if let Some(rules) = engine_schema.keyboard_map.get(&vk_code) {
         let Some(ctx) = try_read_ctx(&ctx_arc) else {
             return EventAction::PassThrough;
         };
@@ -526,8 +519,7 @@ pub fn process_mouse_event(
         None => return EventAction::PassThrough,
     };
 
-    let rules_opt = engine_schema.mouse_map.get(&button);
-    if let Some(rules) = rules_opt {
+    if let Some(rules) = engine_schema.mouse_map.get(&button) {
         let Some(ctx) = try_read_ctx(&ctx_arc) else {
             return EventAction::PassThrough;
         };
@@ -588,7 +580,7 @@ pub fn vk_to_key_name(vk: u8) -> String {
 #[cfg(target_os = "windows")]
 fn is_shift_pressed() -> bool {
     unsafe {
-        let state = windows::Win32::UI::Input::KeyboardAndMouse::GetKeyState(0x10); // VK_SHIFT = 0x10
+        let state = windows::Win32::UI::Input::KeyboardAndMouse::GetKeyState(0x10);
         (state & 0x8000u16 as i16) != 0
     }
 }
@@ -600,20 +592,22 @@ fn is_shift_pressed() -> bool {
 
 #[cfg(target_os = "windows")]
 fn vk_to_char(vk: u8, _shift: bool) -> Option<char> {
-    use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyboardState, ToUnicodeEx, GetKeyboardLayout, MapVirtualKeyW, MAPVK_VK_TO_VSC_EX};
-    
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        GetKeyboardLayout, GetKeyboardState, MapVirtualKeyW, ToUnicodeEx, MAPVK_VK_TO_VSC_EX,
+    };
+
     unsafe {
         let mut key_state = [0u8; 256];
         if GetKeyboardState(&mut key_state).is_err() {
             return None;
         }
-        
+
         let dwhkl = GetKeyboardLayout(0);
         let scan_code = MapVirtualKeyW(vk as u32, MAPVK_VK_TO_VSC_EX);
-        
+
         let mut buf = [0u16; 4];
         let result = ToUnicodeEx(vk as u32, scan_code, &key_state, &mut buf, 0, Some(dwhkl));
-        
+
         if result > 0 {
             if let Some(c) = char::from_u32(buf[0] as u32) {
                 if !c.is_control() {
