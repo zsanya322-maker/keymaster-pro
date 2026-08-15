@@ -24,8 +24,10 @@ export const ActionEditor: React.FC<ActionEditorProps> = ({ action, onChange, on
   const showContentBelow = action.type === 'runMacro';
 
   const changeType = (type: FrontendAction['type']) => {
-    if (type === 'remapKey' || type === 'remapMouse') {
-      onChange({ type, code: type === 'remapMouse' ? 1 : 0 } as FrontendAction);
+    if (type === 'remapKey') {
+      onChange({ type: 'remapKey', code: 0, modifiers: 0 });
+    } else if (type === 'remapMouse') {
+      onChange({ type: 'remapMouse', code: 1 });
     } else if (type === 'typeText') {
       onChange({ type, text: '' });
     } else if (type === 'runMacro') {
@@ -84,8 +86,8 @@ export const ActionEditor: React.FC<ActionEditorProps> = ({ action, onChange, on
 
             {action.type === 'remapKey' && (
               <KeyPicker
-                value={action.code || 0}
-                onChange={(code) => onChange({ ...action, code })}
+                value={{ code: action.code || 0, modifiers: action.modifiers || 0 }}
+                onChange={(chord) => onChange({ ...action, ...chord })}
                 className="flex-1 min-w-0 text-left"
               />
             )}
@@ -149,7 +151,7 @@ export const ActionEditor: React.FC<ActionEditorProps> = ({ action, onChange, on
             {action.type === 'windowAction' && (
               <select
                 value={action.action}
-                onChange={(event) => onChange({ ...action, action: event.target.value as any })}
+                onChange={(event) => onChange({ ...action, action: event.target.value as FrontendAction & string })}
                 className={`${selectClass} flex-1 min-w-0`}
               >
                 <option value="snap_left">{t('ruleBuilder.action_options.window_snap_left')}</option>
