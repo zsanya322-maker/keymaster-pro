@@ -5,8 +5,10 @@ use std::time::Duration;
 use tracing::info;
 
 pub mod system;
+pub mod macro_player;
 
-use crate::schemas::engine::SimulatorCommand;
+use crate::schemas::engine::{MacroPlaybackConfig, SimulatorCommand};
+use self::macro_player::{MacroExecutor, MacroPlayer};
 
 #[cfg(target_os = "windows")]
 use windows::Win32::UI::Input::KeyboardAndMouse::{
@@ -25,7 +27,7 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 #[derive(Clone)]
 pub struct SimulatorSender {
     immediate_tx: Sender<SimulatorCommand>,
-    macro_tx: Sender<Vec<SimulatorCommand>>,
+    macro_player: MacroPlayer,
 }
 
 impl std::fmt::Debug for SimulatorSender {
@@ -41,26 +43,38 @@ impl SimulatorSender {
         self.immediate_tx.send(command)
     }
 
-    /// Поставить в очередь один целый макрос. Его задержки выполняются только
-    /// macro-worker'ом и не блокируют мгновенную очередь.
+    /// Поставить в очередь macro-job. Delay/repeat/cancellation живут только в
+    /// macro-player и никогда не блокируют immediate remap queue.
     pub fn send_macro(
         &self,
         commands: Vec<SimulatorCommand>,
-    ) -> Result<(), SendError<Vec<SimulatorCommand>>> {
-        self.macro_tx.send(commands)
+        playback: MacroPlaybackConfig,
+        macro_key: u64,
+    ) -> Result<u64, String> {
+        self.macro_player.enqueue(commands, playback, macro_key)
+    }
+
+    pub fn cancel_macro_key(&self, macro_key: u64) {
+        self.macro_player.cancel_macro_key(macro_key);
+    }
+
+    pub fn cancel_current_macro(&self) {
+        self.macro_player.cancel_current();
+    }
+
+    pub fn cancel_all_macros(&self) {
+        self.macro_player.cancel_all();
     }
 }
-
-type CommandExecutor = Arc<dyn Fn(SimulatorCommand) + Send + Sync + 'static>;
 
 /// Внутренний конструктор worker'ов с внедряемым executor.
 ///
 /// В production executor вызывает Win32 SendInput. В тестах можно подставить
 /// детерминированный наблюдатель и проверить именно архитектуру очередей, не
 /// генерируя реальные нажатия клавиш на CI-машине.
-fn spawn_simulator_with_executor(executor: CommandExecutor) -> SimulatorSender {
+fn spawn_simulator_with_executor(executor: MacroExecutor) -> SimulatorSender {
     let (immediate_tx, immediate_rx): (Sender<SimulatorCommand>, Receiver<SimulatorCommand>) = mpsc::channel();
-    let (macro_tx, macro_rx): (Sender<Vec<SimulatorCommand>>, Receiver<Vec<SimulatorCommand>>) = mpsc::channel();
+    let macro_player = MacroPlayer::spawn(Arc::clone(&executor));
 
     let immediate_executor = Arc::clone(&executor);
     thread::Builder::new()
@@ -74,22 +88,9 @@ fn spawn_simulator_with_executor(executor: CommandExecutor) -> SimulatorSender {
         })
         .expect("Failed to spawn simulator thread");
 
-    thread::Builder::new()
-        .name("km-macro-player".to_string())
-        .spawn(move || {
-            info!("Macro player thread started.");
-            while let Ok(commands) = macro_rx.recv() {
-                for command in commands {
-                    executor(command);
-                }
-            }
-            info!("Macro player thread channel closed, exiting.");
-        })
-        .expect("Failed to spawn macro player thread");
-
     SimulatorSender {
         immediate_tx,
-        macro_tx,
+        macro_player,
     }
 }
 
@@ -303,44 +304,30 @@ fn move_mouse_absolute(_x: i32, _y: i32) {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Condvar, Mutex};
     use std::time::Duration;
 
     #[test]
     fn macro_delay_does_not_block_immediate_queue() {
-        let delay_gate = Arc::new((Mutex::new(false), Condvar::new()));
-        let delay_gate_for_executor = Arc::clone(&delay_gate);
-
-        let (delay_started_tx, delay_started_rx) = mpsc::channel::<()>();
         let (observed_tx, observed_rx) = mpsc::channel::<String>();
-
-        let executor: CommandExecutor = Arc::new(move |command| match command {
-            SimulatorCommand::Delay(_) => {
-                let _ = delay_started_tx.send(());
-                let (lock, condvar) = &*delay_gate_for_executor;
-                let mut released = lock.lock().expect("delay gate poisoned");
-                while !*released {
-                    released = condvar.wait(released).expect("delay gate poisoned");
-                }
-            }
-            SimulatorCommand::TypeString(text) => {
+        let executor: MacroExecutor = Arc::new(move |command| {
+            if let SimulatorCommand::TypeString(text) = command {
                 let _ = observed_tx.send(text);
             }
-            _ => {}
         });
 
         let sender = spawn_simulator_with_executor(executor);
         sender
-            .send_macro(vec![
-                SimulatorCommand::Delay(10_000),
-                SimulatorCommand::TypeString("macro-finished".to_string()),
-            ])
+            .send_macro(
+                vec![
+                    SimulatorCommand::Delay(250),
+                    SimulatorCommand::TypeString("macro-finished".to_string()),
+                ],
+                MacroPlaybackConfig::default(),
+                1,
+            )
             .expect("macro queue should be available");
 
-        delay_started_rx
-            .recv_timeout(Duration::from_secs(1))
-            .expect("macro worker did not enter delay");
-
+        std::thread::sleep(Duration::from_millis(25));
         sender
             .send(SimulatorCommand::TypeString("immediate".to_string()))
             .expect("immediate queue should be available");
@@ -348,16 +335,8 @@ mod tests {
         assert_eq!(
             observed_rx.recv_timeout(Duration::from_secs(1)).unwrap(),
             "immediate",
-            "immediate command must execute while macro worker is blocked",
+            "immediate command must execute while macro worker is delayed",
         );
-
-        {
-            let (lock, condvar) = &*delay_gate;
-            let mut released = lock.lock().expect("delay gate poisoned");
-            *released = true;
-            condvar.notify_all();
-        }
-
         assert_eq!(
             observed_rx.recv_timeout(Duration::from_secs(1)).unwrap(),
             "macro-finished",
@@ -367,7 +346,7 @@ mod tests {
     #[test]
     fn macro_jobs_remain_serial_and_ordered() {
         let (observed_tx, observed_rx) = mpsc::channel::<String>();
-        let executor: CommandExecutor = Arc::new(move |command| {
+        let executor: MacroExecutor = Arc::new(move |command| {
             if let SimulatorCommand::TypeString(text) = command {
                 let _ = observed_tx.send(text);
             }
@@ -375,13 +354,21 @@ mod tests {
 
         let sender = spawn_simulator_with_executor(executor);
         sender
-            .send_macro(vec![
-                SimulatorCommand::TypeString("a".to_string()),
-                SimulatorCommand::TypeString("b".to_string()),
-            ])
+            .send_macro(
+                vec![
+                    SimulatorCommand::TypeString("a".to_string()),
+                    SimulatorCommand::TypeString("b".to_string()),
+                ],
+                MacroPlaybackConfig::default(),
+                1,
+            )
             .unwrap();
         sender
-            .send_macro(vec![SimulatorCommand::TypeString("c".to_string())])
+            .send_macro(
+                vec![SimulatorCommand::TypeString("c".to_string())],
+                MacroPlaybackConfig::default(),
+                2,
+            )
             .unwrap();
 
         let observed = (0..3)

@@ -320,7 +320,7 @@ fn execute_actions(
                     }
                 }
             }
-            EngineAction::MacroCommands { commands } => {
+            EngineAction::MacroCommands { commands, playback, macro_key } => {
                 if is_down {
                     let mut macro_commands = commands.clone();
 
@@ -351,7 +351,9 @@ fn execute_actions(
                             current_physical_modifiers(),
                         );
                     }
-                    let _ = simulator.send_macro(macro_commands);
+                    let _ = simulator.send_macro(macro_commands, *playback, *macro_key);
+                } else if playback.repeat_while_held {
+                    simulator.cancel_macro_key(*macro_key);
                 }
             }
             EngineAction::ToggleLayer { layer_id_hash } => {
