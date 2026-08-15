@@ -116,6 +116,71 @@ pub fn run_daemon(parent_pid: Option<u32>) -> Result<(), String> {
         });
     }
 
+    // Синхронизировать runtime-настройки, которые hook/engine читают из DaemonState.
+    // GUI сохраняет config.json напрямую; daemon следит только за mtime файла и
+    // перечитывает его при реальном изменении, поэтому здесь нет постоянного JSON-I/O.
+    let config_sync_state = state.clone();
+    tokio_rt.spawn(async move {
+        let config_path = match crate::shared::persistence::app_data_dir() {
+            Ok(dir) => dir.join("config.json"),
+            Err(e) => {
+                warn!("Config sync disabled: {}", e);
+                return;
+            }
+        };
+        let mut last_modified = std::fs::metadata(&config_path)
+            .and_then(|meta| meta.modified())
+            .ok();
+
+        loop {
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+            let running = config_sync_state
+                .read()
+                .map(|s| s.running)
+                .unwrap_or(false);
+            if !running {
+                break;
+            }
+
+            let modified = match std::fs::metadata(&config_path).and_then(|meta| meta.modified()) {
+                Ok(value) => value,
+                Err(_) => continue,
+            };
+            if last_modified.as_ref().is_some_and(|previous| *previous == modified) {
+                continue;
+            }
+            last_modified = Some(modified);
+
+            let updated = match crate::shared::config::load_config() {
+                Ok(config) => config,
+                Err(e) => {
+                    warn!("Не удалось перечитать config для runtime sync: {}", e);
+                    continue;
+                }
+            };
+
+            if let Ok(mut s) = config_sync_state.write() {
+                let changed = s.kb_hook_enabled != updated.kb_hook_enabled
+                    || s.mouse_hook_enabled != updated.mouse_hook_enabled
+                    || s.restore_mouse_after_macro != updated.restore_mouse_after_macro;
+
+                s.kb_hook_enabled = updated.kb_hook_enabled;
+                s.mouse_hook_enabled = updated.mouse_hook_enabled;
+                s.restore_mouse_after_macro = updated.restore_mouse_after_macro;
+
+                if changed {
+                    info!(
+                        "Runtime config applied: keyboard={}, mouse={}, restore_mouse_after_macro={}",
+                        s.kb_hook_enabled,
+                        s.mouse_hook_enabled,
+                        s.restore_mouse_after_macro
+                    );
+                }
+            }
+        }
+    });
+
     // NOTE: Автопереключение профилей по активному окну убрано (раньше каждую секунду
     // перетирало ручной выбор пользователя, откатывая на профиль с is_default=true).
     // Профиль выбирается ТОЛЬКО вручную через UI. Последний активный сохраняется в config.
