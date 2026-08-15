@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 import { useProfileStore } from '../store/profileStore';
 import { useKeyMasterStore } from '../store/keyMasterStore';
-import { useAppStore } from '../stores/app-store';
+import { useAppStore } from '../store/appStore';
 import { ActionEditor } from '../components/ruleBuilder/ActionEditor';
 import { ConditionEditor } from '../components/ruleBuilder/ConditionEditor';
 import { KeyPicker } from '../components/ruleBuilder/KeyPicker';
