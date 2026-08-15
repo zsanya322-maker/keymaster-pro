@@ -40,6 +40,7 @@ pub fn run() {
             gui::commands::daemon_status,
             gui::commands::spawn_daemon,
             gui::commands::stop_daemon,
+            gui::commands::quit_app,
             gui::commands::restart_app,
             gui::commands::restart_as_admin,
             gui::commands::is_elevated,
@@ -125,10 +126,15 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            // Hide window instead of closing
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                let _ = window.hide();
-                api.prevent_close();
+                let minimize_to_tray = crate::shared::config::load_config()
+                    .map(|config| config.minimize_to_tray)
+                    .unwrap_or(true);
+
+                if minimize_to_tray {
+                    let _ = window.hide();
+                    api.prevent_close();
+                }
             }
         })
         .run(tauri::generate_context!())
