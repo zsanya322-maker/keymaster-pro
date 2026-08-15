@@ -1,4 +1,38 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
+
+pub mod key_modifiers {
+    pub const CTRL: u16 = 1 << 0;
+    pub const ALT: u16 = 1 << 1;
+    pub const SHIFT: u16 = 1 << 2;
+    pub const WIN: u16 = 1 << 3;
+
+    pub const LCTRL: u16 = 1 << 4;
+    pub const RCTRL: u16 = 1 << 5;
+    pub const LALT: u16 = 1 << 6;
+    pub const RALT: u16 = 1 << 7;
+    pub const LSHIFT: u16 = 1 << 8;
+    pub const RSHIFT: u16 = 1 << 9;
+    pub const LWIN: u16 = 1 << 10;
+    pub const RWIN: u16 = 1 << 11;
+
+    pub const GENERIC_MASK: u16 = CTRL | ALT | SHIFT | WIN;
+    pub const SIDE_MASK: u16 = LCTRL | RCTRL | LALT | RALT | LSHIFT | RSHIFT | LWIN | RWIN;
+    pub const ALL: u16 = GENERIC_MASK | SIDE_MASK;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KeyChord {
+    pub code: u8,
+    #[serde(default)]
+    pub modifiers: u16,
+}
+
+impl KeyChord {
+    pub const fn single(code: u8) -> Self {
+        Self { code, modifiers: 0 }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -17,6 +51,21 @@ pub struct LayerMeta {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct RuleFolder {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub parent_id: Option<String>,
+    #[serde(default)]
+    pub order: i32,
+}
+
+fn default_rule_enabled() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct FrontendRule {
     pub id: String,
     pub name: Option<String>,
@@ -25,13 +74,25 @@ pub struct FrontendRule {
     pub hold_actions: Option<Vec<FrontendAction>>,
     pub conditions: Vec<FrontendCondition>,
     pub priority: i32,
+    #[serde(default = "default_rule_enabled")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub folder_id: Option<String>,
+    #[serde(default)]
+    pub order: i32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum FrontendTrigger {
-    KeyDown { code: u8 },
-    KeyUp { code: u8 },
+    KeyDown {
+        #[serde(flatten)]
+        chord: KeyChord,
+    },
+    KeyUp {
+        #[serde(flatten)]
+        chord: KeyChord,
+    },
     MouseDown { code: u8 },
     MouseUp { code: u8 },
     TapHoldKeyDown { code: u8, timeout_ms: u32 },
@@ -41,7 +102,10 @@ pub enum FrontendTrigger {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum FrontendAction {
-    RemapKey { code: u8 },
+    RemapKey {
+        #[serde(flatten)]
+        chord: KeyChord,
+    },
     RemapMouse { code: u8 },
     TypeText { text: String },
     RunMacro { steps: Vec<MacroStep> },
