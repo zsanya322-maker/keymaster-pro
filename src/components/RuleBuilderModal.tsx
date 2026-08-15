@@ -1,9 +1,11 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { FrontendRule, FrontendTrigger } from '../lib/types';
+import { X } from 'lucide-react';
+import type { FrontendRule, FrontendTrigger } from '../lib/types';
 import { ActionEditor } from './ruleBuilder/ActionEditor';
 import { ConditionEditor } from './ruleBuilder/ConditionEditor';
 import { KeyPicker } from './ruleBuilder/KeyPicker';
+import { ConfirmDialog } from './ConfirmDialog';
 
 interface RuleBuilderModalProps {
   existingRule: FrontendRule | null;
@@ -11,243 +13,292 @@ interface RuleBuilderModalProps {
   onSave: (rule: FrontendRule) => void;
 }
 
+type TriggerType = FrontendTrigger['type'];
+
+function makeInitialRule(existingRule: FrontendRule | null): FrontendRule {
+  if (!existingRule) {
+    return {
+      id: crypto.randomUUID(),
+      name: '',
+      trigger: { type: 'keyDown', code: 0 },
+      actions: [],
+      holdActions: [],
+      conditions: [],
+      priority: 0,
+    };
+  }
+
+  return structuredClone(existingRule);
+}
+
 export const RuleBuilderModal: React.FC<RuleBuilderModalProps> = ({ existingRule, onClose, onSave }) => {
   const { t } = useTranslation();
-  const [rule, setRule] = useState<FrontendRule>(existingRule ? {
-    // deep copy to avoid mutations before save
-    ...existingRule,
-    name: existingRule.name || '',
-    actions: [...existingRule.actions],
-    conditions: [...existingRule.conditions],
-    holdActions: existingRule.holdActions ? [...existingRule.holdActions] : [],
-    trigger: { ...existingRule.trigger }
-  } : {
-    id: crypto.randomUUID(),
-    name: '',
-    trigger: { type: 'keyDown', code: 0 },
-    actions: [],
-    holdActions: [],
-    conditions: [],
-    priority: 0,
-  });
+  const initialRule = useMemo(() => makeInitialRule(existingRule), [existingRule]);
+  const [rule, setRule] = useState<FrontendRule>(initialRule);
+  const [showCloseConfirm, setShowCloseConfirm] = useState(false);
+
+  const isDirty = JSON.stringify(rule) !== JSON.stringify(initialRule);
+  const isTapHold = rule.trigger.type === 'tapHoldKeyDown';
+
+  const requestClose = () => {
+    if (isDirty) setShowCloseConfirm(true);
+    else onClose();
+  };
 
   const handleSave = () => {
     onSave(rule);
   };
 
-  const isTapHold = rule.trigger.type === 'tapHoldKeyDown';
+  const changeTriggerType = (type: TriggerType) => {
+    if (type === 'tapHoldKeyDown') {
+      setRule(current => ({ ...current, trigger: { type, code: 0, timeoutMs: 200 } }));
+    } else if (type === 'typedText') {
+      setRule(current => ({ ...current, trigger: { type, sequence: '' } }));
+    } else {
+      setRule(current => ({ ...current, trigger: { type, code: 0 } }));
+    }
+  };
 
   return (
-    <div className="fixed inset-0 bg-app-bg/80 backdrop-blur-sm flex items-center justify-center z-50 animate-fade-in">
-      <div className="bg-app-surface border border-app-border rounded-xl shadow-2xl w-[600px] flex flex-col glow-primary">
-        <div className="p-4 border-b border-app-border bg-app-bg/40 flex justify-between items-center">
-          <h3 className="text-base font-bold text-app-text">
-            {existingRule ? t('ruleBuilder.modal.edit_title') : t('ruleBuilder.modal.create_title')}
-          </h3>
-          <button onClick={onClose} className="text-app-muted hover:text-app-text transition-colors">
-            ✕
-          </button>
-        </div>
-
-        <div className="p-6 space-y-6 max-h-[70vh] overflow-y-auto">
-          {/* RULE NAME */}
-          <div className="space-y-2">
-            <h4 className="text-xs font-bold text-app-muted uppercase tracking-wider">{t('ruleBuilder.tabs.name', 'Название правила')}</h4>
-            <input
-              type="text"
-              value={rule.name || ''}
-              onChange={(e) => setRule({ ...rule, name: e.target.value })}
-              placeholder={t('ruleBuilder.placeholders.name', 'Назовите правило (например, "Копировать")')}
-              className="bg-app-surface-hover border border-app-border text-sm text-app-text rounded-lg p-2 w-full focus:ring-1 focus:ring-app-primary"
-            />
+    <>
+      <div className="fixed inset-0 bg-black/25 flex items-center justify-center z-50">
+        <div className="bg-app-bg border border-app-border shadow-2xl w-[640px] max-w-[calc(100vw-32px)] flex flex-col rounded-md overflow-hidden">
+          <div className="h-11 px-4 border-b border-app-border bg-app-surface/55 flex justify-between items-center shrink-0">
+            <h3 className="text-sm font-semibold text-app-text">
+              {existingRule ? t('ruleBuilder.modal.edit_title') : t('ruleBuilder.modal.create_title')}
+            </h3>
+            <button
+              type="button"
+              onClick={requestClose}
+              className="h-7 w-7 flex items-center justify-center rounded hover:bg-app-surface-hover text-app-muted hover:text-app-text"
+              title={t('common.close', 'Закрыть')}
+            >
+              <X size={15} />
+            </button>
           </div>
 
-          {/* TRIGGER */}
-          <div className="space-y-2">
-            <h4 className="text-xs font-bold text-app-muted uppercase tracking-wider">{t('ruleBuilder.tabs.trigger')}</h4>
-            <div className="flex gap-2">
-              <select 
-                value={rule.trigger.type}
-                onChange={(e) => {
-                  const type = e.target.value as any;
-                  if (type === 'tapHoldKeyDown') {
-                    setRule({ ...rule, trigger: { type, code: 0, timeoutMs: 200 } });
-                  } else if (type === 'typedText') {
-                    setRule({ ...rule, trigger: { type, sequence: '' } });
-                  } else {
-                    setRule({ ...rule, trigger: { type, code: 0 } });
-                  }
-                }}
-                className="bg-app-surface-hover border border-app-border text-sm text-app-text rounded-lg p-2"
-              >
-                <option value="keyDown">{t('ruleBuilder.trigger_types.keyDown')}</option>
-                <option value="keyUp">{t('ruleBuilder.trigger_types.keyUp')}</option>
-                <option value="mouseDown">{t('ruleBuilder.trigger_types.mouseDown')}</option>
-                <option value="mouseUp">{t('ruleBuilder.trigger_types.mouseUp')}</option>
-                <option value="tapHoldKeyDown">{t('ruleBuilder.trigger_types.tapHoldKeyDown')}</option>
-                <option value="typedText">{t('ruleBuilder.trigger_types.typedText')}</option>
-              </select>
-              
-              {rule.trigger.type === 'typedText' ? (
-                <input
-                  type="text"
-                  value={rule.trigger.sequence || ''}
-                  onChange={(e) => setRule({
-                    ...rule,
-                    trigger: { type: 'typedText', sequence: e.target.value }
-                  })}
-                  placeholder={t('ruleBuilder.placeholders.sequence')}
-                  className="bg-app-surface-hover border border-app-border text-sm text-app-text rounded-lg p-2 flex-grow"
-                />
-              ) : (
-                <KeyPicker
-                  value={(rule.trigger as any).code || 0}
-                  onChange={(vk) => setRule({
-                    ...rule,
-                    trigger: { ...rule.trigger, code: vk } as FrontendTrigger
-                  })}
-                />
-              )}
-              
-              {isTapHold && (
-                <input 
-                  type="number"
-                  value={(rule.trigger as any).timeoutMs || 200}
-                  onChange={(e) => {
-                    if (rule.trigger.type === 'tapHoldKeyDown') {
-                      setRule({
-                        ...rule,
-                        trigger: {
-                          ...rule.trigger,
-                          timeoutMs: parseInt(e.target.value) || 200
-                        }
-                      });
-                    }
-                  }}
-                  placeholder={t('ruleBuilder.placeholders.timeout')}
-                  className="bg-app-surface-hover border border-app-border text-sm text-app-text rounded-lg p-2 w-32"
-                  title={t('ruleBuilder.placeholders.timeout_title')}
-                />
-              )}
-            </div>
-          </div>
+          <div className="p-4 space-y-5 max-h-[72vh] overflow-y-auto">
+            <section className="space-y-1.5">
+              <label className="text-[11px] font-semibold text-app-muted">{t('ruleBuilder.tabs.name', 'Название правила')}</label>
+              <input
+                type="text"
+                value={rule.name || ''}
+                onChange={event => setRule(current => ({ ...current, name: event.target.value }))}
+                placeholder={t('ruleBuilder.placeholders.name', 'Название правила')}
+                className="bg-app-bg border border-app-border text-xs text-app-text rounded-md h-8 px-2.5 w-full outline-none focus:border-app-primary"
+              />
+            </section>
 
-          {/* CONDITIONS */}
-          <div className="space-y-2">
-            <h4 className="text-xs font-bold text-app-muted uppercase tracking-wider flex justify-between items-center">
-              {t('ruleBuilder.tabs.conditions')}
-              <button 
-                onClick={() => setRule({ ...rule, conditions: [...rule.conditions, { type: 'windowMatch', process: '', title: '' }] })}
-                className="text-[10px] bg-app-primary/20 text-app-primary px-2 py-1 rounded hover:bg-app-primary/40 transition-colors"
-              >
-                {t('ruleBuilder.buttons.add_condition')}
-              </button>
-            </h4>
-            {rule.conditions.length === 0 ? (
-              <p className="text-xs text-app-muted opacity-60 italic">{t('ruleBuilder.hints.no_conditions_global')}</p>
-            ) : (
-              <div className="space-y-2">
-                {rule.conditions.map((cond, i) => (
-                  <ConditionEditor 
-                    key={i} 
-                    condition={cond} 
-                    onChange={(newCond) => {
-                      const newConds = [...rule.conditions];
-                      newConds[i] = newCond;
-                      setRule({ ...rule, conditions: newConds });
-                    }}
-                    onRemove={() => {
-                      setRule({ ...rule, conditions: rule.conditions.filter((_, idx) => idx !== i) });
-                    }}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* ACTIONS (TAP ACTIONS if TapHold) */}
-          <div className="space-y-2">
-            <h4 className="text-xs font-bold text-app-muted uppercase tracking-wider flex justify-between items-center">
-              {isTapHold ? t('ruleBuilder.tabs.tap_actions') : t('ruleBuilder.tabs.actions')}
-              <button 
-                onClick={() => setRule({ ...rule, actions: [...rule.actions, { type: 'typeText', text: '' }] })}
-                className="text-[10px] bg-app-primary/20 text-app-primary px-2 py-1 rounded hover:bg-app-primary/40 transition-colors"
-              >
-                {t('ruleBuilder.buttons.add_action')}
-              </button>
-            </h4>
-            {rule.actions.length === 0 ? (
-              <p className="text-xs text-app-danger italic">{t('ruleBuilder.hints.must_have_action')}</p>
-            ) : (
-              <div className="space-y-2">
-                {rule.actions.map((act, i) => (
-                  <ActionEditor 
-                    key={i}
-                    action={act}
-                    onChange={(newAct) => {
-                      const newActs = [...rule.actions];
-                      newActs[i] = newAct;
-                      setRule({ ...rule, actions: newActs });
-                    }}
-                    onRemove={() => {
-                      setRule({ ...rule, actions: rule.actions.filter((_, idx) => idx !== i) });
-                    }}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* HOLD ACTIONS */}
-          {isTapHold && (
-            <div className="space-y-2 p-3 bg-app-bg/50 border border-app-border rounded-lg mt-4">
-              <h4 className="text-xs font-bold text-app-muted uppercase tracking-wider flex justify-between items-center">
-                {t('ruleBuilder.tabs.hold_actions')}
-                <button 
-                  onClick={() => setRule({ ...rule, holdActions: [...(rule.holdActions || []), { type: 'holdLayer', layerId: '' }] })}
-                  className="text-[10px] bg-app-primary/20 text-app-primary px-2 py-1 rounded hover:bg-app-primary/40 transition-colors"
+            <section className="space-y-1.5">
+              <label className="text-[11px] font-semibold text-app-muted">{t('ruleBuilder.tabs.trigger')}</label>
+              <div className="flex gap-2 items-center">
+                <select
+                  value={rule.trigger.type}
+                  onChange={event => changeTriggerType(event.target.value as TriggerType)}
+                  className="bg-app-bg border border-app-border text-xs text-app-text rounded-md h-8 px-2"
                 >
-                  {t('ruleBuilder.buttons.add_hold_action')}
+                  <option value="keyDown">{t('ruleBuilder.trigger_types.keyDown')}</option>
+                  <option value="keyUp">{t('ruleBuilder.trigger_types.keyUp')}</option>
+                  <option value="mouseDown">{t('ruleBuilder.trigger_types.mouseDown')}</option>
+                  <option value="mouseUp">{t('ruleBuilder.trigger_types.mouseUp')}</option>
+                  <option value="tapHoldKeyDown">{t('ruleBuilder.trigger_types.tapHoldKeyDown')}</option>
+                  <option value="typedText">{t('ruleBuilder.trigger_types.typedText')}</option>
+                </select>
+
+                {rule.trigger.type === 'typedText' ? (
+                  <input
+                    type="text"
+                    value={rule.trigger.sequence}
+                    onChange={event => setRule(current => ({
+                      ...current,
+                      trigger: { type: 'typedText', sequence: event.target.value },
+                    }))}
+                    placeholder={t('ruleBuilder.placeholders.sequence')}
+                    className="bg-app-bg border border-app-border text-xs text-app-text rounded-md h-8 px-2.5 flex-grow outline-none focus:border-app-primary"
+                  />
+                ) : (
+                  <KeyPicker
+                    value={rule.trigger.code}
+                    onChange={code => setRule(current => ({
+                      ...current,
+                      trigger: { ...current.trigger, code } as FrontendTrigger,
+                    }))}
+                  />
+                )}
+
+                {rule.trigger.type === 'tapHoldKeyDown' && (
+                  <input
+                    type="number"
+                    min={1}
+                    value={rule.trigger.timeoutMs}
+                    onChange={event => {
+                      const timeoutMs = Math.max(1, Number.parseInt(event.target.value, 10) || 200);
+                      setRule(current => current.trigger.type === 'tapHoldKeyDown'
+                        ? { ...current, trigger: { ...current.trigger, timeoutMs } }
+                        : current);
+                    }}
+                    className="bg-app-bg border border-app-border text-xs text-app-text rounded-md h-8 px-2 w-24 outline-none focus:border-app-primary"
+                    title={t('ruleBuilder.placeholders.timeout_title')}
+                  />
+                )}
+              </div>
+            </section>
+
+            <section className="space-y-2">
+              <div className="flex justify-between items-center">
+                <h4 className="text-[11px] font-semibold text-app-muted">{t('ruleBuilder.tabs.conditions')}</h4>
+                <button
+                  type="button"
+                  onClick={() => setRule(current => ({
+                    ...current,
+                    conditions: [...current.conditions, { type: 'windowMatch', process: '', title: '' }],
+                  }))}
+                  className="h-7 px-2 text-[11px] border border-app-border rounded-md text-app-primary hover:bg-app-surface"
+                >
+                  + {t('ruleBuilder.buttons.add_condition')}
                 </button>
-              </h4>
-              {!rule.holdActions || rule.holdActions.length === 0 ? (
-                <p className="text-xs text-app-muted opacity-60 italic">{t('ruleBuilder.hints.no_hold_actions')}</p>
+              </div>
+
+              {rule.conditions.length === 0 ? (
+                <p className="text-xs text-app-muted">{t('ruleBuilder.hints.no_conditions_global')}</p>
               ) : (
                 <div className="space-y-2">
-                  {rule.holdActions.map((act, i) => (
-                    <ActionEditor 
-                      key={i}
-                      action={act}
-                      onChange={(newAct) => {
-                        const newActs = [...rule.holdActions!];
-                        newActs[i] = newAct;
-                        setRule({ ...rule, holdActions: newActs });
+                  {rule.conditions.map((condition, index) => (
+                    <ConditionEditor
+                      key={index}
+                      condition={condition}
+                      onChange={nextCondition => {
+                        setRule(current => {
+                          const conditions = [...current.conditions];
+                          conditions[index] = nextCondition;
+                          return { ...current, conditions };
+                        });
                       }}
-                      onRemove={() => {
-                        setRule({ ...rule, holdActions: rule.holdActions!.filter((_, idx) => idx !== i) });
-                      }}
+                      onRemove={() => setRule(current => ({
+                        ...current,
+                        conditions: current.conditions.filter((_, itemIndex) => itemIndex !== index),
+                      }))}
                     />
                   ))}
                 </div>
               )}
-            </div>
-          )}
+            </section>
 
-        </div>
+            <section className="space-y-2">
+              <div className="flex justify-between items-center">
+                <h4 className="text-[11px] font-semibold text-app-muted">
+                  {isTapHold ? t('ruleBuilder.tabs.tap_actions') : t('ruleBuilder.tabs.actions')}
+                </h4>
+                <button
+                  type="button"
+                  onClick={() => setRule(current => ({
+                    ...current,
+                    actions: [...current.actions, { type: 'typeText', text: '' }],
+                  }))}
+                  className="h-7 px-2 text-[11px] border border-app-border rounded-md text-app-primary hover:bg-app-surface"
+                >
+                  + {t('ruleBuilder.buttons.add_action')}
+                </button>
+              </div>
 
-        <div className="p-4 border-t border-app-border bg-app-bg/40 flex justify-end gap-3">
-          <button onClick={onClose} className="px-4 py-2 text-sm font-semibold text-app-muted hover:text-app-text transition-colors">
-            {t('ruleBuilder.buttons.cancel')}
-          </button>
-          <button 
-            onClick={handleSave} 
-            disabled={rule.actions.length === 0}
-            className="px-4 py-2 bg-app-primary hover:bg-app-primary-hover disabled:opacity-50 text-white rounded-lg text-sm font-semibold shadow-lg shadow-app-primary/20 transition-all cursor-pointer"
-          >
-            {t('ruleBuilder.buttons.save_rule')}
-          </button>
+              {rule.actions.length === 0 ? (
+                <p className="text-xs text-app-danger">{t('ruleBuilder.hints.must_have_action')}</p>
+              ) : (
+                <div className="space-y-2">
+                  {rule.actions.map((action, index) => (
+                    <ActionEditor
+                      key={index}
+                      action={action}
+                      onChange={nextAction => {
+                        setRule(current => {
+                          const actions = [...current.actions];
+                          actions[index] = nextAction;
+                          return { ...current, actions };
+                        });
+                      }}
+                      onRemove={() => setRule(current => ({
+                        ...current,
+                        actions: current.actions.filter((_, itemIndex) => itemIndex !== index),
+                      }))}
+                    />
+                  ))}
+                </div>
+              )}
+            </section>
+
+            {isTapHold && (
+              <section className="space-y-2 border border-app-border rounded-md p-3 bg-app-surface/25">
+                <div className="flex justify-between items-center">
+                  <h4 className="text-[11px] font-semibold text-app-muted">{t('ruleBuilder.tabs.hold_actions')}</h4>
+                  <button
+                    type="button"
+                    onClick={() => setRule(current => ({
+                      ...current,
+                      holdActions: [...(current.holdActions || []), { type: 'holdLayer', layerId: '' }],
+                    }))}
+                    className="h-7 px-2 text-[11px] border border-app-border rounded-md text-app-primary hover:bg-app-bg"
+                  >
+                    + {t('ruleBuilder.buttons.add_hold_action')}
+                  </button>
+                </div>
+
+                {!rule.holdActions || rule.holdActions.length === 0 ? (
+                  <p className="text-xs text-app-muted">{t('ruleBuilder.hints.no_hold_actions')}</p>
+                ) : (
+                  <div className="space-y-2">
+                    {rule.holdActions.map((action, index) => (
+                      <ActionEditor
+                        key={index}
+                        action={action}
+                        onChange={nextAction => setRule(current => {
+                          const holdActions = [...(current.holdActions || [])];
+                          holdActions[index] = nextAction;
+                          return { ...current, holdActions };
+                        })}
+                        onRemove={() => setRule(current => ({
+                          ...current,
+                          holdActions: (current.holdActions || []).filter((_, itemIndex) => itemIndex !== index),
+                        }))}
+                      />
+                    ))}
+                  </div>
+                )}
+              </section>
+            )}
+          </div>
+
+          <div className="h-12 px-4 border-t border-app-border bg-app-surface/40 flex justify-end items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={requestClose}
+              className="h-8 px-3 text-xs border border-app-border rounded-md text-app-text hover:bg-app-surface-hover"
+            >
+              {t('ruleBuilder.buttons.cancel')}
+            </button>
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={rule.actions.length === 0}
+              className="h-8 px-4 bg-app-primary hover:bg-app-primary-hover disabled:opacity-45 text-white rounded-md text-xs font-semibold"
+            >
+              {t('ruleBuilder.buttons.save_rule')}
+            </button>
+          </div>
         </div>
       </div>
-    </div>
+
+      <ConfirmDialog
+        open={showCloseConfirm}
+        title={t('ruleBuilder.unsaved_title', 'Несохранённые изменения')}
+        message={t('ruleBuilder.unsaved_message', 'Закрыть редактор и отбросить изменения?')}
+        confirmLabel={t('ruleBuilder.discard_changes', 'Отбросить')}
+        danger
+        onCancel={() => setShowCloseConfirm(false)}
+        onConfirm={() => {
+          setShowCloseConfirm(false);
+          onClose();
+        }}
+      />
+    </>
   );
 };
