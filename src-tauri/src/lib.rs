@@ -12,7 +12,7 @@ pub mod trackers;
 pub mod simulator;
 
 use gui::commands::GuiState;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 use tracing::{info, error};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -133,8 +133,13 @@ pub fn run() {
 
                 if minimize_to_tray {
                     let _ = window.hide();
-                    api.prevent_close();
+                } else {
+                    // Само окно не закрываем сразу: React проверит, есть ли
+                    // несохранённый черновик, и при необходимости покажет
+                    // внутренний ConfirmDialog. Явный quit_app() завершит процесс.
+                    let _ = window.emit("app-exit-requested", ());
                 }
+                api.prevent_close();
             }
         })
         .run(tauri::generate_context!())
