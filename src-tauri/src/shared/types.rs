@@ -35,7 +35,7 @@ pub struct AppConfig {
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            language: "en".to_string(),
+            language: "ru".to_string(),
             theme: "light".to_string(),
             autostart: false,
             minimize_to_tray: true,
