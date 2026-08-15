@@ -8,6 +8,7 @@ pub mod ipc_types;
 pub mod ipc_client;
 pub mod engine;
 pub mod chord_output;
+pub mod mouse_triggers;
 pub mod state;
 pub mod router;
 pub mod compiler;
