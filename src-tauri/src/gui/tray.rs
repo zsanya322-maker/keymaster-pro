@@ -2,8 +2,7 @@
 ///
 /// Иконка в трее с контекстным меню:
 /// - Показать окно
-/// - Включить/Выключить хуки
-/// - Активный профиль
+/// - Перезапустить от Администратора
 /// - Выйти
 
 use tauri::{
@@ -14,7 +13,6 @@ use tauri::{
 
 /// Идентификаторы пунктов меню
 pub const MENU_SHOW: &str = "show";
-pub const MENU_HOOKS_TOGGLE: &str = "hooks_toggle";
 pub const MENU_RESTART_ADMIN: &str = "restart_admin";
 
 /// Создать System Tray с контекстным меню
@@ -51,15 +49,19 @@ pub fn setup_tray(app: &App) -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    // Контекстное меню
     let mut menu_builder = MenuBuilder::new(app)
-        .item(&MenuItemBuilder::with_id(MENU_SHOW, "Показать KeyMaster Pro").build(app)?)
-        .item(&MenuItemBuilder::with_id(MENU_HOOKS_TOGGLE, "⏸ Отключить хуки").build(app)?);
+        .item(&MenuItemBuilder::with_id(MENU_SHOW, "Показать KeyMaster Pro").build(app)?);
 
     if !is_elevated {
-        menu_builder = menu_builder.item(&MenuItemBuilder::with_id(MENU_RESTART_ADMIN, "🛡️ Перезапустить от Администратора").build(app)?);
+        menu_builder = menu_builder.item(
+            &MenuItemBuilder::with_id(MENU_RESTART_ADMIN, "🛡️ Перезапустить от Администратора").build(app)?,
+        );
     } else {
-        menu_builder = menu_builder.item(&MenuItemBuilder::with_id(MENU_RESTART_ADMIN, "🛡️ Запущено как Администратор").enabled(false).build(app)?);
+        menu_builder = menu_builder.item(
+            &MenuItemBuilder::with_id(MENU_RESTART_ADMIN, "🛡️ Запущено как Администратор")
+                .enabled(false)
+                .build(app)?,
+        );
     }
 
     let menu = menu_builder
@@ -67,7 +69,6 @@ pub fn setup_tray(app: &App) -> Result<(), Box<dyn std::error::Error>> {
         .quit()
         .build()?;
 
-    // Tray icon
     let icon = match app.default_window_icon() {
         Some(icon) => icon.clone(),
         None => {
@@ -87,10 +88,6 @@ pub fn setup_tray(app: &App) -> Result<(), Box<dyn std::error::Error>> {
                         let _ = window.show();
                         let _ = window.set_focus();
                     }
-                }
-                MENU_HOOKS_TOGGLE => {
-                    // IPC command toggle_hooks to daemon is not implemented yet
-                    tracing::info!("Tray: toggle hooks (IPC not implemented)");
                 }
                 MENU_RESTART_ADMIN => {
                     let exe_path = std::env::current_exe()
