@@ -1,1 +1,1 @@
-checkpoint-5: single GUI instance, graceful daemon lifecycle, safe UAC handoff, config flush
+checkpoint-6: atomic profiles, backend mutation guards, profile tests, IPC timeout, deterministic settings restart
