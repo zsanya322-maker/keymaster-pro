@@ -1,0 +1,44 @@
+name: v0.3.1 Version Align
+
+on:
+  push:
+    branches:
+      - dev/v0.3.1-mouse-macros
+    paths:
+      - '.github/workflows/v031-version-align.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  align:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dev/v0.3.1-mouse-macros
+      - name: Align versions
+        shell: python
+        run: |
+          from pathlib import Path
+          replacements = {
+              'package.json': [('"version": "0.3.0"', '"version": "0.3.1"')],
+              'src-tauri/tauri.conf.json': [('"version": "0.3.0"', '"version": "0.3.1"')],
+              'src-tauri/Cargo.toml': [('version = "0.3.0"', 'version = "0.3.1"')],
+              'src-tauri/Cargo.lock': [('name = "keymaster-pro"\nversion = "0.3.0"', 'name = "keymaster-pro"\nversion = "0.3.1"')],
+          }
+          for filename, pairs in replacements.items():
+              path = Path(filename)
+              text = path.read_text(encoding='utf-8')
+              for old, new in pairs:
+                  if old not in text:
+                      raise SystemExit(f'expected version marker not found in {filename}')
+                  text = text.replace(old, new, 1)
+              path.write_text(text, encoding='utf-8')
+      - shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add package.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock
+          git commit -m 'chore(0.3.1): align application version'
+          git push origin HEAD:dev/v0.3.1-mouse-macros
