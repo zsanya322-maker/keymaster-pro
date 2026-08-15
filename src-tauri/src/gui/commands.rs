@@ -35,10 +35,13 @@ impl Default for GuiState {
 /// Запустить daemon-процесс из GUI.
 #[tauri::command]
 pub fn spawn_daemon(state: State<'_, GuiState>) -> Result<serde_json::Value, String> {
-    let exe_path = state.exe_path.as_ref()
+    let exe_path = state
+        .exe_path
+        .as_ref()
         .ok_or("Не удалось определить путь к исполняемому файлу")?;
 
     if crate::daemon::runner::is_daemon_running() {
+        state.spawning.store(false, Ordering::SeqCst);
         info!("Daemon уже запущен");
         return Ok(serde_json::json!({
             "success": true,
@@ -56,7 +59,10 @@ pub fn spawn_daemon(state: State<'_, GuiState>) -> Result<serde_json::Value, Str
 
     let current_pid = std::process::id();
     let pipe_path = crate::shared::constants::IPC_PIPE_NAME;
-    info!("Запуск daemon-процесса: {} --daemon --parent-pid {}", exe_path, current_pid);
+    info!(
+        "Запуск daemon-процесса: {} --daemon --parent-pid {}",
+        exe_path, current_pid
+    );
     info!("Ожидаемый Named Pipe: {}", pipe_path);
 
     let child = match std::process::Command::new(exe_path)
@@ -83,26 +89,49 @@ pub fn spawn_daemon(state: State<'_, GuiState>) -> Result<serde_json::Value, Str
     }))
 }
 
-/// Остановить daemon-процесс через IPC.
-/// Возвращаем успех только когда Named Pipe действительно исчез. Это делает
-/// последовательность stop -> spawn детерминированной и не требует угадывать
-/// задержку завершения daemon в GUI.
-#[tauri::command]
-pub async fn stop_daemon() -> Result<serde_json::Value, String> {
+/// Дождаться появления Named Pipe, если daemon уже был spawn'нут, но ещё
+/// находится в коротком startup-окне до запуска IPC server.
+async fn wait_for_spawning_daemon(state: &GuiState) {
+    if crate::daemon::runner::is_daemon_running() || !state.spawning.load(Ordering::SeqCst) {
+        return;
+    }
+
+    for _ in 0..20 {
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        if crate::daemon::runner::is_daemon_running() {
+            return;
+        }
+        if !state.spawning.load(Ordering::SeqCst) {
+            return;
+        }
+    }
+}
+
+/// Реальная остановка daemon. Учитывает гонку spawn -> pipe и возвращает успех
+/// только после исчезновения Named Pipe.
+async fn stop_daemon_impl(state: &GuiState) -> Result<serde_json::Value, String> {
+    wait_for_spawning_daemon(state).await;
+
     if !crate::daemon::runner::is_daemon_running() {
+        state.spawning.store(false, Ordering::SeqCst);
         return Ok(serde_json::json!({
             "success": true,
             "message": "Daemon already stopped"
         }));
     }
 
+    // После появления pipe daemon уже вышел из spawn-фазы. Новый spawn разрешим
+    // только когда текущий процесс действительно исчезнет.
+    state.spawning.store(false, Ordering::SeqCst);
     info!("stop_daemon: отправка shutdown через IPC");
-    if let Err(e) = crate::daemon::ipc_client::call("shutdown", None).await {
-        warn!("stop_daemon: не удалось отправить команду: {}", e);
-        return Ok(serde_json::json!({
-            "success": false,
-            "message": format!("IPC error: {}", e)
-        }));
+
+    let shutdown_error = crate::daemon::ipc_client::call("shutdown", None)
+        .await
+        .err();
+    if let Some(ref error) = shutdown_error {
+        // Даже при ошибке чтения ответа daemon мог успеть принять shutdown.
+        // Проверяем фактическое состояние pipe, прежде чем объявлять failure.
+        warn!("stop_daemon: IPC shutdown вернул ошибку: {}", error);
     }
 
     for _ in 0..30 {
@@ -116,22 +145,36 @@ pub async fn stop_daemon() -> Result<serde_json::Value, String> {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }
 
-    warn!("stop_daemon: timeout ожидания завершения daemon");
+    let message = shutdown_error
+        .map(|error| format!("Daemon shutdown failed after IPC error: {}", error))
+        .unwrap_or_else(|| "Daemon shutdown timeout".to_string());
+    warn!("stop_daemon: {}", message);
     Ok(serde_json::json!({
         "success": false,
-        "message": "Daemon shutdown timeout"
+        "message": message
     }))
 }
 
-async fn stop_daemon_before_process_transition(reason: &str) {
-    match stop_daemon().await {
-        Ok(result) => {
-            if result.get("success").and_then(|v| v.as_bool()) == Some(false) {
-                warn!("{}: daemon не подтвердил остановку: {}", reason, result);
-            }
-        }
-        Err(error) => warn!("{}: ошибка остановки daemon: {}", reason, error),
+/// Остановить daemon-процесс через IPC.
+#[tauri::command]
+pub async fn stop_daemon(state: State<'_, GuiState>) -> Result<serde_json::Value, String> {
+    stop_daemon_impl(&state).await
+}
+
+async fn stop_daemon_before_process_transition(
+    reason: &str,
+    state: &GuiState,
+) -> Result<(), String> {
+    let result = stop_daemon_impl(state).await?;
+    if result.get("success").and_then(|v| v.as_bool()) == Some(false) {
+        let message = result
+            .get("message")
+            .and_then(|v| v.as_str())
+            .unwrap_or("daemon did not stop");
+        warn!("{}: daemon не подтвердил остановку: {}", reason, message);
+        return Err(format!("Не удалось остановить daemon перед {}: {}", reason, message));
     }
+    Ok(())
 }
 
 /// Получить статус Daemon через IPC.
@@ -161,7 +204,10 @@ pub async fn daemon_status(state: State<'_, GuiState>) -> Result<serde_json::Val
 
 /// IPC-прокси: отправить произвольный JSON-RPC запрос в Daemon.
 #[tauri::command]
-pub async fn ipc_call(method: String, params: Option<serde_json::Value>) -> Result<serde_json::Value, String> {
+pub async fn ipc_call(
+    method: String,
+    params: Option<serde_json::Value>,
+) -> Result<serde_json::Value, String> {
     crate::daemon::ipc_client::call(&method, params).await
 }
 
@@ -171,22 +217,28 @@ pub fn greet(name: &str) -> String {
     format!("Привет, {}! KeyMaster Pro работает 🎉", name)
 }
 
-/// Полностью завершить GUI. Перед выходом штатно останавливаем daemon;
-/// parent-PID watchdog остаётся аварийной страховкой, а не основным способом.
+/// Полностью завершить GUI. Quit остаётся best-effort: если daemon завис,
+/// пользователь всё равно должен иметь возможность закрыть приложение, а
+/// parent-PID watchdog останется аварийной страховкой.
 #[tauri::command]
-pub async fn quit_app(app_handle: tauri::AppHandle) {
+pub async fn quit_app(app_handle: tauri::AppHandle, state: State<'_, GuiState>) {
     info!("quit_app: explicit application exit");
-    stop_daemon_before_process_transition("quit_app").await;
+    if let Err(error) = stop_daemon_before_process_transition("quit_app", &state).await {
+        warn!("quit_app: продолжаем выход после ошибки daemon: {}", error);
+    }
     app_handle.exit(0);
 }
 
 /// Перезапустить приложение (используется после обновления).
-/// Сначала полностью останавливаем daemon, чтобы новый GUI не успел подключиться
-/// к daemon, привязанному watchdog'ом к PID старого GUI.
+/// В отличие от обычного Quit, restart запрещён, если старый daemon не удалось
+/// полностью остановить: новый GUI не должен подключаться к daemon старого PID.
 #[tauri::command]
-pub async fn restart_app(app_handle: tauri::AppHandle) {
+pub async fn restart_app(
+    app_handle: tauri::AppHandle,
+    state: State<'_, GuiState>,
+) -> Result<(), String> {
     info!("restart_app: перезапуск приложения");
-    stop_daemon_before_process_transition("restart_app").await;
+    stop_daemon_before_process_transition("restart_app", &state).await?;
     app_handle.restart();
 }
 
@@ -195,17 +247,17 @@ pub async fn restart_app(app_handle: tauri::AppHandle) {
 pub async fn restart_as_admin(state: State<'_, GuiState>) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
+        use windows::core::HSTRING;
         use windows::Win32::UI::Shell::ShellExecuteW;
         use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
-        use windows::core::HSTRING;
 
-        let exe_path = state.exe_path.clone()
+        let exe_path = state
+            .exe_path
+            .clone()
             .ok_or("Не удалось определить путь к исполняемому файлу")?;
 
-        // Закрываем старый daemon до старта elevated GUI. Иначе новый GUI может
-        // кратко подключиться к daemon старого parent PID, который затем умрёт
-        // по watchdog и оставит новое окно без engine.
-        stop_daemon_before_process_transition("restart_as_admin").await;
+        // Не запускаем elevated-копию, пока старый daemon не исчез полностью.
+        stop_daemon_before_process_transition("restart_as_admin", &state).await?;
 
         let verb = HSTRING::from("runas");
         let file = HSTRING::from(exe_path);
@@ -214,25 +266,25 @@ pub async fn restart_as_admin(state: State<'_, GuiState>) -> Result<(), String> 
         let parameters = HSTRING::from("--gui-delay-ms 650");
 
         let launch_result = unsafe {
-            ShellExecuteW(
-                None,
-                &verb,
-                &file,
-                &parameters,
-                None,
-                SW_SHOWNORMAL,
-            )
+            ShellExecuteW(None, &verb, &file, &parameters, None, SW_SHOWNORMAL)
         };
         let launch_code = launch_result.0 as isize;
 
         if launch_code <= 32 {
-            warn!("restart_as_admin: ShellExecuteW failed/cancelled, code={}", launch_code);
+            warn!(
+                "restart_as_admin: ShellExecuteW failed/cancelled, code={}",
+                launch_code
+            );
             // Мы уже штатно остановили daemon. Если пользователь отменил UAC,
             // оставляем старое GUI открытым и возвращаем ему engine обратно.
+            state.spawning.store(false, Ordering::SeqCst);
             if let Err(error) = spawn_daemon(state) {
                 warn!("restart_as_admin: не удалось восстановить daemon: {}", error);
             }
-            return Err(format!("Запуск от Администратора отменён или завершился ошибкой (код {})", launch_code));
+            return Err(format!(
+                "Запуск от Администратора отменён или завершился ошибкой (код {})",
+                launch_code
+            ));
         }
 
         std::process::exit(0);
@@ -249,8 +301,10 @@ pub async fn restart_as_admin(state: State<'_, GuiState>) -> Result<(), String> 
 pub fn is_elevated() -> bool {
     #[cfg(target_os = "windows")]
     {
+        use windows::Win32::Security::{
+            GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY,
+        };
         use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
-        use windows::Win32::Security::{GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY};
         unsafe {
             let mut token = windows::Win32::Foundation::HANDLE::default();
             if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token).is_ok() {
@@ -262,7 +316,9 @@ pub fn is_elevated() -> bool {
                     Some(&mut elevation as *mut _ as *mut _),
                     std::mem::size_of::<TOKEN_ELEVATION>() as u32,
                     &mut size,
-                ).is_ok() {
+                )
+                .is_ok()
+                {
                     return elevation.TokenIsElevated != 0;
                 }
             }
