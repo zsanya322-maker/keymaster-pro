@@ -1,0 +1,40 @@
+name: v0.3.2 Rust Diagnostics Lite
+
+on:
+  push:
+    branches: [dev/v0.3.2-profiles-context]
+    paths: [.github/workflows/v032-rust-diagnostics-lite.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dev/v0.3.2-profiles-context
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Apply staged implementation and fixes
+        shell: pwsh
+        run: |
+          python scripts/v032_profiles_context.py
+          python scripts/v032_frontend_fix.py
+          python scripts/v032_rust_fix.py
+      - name: Capture cargo check
+        shell: pwsh
+        working-directory: src-tauri
+        run: |
+          cargo check --all-targets *>&1 | Tee-Object -FilePath ../V032_RUST_CHECK.log
+          exit 0
+      - name: Commit diagnostic log
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add V032_RUST_CHECK.log
+          git commit -m "chore(0.3.2): capture Rust diagnostics lite"
+          git push origin HEAD:dev/v0.3.2-profiles-context
