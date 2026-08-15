@@ -10,7 +10,7 @@ use crate::schemas::engine::{EngineAction, EngineCondition, SimulatorCommand};
 use crate::schemas::frontend::key_modifiers;
 use crate::daemon::chord_output::{
     build_atomic_chord_commands, isolate_macro_commands, modifier_vks,
-    press_modifier_commands, release_modifier_commands, shell_mask_commands,
+    release_modifier_commands, shell_mask_commands,
 };
 use crate::shared::calculate_hash;
 
@@ -150,7 +150,9 @@ fn send_isolated_immediate(
     send_commands(simulator, shell_mask_commands(physical));
     send_commands(simulator, release_modifier_commands(physical));
     send_commands(simulator, commands);
-    send_commands(simulator, press_modifier_commands(physical));
+    if physical != 0 {
+        let _ = simulator.send(SimulatorCommand::RestorePhysicalModifiers { mask: physical });
+    }
 }
 
 fn send_atomic_chord(
