@@ -7,10 +7,18 @@
 use std::fs;
 use std::path::PathBuf;
 
-use tracing::{info, warn};
+use serde_json::{json, Value};
+use tracing::{error, info, warn};
 
 use crate::shared::constants::MAX_BACKUPS;
 use crate::shared::types::Profile;
+
+/// Текущая версия JSON-схемы профиля.
+///
+/// Поле хранится непосредственно в JSON как `schemaVersion`, но намеренно
+/// не является частью `Profile`: так фронтенд и runtime-модель остаются
+/// совместимыми с существующим API, а миграции централизованы в persistence.
+pub const PROFILE_SCHEMA_VERSION: u32 = 1;
 
 /// Получить путь к директории данных приложения (%APPDATA%\KeyMaster Pro\)
 pub fn app_data_dir() -> Result<PathBuf, String> {
@@ -35,7 +43,71 @@ fn backups_dir() -> Result<PathBuf, String> {
     Ok(dir)
 }
 
-/// Загрузить профиль из JSON файла
+/// Применить последовательные миграции JSON-профиля.
+///
+/// Профили старых версий KeyMaster Pro не имели `schemaVersion`; для них
+/// считаем версию равной 0 и проводим безопасную миграцию 0 -> 1, которая
+/// только добавляет метаданные версии и не меняет правила/слои.
+fn migrate_profile_value(mut value: Value) -> Result<(Value, bool), String> {
+    let object = value
+        .as_object_mut()
+        .ok_or_else(|| "Корень профиля должен быть JSON-объектом".to_string())?;
+
+    let mut version = object
+        .get("schemaVersion")
+        .and_then(Value::as_u64)
+        .unwrap_or(0) as u32;
+
+    if version > PROFILE_SCHEMA_VERSION {
+        return Err(format!(
+            "Профиль использует более новую схему {} (поддерживается до {})",
+            version, PROFILE_SCHEMA_VERSION
+        ));
+    }
+
+    let original_version = version;
+
+    while version < PROFILE_SCHEMA_VERSION {
+        match version {
+            0 => {
+                // v0 -> v1: только вводим явную версию схемы. Структура
+                // существующих правил, слоёв и профиля не меняется.
+                object.insert("schemaVersion".to_string(), json!(1));
+                version = 1;
+            }
+            other => {
+                return Err(format!("Нет миграции для версии профиля {}", other));
+            }
+        }
+    }
+
+    Ok((value, original_version != version))
+}
+
+fn write_profile_value(path: &PathBuf, value: &Value) -> Result<(), String> {
+    let data = serde_json::to_string_pretty(value)
+        .map_err(|e| format!("Ошибка сериализации профиля: {}", e))?;
+    fs::write(path, data)
+        .map_err(|e| format!("Ошибка записи {}: {}", path.display(), e))
+}
+
+fn recovery_profile(id: &str) -> Profile {
+    Profile {
+        id: id.to_string(),
+        name: format!("{} (Ошибка загрузки)", id),
+        is_default: false,
+        linked_apps: vec![],
+        rules: vec![],
+        layers: vec![],
+    }
+}
+
+/// Загрузить профиль из JSON файла.
+///
+/// Важное правило: повреждённый/несовместимый файл НИКОГДА не
+/// перезаписывается автоматически пустым профилем. Сначала сохраняется
+/// резервная копия, а runtime получает безопасный временный профиль с
+/// заметным именем `(... Ошибка загрузки)`. Исходный файл остаётся на месте.
 pub fn load_profile(id: &str) -> Result<Profile, String> {
     let dir = profiles_dir()?;
     let path = dir.join(format!("{}.json", id));
@@ -47,24 +119,64 @@ pub fn load_profile(id: &str) -> Result<Profile, String> {
     let data = fs::read_to_string(&path)
         .map_err(|e| format!("Ошибка чтения {}: {}", path.display(), e))?;
 
-    match serde_json::from_str::<Profile>(&data) {
-        Ok(profile) => Ok(profile),
+    let raw_value: Value = match serde_json::from_str(&data) {
+        Ok(value) => value,
         Err(e) => {
-            warn!("Ошибка парсинга {}: {}. Попытка сброса профиля (миграция).", path.display(), e);
-            // Если парсинг не удался (скорее всего старый формат), создаем пустой новый профиль
-            let new_profile = Profile {
-                id: id.to_string(),
-                name: format!("{} (Сброшен)", id),
-                is_default: false,
-                linked_apps: vec![],
-                rules: vec![],
-                layers: vec![],
-            };
-            // Сохраним его, чтобы починить файл
-            let _ = save_profile(&new_profile);
-            Ok(new_profile)
+            error!(
+                "Повреждён JSON профиля {}: {}. Файл НЕ перезаписывается.",
+                path.display(),
+                e
+            );
+            if let Err(backup_err) = backup_file(&path) {
+                warn!("Не удалось создать защитный бэкап повреждённого профиля: {}", backup_err);
+            }
+            return Ok(recovery_profile(id));
         }
+    };
+
+    let (migrated_value, was_migrated) = match migrate_profile_value(raw_value) {
+        Ok(result) => result,
+        Err(e) => {
+            error!(
+                "Не удалось мигрировать профиль {}: {}. Файл НЕ перезаписывается.",
+                path.display(),
+                e
+            );
+            if let Err(backup_err) = backup_file(&path) {
+                warn!("Не удалось создать защитный бэкап несовместимого профиля: {}", backup_err);
+            }
+            return Ok(recovery_profile(id));
+        }
+    };
+
+    let profile = match serde_json::from_value::<Profile>(migrated_value.clone()) {
+        Ok(profile) => profile,
+        Err(e) => {
+            error!(
+                "Профиль {} не соответствует runtime-схеме: {}. Файл НЕ перезаписывается.",
+                path.display(),
+                e
+            );
+            if let Err(backup_err) = backup_file(&path) {
+                warn!("Не удалось создать защитный бэкап несовместимого профиля: {}", backup_err);
+            }
+            return Ok(recovery_profile(id));
+        }
+    };
+
+    if was_migrated {
+        // До любого изменения старого файла сохраняем его исходную копию.
+        if let Err(e) = backup_file(&path) {
+            warn!("Не удалось создать бэкап перед миграцией {}: {}", path.display(), e);
+        }
+        write_profile_value(&path, &migrated_value)?;
+        info!(
+            "Профиль '{}' мигрирован до schemaVersion={}",
+            id, PROFILE_SCHEMA_VERSION
+        );
     }
+
+    Ok(profile)
 }
 
 /// Сохранить профиль в JSON файл (с бэкапом)
@@ -79,12 +191,18 @@ pub fn save_profile(profile: &Profile) -> Result<(), String> {
         }
     }
 
-    // Сериализовать с форматированием
-    let data = serde_json::to_string_pretty(profile)
+    // Версия схемы добавляется на границе persistence, не меняя runtime Profile.
+    let mut value = serde_json::to_value(profile)
         .map_err(|e| format!("Ошибка сериализации профиля: {}", e))?;
+    let object = value
+        .as_object_mut()
+        .ok_or_else(|| "Сериализованный профиль не является JSON-объектом".to_string())?;
+    object.insert(
+        "schemaVersion".to_string(),
+        json!(PROFILE_SCHEMA_VERSION),
+    );
 
-    fs::write(&path, data)
-        .map_err(|e| format!("Ошибка записи {}: {}", path.display(), e))?;
+    write_profile_value(&path, &value)?;
 
     info!("Профиль '{}' сохранён", profile.id);
     Ok(())
@@ -178,7 +296,7 @@ fn rotate_backups(profile_id: &str) -> Result<(), String> {
     // Сортируем по времени (новые первые)
     backups.sort_by(|a, b| b.1.cmp(&a.1));
 
-    // Удаляем лишние
+    // Удаляем лишние бэкапы сверх лимита
     for (name, _) in backups.iter().skip(MAX_BACKUPS) {
         let path = dir.join(name);
         if let Err(e) = fs::remove_file(&path) {
@@ -203,22 +321,49 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_invalid_json_creates_empty_profile() {
+    fn test_invalid_json_is_not_overwritten() {
         let dir = profiles_dir().unwrap();
         let id = "test_invalid";
         let path = dir.join(format!("{}.json", id));
-        fs::write(&path, "invalid_json_data").unwrap();
+        let invalid = "invalid_json_data";
+        fs::write(&path, invalid).unwrap();
 
         let profile = load_profile(id).unwrap();
         assert_eq!(profile.id, id);
-        assert_eq!(profile.name, format!("{} (Сброшен)", id));
+        assert!(profile.name.contains("Ошибка загрузки"));
         assert!(profile.rules.is_empty());
+        assert_eq!(fs::read_to_string(&path).unwrap(), invalid);
 
         let _ = fs::remove_file(&path);
     }
 
     #[test]
-    fn test_save_load_round_trip() {
+    fn test_legacy_profile_is_migrated_without_data_loss() {
+        let dir = profiles_dir().unwrap();
+        let id = "test_legacy_migration";
+        let path = dir.join(format!("{}.json", id));
+        let legacy = json!({
+            "id": id,
+            "name": "Legacy",
+            "isDefault": false,
+            "linkedApps": [],
+            "rules": [],
+            "layers": []
+        });
+        fs::write(&path, serde_json::to_string_pretty(&legacy).unwrap()).unwrap();
+
+        let profile = load_profile(id).unwrap();
+        assert_eq!(profile.name, "Legacy");
+
+        let migrated: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(migrated.get("schemaVersion").and_then(Value::as_u64), Some(1));
+        assert_eq!(migrated.get("name").and_then(Value::as_str), Some("Legacy"));
+
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn test_save_load_round_trip_writes_schema_version() {
         let profile = Profile {
             id: "test_rt".to_string(),
             name: "Round Trip".to_string(),
@@ -230,9 +375,13 @@ mod tests {
 
         save_profile(&profile).unwrap();
         let loaded = load_profile("test_rt").unwrap();
-        
+
         assert_eq!(loaded.id, "test_rt");
         assert_eq!(loaded.name, "Round Trip");
+
+        let path = profiles_dir().unwrap().join("test_rt.json");
+        let saved: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(saved.get("schemaVersion").and_then(Value::as_u64), Some(1));
 
         let _ = delete_profile("test_rt");
     }
