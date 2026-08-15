@@ -1,13 +1,17 @@
 import { useEffect, useState } from 'react'
+import { check } from '@tauri-apps/plugin-updater'
 import { Download, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { triggerToast } from '../lib/toast'
 import { useKeyMasterStore } from '../store/keyMasterStore'
+import { useAppStore } from '../stores/app-store'
+
+type UpdateInfo = Awaited<ReturnType<typeof check>>
 
 export function UpdateBanner() {
   const { t } = useTranslation()
   const rulesDirty = useKeyMasterStore(state => state.rulesDirty)
-  const [updateInfo, setUpdateInfo] = useState<any>(null)
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo>(null)
   const [isDismissed, setIsDismissed] = useState(false)
   const [isUpdating, setIsUpdating] = useState(false)
 
@@ -16,7 +20,6 @@ export function UpdateBanner() {
 
     async function checkForUpdates() {
       try {
-        const { check } = await import('@tauri-apps/plugin-updater')
         const update = await check()
         if (!disposed && update) setUpdateInfo(update)
       } catch (error) {
@@ -49,6 +52,9 @@ export function UpdateBanner() {
     setIsUpdating(true)
     try {
       await updateInfo.downloadAndInstall()
+      // Последний debounce-пакет настроек должен попасть на диск до смены
+      // процесса, даже если пользователь только что двигал scale/font slider.
+      await useAppStore.getState().flushConfig()
       const { invoke } = await import('@tauri-apps/api/core')
       await invoke('restart_app')
     } catch (error) {
