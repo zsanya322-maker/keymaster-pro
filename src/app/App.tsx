@@ -112,9 +112,7 @@ function App() {
 
     if (daemonConnected !== lastConnectionState) {
       showToast(
-        daemonConnected
-          ? t('status.daemon_connected', { defaultValue: 'Демон подключён' })
-          : t('status.daemon_disconnected', { defaultValue: 'Демон отключён' }),
+        daemonConnected ? t('status.daemon_connected') : t('status.daemon_disconnected'),
         daemonConnected ? 'success' : 'error',
       )
       setLastConnectionState(daemonConnected)
@@ -193,8 +191,6 @@ function App() {
             },
           })
 
-          // Не переключаем профиль из фонового status polling, пока справа
-          // есть несохранённый черновик правила.
           if (details.active_profile_id && !useKeyMasterStore.getState().rulesDirty) {
             const currentActive = useProfileStore.getState().activeProfileId
             if (currentActive !== details.active_profile_id) {
@@ -261,9 +257,6 @@ function App() {
     }
 
     try {
-      // Любой системный переход обязан сначала дописать последний debounced
-      // пакет scale/fontSize/rowPadding. Так tray/крестик имеют ту же гарантию,
-      // что и Restart из Settings.
       await useAppStore.getState().flushConfig()
 
       if (intent.type === 'restartAdmin') {
@@ -342,7 +335,6 @@ function App() {
         return
       }
 
-      // Импорт не должен молча перезаписывать профиль с тем же ID.
       if (useProfileStore.getState().profiles.some(profile => profile.id === profileData.id)) {
         profileData.id = crypto.randomUUID()
         profileData.isDefault = false
@@ -414,11 +406,11 @@ function App() {
   ).length ?? 0
 
   const sidebarLinks = [
-    { id: 'rules' as const, label: t('nav.rules', { defaultValue: 'Правила' }), icon: Keyboard },
-    { id: 'layers' as const, label: t('nav.layers', { defaultValue: 'Слои' }), icon: Layers },
-    { id: 'macros' as const, label: t('nav.macros', { defaultValue: 'Макросы' }), icon: Activity },
-    { id: 'text' as const, label: t('nav.text', { defaultValue: 'Текст' }), icon: FileText },
-    { id: 'settings' as const, label: t('nav.settings', { defaultValue: 'Настройки' }), icon: Settings },
+    { id: 'rules' as const, label: t('nav.rules'), icon: Keyboard },
+    { id: 'layers' as const, label: t('nav.layers'), icon: Layers },
+    { id: 'macros' as const, label: t('nav.macros'), icon: Activity },
+    { id: 'text' as const, label: t('nav.text'), icon: FileText },
+    { id: 'settings' as const, label: t('nav.settings'), icon: Settings },
   ]
 
   const isRulesWorkspace = activeCategory === 'rules' || activeCategory === 'macros' || activeCategory === 'text'
@@ -444,50 +436,48 @@ function App() {
     '--table-row-padding': `${config.rowPadding || 8}px`,
   } as CSSProperties
 
-  const menuButtonClass = 'px-2.5 h-7 text-[12px] text-app-text hover:bg-app-surface-hover cursor-pointer'
+  const menuButtonClass = 'px-2 h-7 text-[11px] text-app-text hover:bg-app-surface-hover cursor-pointer'
   const menuPanelClass = 'absolute left-0 top-full mt-px min-w-44 bg-app-bg border border-app-border shadow-lg py-1 z-50'
-  const menuItemClass = 'block w-full px-3 py-1.5 text-left text-xs text-app-text hover:bg-app-surface-hover cursor-pointer disabled:opacity-40 disabled:cursor-default'
-  const toolButtonClass = 'h-8 w-8 border border-app-border bg-app-bg flex items-center justify-center text-app-muted hover:text-app-text hover:bg-app-surface cursor-pointer disabled:opacity-35 disabled:cursor-default'
+  const menuItemClass = 'block w-full px-3 py-1.5 text-left text-[11px] text-app-text hover:bg-app-surface-hover cursor-pointer disabled:opacity-40 disabled:cursor-default'
+  const toolButtonClass = 'h-7 w-7 border border-transparent bg-transparent flex items-center justify-center text-app-muted hover:text-app-text hover:bg-app-surface hover:border-app-border cursor-pointer disabled:opacity-30 disabled:cursor-default'
 
   return (
     <div className="flex flex-col h-screen bg-app-bg text-app-text select-none font-sans overflow-hidden" style={rootStyle}>
-      <div className="h-8 flex items-center px-2 bg-app-bg border-b border-app-border relative z-50 shrink-0">
+      <div className="h-8 flex items-center px-1.5 bg-app-bg border-b border-app-border relative z-50 shrink-0">
         <div className="relative" onClick={event => event.stopPropagation()}>
           <button className={menuButtonClass} onClick={() => setActiveMenu(activeMenu === 'file' ? null : 'file')}>
-            {t('menu.file', { defaultValue: 'Файл' })}
+            {t('menu.file')}
           </button>
           {activeMenu === 'file' && (
             <div className={menuPanelClass}>
-              <button className={menuItemClass} onClick={() => { void handleImportProfile(); setActiveMenu(null) }}>{t('menu.import_profile', { defaultValue: 'Импорт профиля' })}</button>
-              <button className={menuItemClass} onClick={() => { void handleExportProfile(); setActiveMenu(null) }}>{t('menu.export_profile', { defaultValue: 'Экспорт профиля' })}</button>
+              <button className={menuItemClass} onClick={() => { void handleImportProfile(); setActiveMenu(null) }}>{t('menu.import_profile')}</button>
+              <button className={menuItemClass} onClick={() => { void handleExportProfile(); setActiveMenu(null) }}>{t('menu.export_profile')}</button>
               <div className="my-1 border-t border-app-border" />
-              <button className={menuItemClass} onClick={() => { requestShellIntent({ type: 'quit' }); setActiveMenu(null) }}>{t('menu.exit', { defaultValue: 'Выход' })}</button>
+              <button className={menuItemClass} onClick={() => { requestShellIntent({ type: 'quit' }); setActiveMenu(null) }}>{t('menu.exit')}</button>
             </div>
           )}
         </div>
 
         <div className="relative" onClick={event => event.stopPropagation()}>
           <button className={menuButtonClass} onClick={() => setActiveMenu(activeMenu === 'edit' ? null : 'edit')}>
-            {t('menu.edit', { defaultValue: 'Правка' })}
+            {t('menu.edit')}
           </button>
           {activeMenu === 'edit' && (
             <div className={menuPanelClass}>
-              <button className={menuItemClass} disabled={!isRulesWorkspace} onClick={() => { if (isRulesWorkspace) emitRuleCommand('add'); setActiveMenu(null) }}>{t('rules.add_rule', { defaultValue: 'Добавить правило' })}</button>
-              <button className={`${menuItemClass} text-app-danger`} disabled={!isRulesWorkspace} onClick={() => { if (isRulesWorkspace) emitRuleCommand('delete'); setActiveMenu(null) }}>{t('rules.delete_rule', { defaultValue: 'Удалить правило' })}</button>
+              <button className={menuItemClass} disabled={!isRulesWorkspace} onClick={() => { if (isRulesWorkspace) emitRuleCommand('add'); setActiveMenu(null) }}>{t('rules.add_rule')}</button>
+              <button className={`${menuItemClass} text-app-danger`} disabled={!isRulesWorkspace} onClick={() => { if (isRulesWorkspace) emitRuleCommand('delete'); setActiveMenu(null) }}>{t('rules.delete_rule')}</button>
             </div>
           )}
         </div>
 
         <div className="relative" onClick={event => event.stopPropagation()}>
           <button className={menuButtonClass} onClick={() => setActiveMenu(activeMenu === 'view' ? null : 'view')}>
-            {t('menu.view', { defaultValue: 'Вид' })}
+            {t('menu.view')}
           </button>
           {activeMenu === 'view' && (
             <div className={menuPanelClass}>
               <button className={menuItemClass} onClick={() => { toggleSidebar(); setActiveMenu(null) }}>
-                {sidebarOpen
-                  ? t('menu.hide_sidebar', { defaultValue: 'Скрыть боковую панель' })
-                  : t('menu.show_sidebar', { defaultValue: 'Показать боковую панель' })}
+                {sidebarOpen ? t('menu.hide_sidebar') : t('menu.show_sidebar')}
               </button>
             </div>
           )}
@@ -495,7 +485,7 @@ function App() {
 
         <div className="relative" onClick={event => event.stopPropagation()}>
           <button className={menuButtonClass} onClick={() => setActiveMenu(activeMenu === 'profiles' ? null : 'profiles')}>
-            {t('menu.profiles', { defaultValue: 'Профиль' })}
+            {t('menu.profiles')}
           </button>
           {activeMenu === 'profiles' && (
             <div className={`${menuPanelClass} min-w-52`}>
@@ -503,13 +493,13 @@ function App() {
                 className={`${menuItemClass} text-app-primary font-semibold flex items-center gap-2`}
                 onClick={() => { setCreateProfileOpen(true); setActiveMenu(null) }}
               >
-                <Plus size={13} /> {t('profiles_menu.create_profile', { defaultValue: 'Создать профиль' })}
+                <Plus size={12} /> {t('profiles_menu.create_profile')}
               </button>
               <div className="my-1 border-t border-app-border" />
               {profiles.map(profile => (
                 <div key={profile.id} className="flex items-center hover:bg-app-surface-hover group">
                   <button
-                    className={`flex-1 px-3 py-1.5 text-left text-xs truncate ${activeProfileId === profile.id ? 'text-app-primary font-semibold' : 'text-app-text'}`}
+                    className={`flex-1 px-3 py-1.5 text-left text-[11px] truncate ${activeProfileId === profile.id ? 'text-app-primary font-semibold' : 'text-app-text'}`}
                     onClick={() => { requestShellIntent({ type: 'profile', id: profile.id }); setActiveMenu(null) }}
                   >
                     {profile.name}
@@ -518,9 +508,9 @@ function App() {
                     <button
                       className="mr-2 p-1 text-app-muted hover:text-app-danger opacity-0 group-hover:opacity-100"
                       onClick={event => { event.stopPropagation(); setProfileToDelete({ id: profile.id, name: profile.name }) }}
-                      title={t('profiles_menu.delete_title', { defaultValue: 'Удалить профиль' })}
+                      title={t('profiles_menu.delete_title')}
                     >
-                      <Trash2 size={12} />
+                      <Trash2 size={11} />
                     </button>
                   )}
                 </div>
@@ -531,22 +521,20 @@ function App() {
 
         <div className="relative" onClick={event => event.stopPropagation()}>
           <button className={menuButtonClass} onClick={() => setActiveMenu(activeMenu === 'tools' ? null : 'tools')}>
-            {t('menu.tools', { defaultValue: 'Инструменты' })}
+            {t('menu.tools')}
           </button>
           {activeMenu === 'tools' && (
             <div className={menuPanelClass}>
               <button className={menuItemClass} onClick={() => { void handleToggleDaemon(); setActiveMenu(null) }}>
-                {daemonConnected
-                  ? t('footer.daemon_stop', { defaultValue: 'Остановить демон' })
-                  : t('footer.daemon_start', { defaultValue: 'Запустить демон' })}
+                {daemonConnected ? t('footer.daemon_stop') : t('footer.daemon_start')}
               </button>
               <button
                 className={`${menuItemClass} text-app-danger`}
                 disabled={!activeProfile || activeProfile.rules.length === 0 || rulesDirty}
-                title={rulesDirty ? t('rules.unsaved', { defaultValue: 'Сначала сохраните или отмените изменения правила' }) : undefined}
+                title={rulesDirty ? t('rules.unsaved') : undefined}
                 onClick={() => { setClearRulesOpen(true); setActiveMenu(null) }}
               >
-                {t('menu.clear_mappings', { defaultValue: 'Очистить правила' })}
+                {t('menu.clear_mappings')}
               </button>
             </div>
           )}
@@ -554,55 +542,55 @@ function App() {
 
         <div className="relative" onClick={event => event.stopPropagation()}>
           <button className={menuButtonClass} onClick={() => setActiveMenu(activeMenu === 'help' ? null : 'help')}>
-            {t('menu.help', { defaultValue: 'Справка' })}
+            {t('menu.help')}
           </button>
           {activeMenu === 'help' && (
             <div className={menuPanelClass}>
               <button className={menuItemClass} onClick={() => { showToast(`KeyMaster Pro v${APP_VERSION}`, 'info'); setActiveMenu(null) }}>
-                {t('menu.about', { defaultValue: 'О программе' })}
+                {t('menu.about')}
               </button>
             </div>
           )}
         </div>
       </div>
 
-      <div className="h-11 px-3 flex items-center gap-1.5 border-b border-app-border bg-app-surface/35 shrink-0">
-        <button className={toolButtonClass} onClick={toggleSidebar} title={sidebarOpen ? 'Скрыть панель' : 'Показать панель'}>
-          {sidebarOpen ? <PanelLeftClose size={15} /> : <PanelLeft size={15} />}
+      <div className="h-9 px-2 flex items-center gap-0.5 border-b border-app-border bg-app-surface/25 shrink-0">
+        <button className={toolButtonClass} onClick={toggleSidebar} title={sidebarOpen ? t('menu.hide_sidebar') : t('menu.show_sidebar')}>
+          {sidebarOpen ? <PanelLeftClose size={14} /> : <PanelLeft size={14} />}
         </button>
-        <div className="w-px h-6 bg-app-border mx-0.5" />
-        <button className={toolButtonClass} disabled={!isRulesWorkspace} onClick={() => emitRuleCommand('add')} title="Добавить правило">
-          <Plus size={15} className="text-app-success" />
+        <div className="w-px h-5 bg-app-border mx-1" />
+        <button className={toolButtonClass} disabled={!isRulesWorkspace} onClick={() => emitRuleCommand('add')} title={t('rules.add_rule')}>
+          <Plus size={14} className="text-app-success" />
         </button>
-        <button className={toolButtonClass} disabled={!isRulesWorkspace} onClick={() => emitRuleCommand('delete')} title="Удалить правило">
-          <Trash2 size={13} className="text-app-danger" />
+        <button className={toolButtonClass} disabled={!isRulesWorkspace} onClick={() => emitRuleCommand('delete')} title={t('rules.delete_rule')}>
+          <Trash2 size={12} className="text-app-danger" />
         </button>
-        <div className="w-px h-6 bg-app-border mx-0.5" />
-        <button className={toolButtonClass} onClick={() => void handleToggleDaemon()} title={daemonConnected ? 'Остановить демон' : 'Запустить демон'}>
-          {daemonConnected ? <Square size={11} fill="currentColor" /> : <Play size={13} className="text-app-success" fill="currentColor" />}
+        <div className="w-px h-5 bg-app-border mx-1" />
+        <button className={toolButtonClass} onClick={() => void handleToggleDaemon()} title={daemonConnected ? t('footer.daemon_stop') : t('footer.daemon_start')}>
+          {daemonConnected ? <Square size={10} fill="currentColor" /> : <Play size={12} className="text-app-success" fill="currentColor" />}
         </button>
-        <button className={toolButtonClass} onClick={() => requestShellIntent({ type: 'category', category: 'settings' })} title="Настройки">
-          <Settings size={14} />
+        <button className={toolButtonClass} onClick={() => requestShellIntent({ type: 'category', category: 'settings' })} title={t('nav.settings')}>
+          <Settings size={13} />
         </button>
 
-        <div className="ml-auto flex items-center gap-2 min-w-0">
-          <span className="text-[11px] text-app-muted hidden xl:inline">{t('footer.active_profile', { defaultValue: 'Профиль' })}:</span>
+        <div className="ml-auto flex items-center gap-1.5 min-w-0">
           <select
             value={activeProfileId ?? ''}
             onChange={event => { if (event.target.value) requestShellIntent({ type: 'profile', id: event.target.value }) }}
-            className="h-7 w-48 max-w-[22vw] px-2 text-[11px] bg-app-bg border border-app-border outline-none"
+            aria-label={t('footer.active_profile')}
+            className="h-7 w-44 max-w-[22vw] px-2 text-[10px] bg-app-bg border border-app-border outline-none focus:border-app-primary"
           >
             {profiles.map(profile => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
           </select>
 
-          <label className="relative w-56 max-w-[25vw]">
-            <Search size={13} className="absolute left-2 top-1/2 -translate-y-1/2 text-app-muted pointer-events-none" />
+          <label className="relative w-52 max-w-[25vw]">
+            <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-app-muted pointer-events-none" />
             <input
               value={shellSearch}
               onChange={event => handleShellSearch(event.target.value)}
               disabled={!isRulesWorkspace}
-              placeholder={t('rules.search_placeholder', { defaultValue: 'Поиск правил' })}
-              className="h-7 w-full pl-7 pr-2 text-[11px] bg-app-bg border border-app-border outline-none focus:border-app-primary disabled:opacity-40"
+              placeholder={t('rules.search_placeholder')}
+              className="h-7 w-full pl-7 pr-2 text-[10px] bg-app-bg border border-app-border outline-none focus:border-app-primary disabled:opacity-35"
             />
           </label>
         </div>
@@ -610,8 +598,8 @@ function App() {
 
       <div className="flex-1 min-h-0 flex overflow-hidden">
         {sidebarOpen && (
-          <aside className="w-40 shrink-0 border-r border-app-border bg-app-surface/30 flex flex-col">
-            <nav className="py-1.5">
+          <aside className="w-[148px] shrink-0 border-r border-app-border bg-app-surface/20 flex flex-col">
+            <nav className="py-1">
               {sidebarLinks.map(link => {
                 const Icon = link.icon
                 const active = activeCategory === link.id
@@ -619,13 +607,13 @@ function App() {
                   <button
                     key={link.id}
                     onClick={() => requestShellIntent({ type: 'category', category: link.id })}
-                    className={`w-full h-10 px-3 flex items-center gap-2.5 text-left text-[11px] border-l-2 transition-colors ${
+                    className={`w-full h-9 px-2.5 flex items-center gap-2 text-left text-[10px] border-l-2 transition-colors ${
                       active
-                        ? 'border-app-primary bg-app-primary/9 text-app-primary font-semibold'
-                        : 'border-transparent text-app-text hover:bg-app-surface-hover'
+                        ? 'border-app-primary bg-app-primary/10 text-app-primary font-semibold'
+                        : 'border-transparent text-app-text hover:bg-app-surface-hover/55'
                     }`}
                   >
-                    <Icon size={15} className={active ? 'text-app-primary' : 'text-app-muted'} />
+                    <Icon size={14} className={active ? 'text-app-primary' : 'text-app-muted'} />
                     <span>{link.label}</span>
                   </button>
                 )
@@ -643,24 +631,24 @@ function App() {
         </main>
       </div>
 
-      <footer className="h-8 px-3 flex items-center border-t border-app-border bg-app-surface/45 text-[10px] text-app-muted shrink-0">
-        <div className="flex items-center gap-2 min-w-28">
-          <span className={`h-2 w-2 rounded-full ${daemonConnected ? 'bg-app-success' : 'bg-app-danger'}`} />
-          <span>{daemonConnected ? t('status.ready', { defaultValue: 'Готово' }) : t('status.daemon_disconnected', { defaultValue: 'Демон отключён' })}</span>
+      <footer className="h-7 px-2.5 flex items-center border-t border-app-border bg-app-surface/35 text-[9px] text-app-muted shrink-0">
+        <div className="flex items-center gap-1.5 min-w-24">
+          <span className={`h-1.5 w-1.5 rounded-full ${daemonConnected ? 'bg-app-success' : 'bg-app-danger'}`} />
+          <span>{daemonConnected ? t('status.ready') : t('status.daemon_disconnected')}</span>
         </div>
-        <div className="h-4 w-px bg-app-border mx-3" />
-        <span>{t('nav.rules', { defaultValue: 'Правила' })}: <strong className="text-app-text">{activeProfile?.rules.length ?? 0}</strong></span>
-        <div className="h-4 w-px bg-app-border mx-3" />
-        <span>{t('nav.macros', { defaultValue: 'Макросы' })}: <strong className="text-app-text">{macroCount}</strong></span>
-        <div className="h-4 w-px bg-app-border mx-3" />
-        <span>{t('nav.layers', { defaultValue: 'Слои' })}: <strong className="text-app-text">{activeProfile?.layers.length ?? 0}</strong></span>
-        <div className="h-4 w-px bg-app-border mx-3" />
-        <span>{t('nav.text', { defaultValue: 'Текст' })}: <strong className="text-app-text">{textRuleCount}</strong></span>
-        {rulesDirty && <span className="ml-3 text-app-warning">● {t('rules.unsaved', { defaultValue: 'Несохранённые изменения' })}</span>}
-        <span className="ml-auto truncate max-w-[35vw]">{t('footer.active_profile', { defaultValue: 'Профиль' })}: <strong className="text-app-text">{activeProfileName}</strong></span>
+        <div className="h-3.5 w-px bg-app-border mx-2.5" />
+        <span>{t('nav.rules')}: <strong className="text-app-text">{activeProfile?.rules.length ?? 0}</strong></span>
+        <div className="h-3.5 w-px bg-app-border mx-2.5" />
+        <span>{t('nav.macros')}: <strong className="text-app-text">{macroCount}</strong></span>
+        <div className="h-3.5 w-px bg-app-border mx-2.5" />
+        <span>{t('nav.layers')}: <strong className="text-app-text">{activeProfile?.layers.length ?? 0}</strong></span>
+        <div className="h-3.5 w-px bg-app-border mx-2.5" />
+        <span>{t('nav.text')}: <strong className="text-app-text">{textRuleCount}</strong></span>
+        {rulesDirty && <span className="ml-2.5 text-app-warning">● {t('rules.unsaved')}</span>}
+        <span className="ml-auto truncate max-w-[32vw]">{t('footer.active_profile')}: <strong className="text-app-text">{activeProfileName}</strong></span>
       </footer>
 
-      <div className="fixed bottom-10 right-3 z-[9999] flex flex-col gap-2 pointer-events-none max-w-sm w-full">
+      <div className="fixed bottom-9 right-2.5 z-[9999] flex flex-col gap-2 pointer-events-none max-w-sm w-full">
         {toasts.map(toast => {
           const Icon = {
             success: CheckCircle,
@@ -692,11 +680,11 @@ function App() {
 
       <TextPromptDialog
         open={createProfileOpen}
-        title={t('profiles_menu.create_profile', { defaultValue: 'Создать профиль' })}
-        label={t('profiles_menu.new_profile_prompt', { defaultValue: 'Введите имя нового профиля:' })}
+        title={t('profiles_menu.create_profile')}
+        label={t('profiles_menu.new_profile_prompt')}
         initialValue="Новый профиль"
-        confirmLabel={t('profiles_menu.create_profile', { defaultValue: 'Создать' })}
-        cancelLabel={t('common.cancel', { defaultValue: 'Отмена' })}
+        confirmLabel={t('profiles_menu.create_profile')}
+        cancelLabel={t('common.cancel')}
         onCancel={() => setCreateProfileOpen(false)}
         onConfirm={async name => {
           const created = await useProfileStore.getState().createProfile({ name })
@@ -706,10 +694,10 @@ function App() {
 
       <ConfirmDialog
         open={pendingShellIntent !== null}
-        title={t('ruleBuilder.unsaved_title', { defaultValue: 'Несохранённые изменения' })}
-        message={t('ruleBuilder.unsaved_message', { defaultValue: 'Отбросить изменения правила и продолжить?' })}
+        title={t('ruleBuilder.unsaved_title')}
+        message={t('ruleBuilder.unsaved_message')}
         danger
-        confirmLabel={t('ruleBuilder.discard_changes', { defaultValue: 'Отбросить' })}
+        confirmLabel={t('ruleBuilder.discard_changes')}
         onCancel={() => setPendingShellIntent(null)}
         onConfirm={async () => {
           const intent = pendingShellIntent
@@ -722,10 +710,10 @@ function App() {
 
       <ConfirmDialog
         open={clearRulesOpen}
-        title={t('menu.clear_mappings', { defaultValue: 'Очистить правила' })}
-        message={t('rules.confirm_clear_all', { defaultValue: 'Удалить все правила активного профиля?' })}
+        title={t('menu.clear_mappings')}
+        message={t('rules.confirm_clear_all')}
         danger
-        confirmLabel={t('menu.clear_mappings', { defaultValue: 'Очистить' })}
+        confirmLabel={t('menu.clear_mappings')}
         onCancel={() => setClearRulesOpen(false)}
         onConfirm={async () => {
           const profile = useProfileStore.getState().profiles.find(item => item.id === useProfileStore.getState().activeProfileId)
@@ -737,10 +725,10 @@ function App() {
 
       <ConfirmDialog
         open={profileToDelete !== null}
-        title={t('profiles_menu.delete_title', { defaultValue: 'Удалить профиль' })}
-        message={t('profiles_menu.confirm_delete', { defaultValue: 'Удалить профиль “{{name}}”?', name: profileToDelete?.name ?? '' })}
+        title={t('profiles_menu.delete_title')}
+        message={t('profiles_menu.confirm_delete', { name: profileToDelete?.name ?? '' })}
         danger
-        confirmLabel={t('profiles_menu.delete_btn', { defaultValue: 'Удалить' })}
+        confirmLabel={t('profiles_menu.delete_btn')}
         onCancel={() => setProfileToDelete(null)}
         onConfirm={async () => {
           if (!profileToDelete) return
