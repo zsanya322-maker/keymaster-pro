@@ -275,18 +275,21 @@ pub fn run_daemon(parent_pid: Option<u32>) -> Result<(), String> {
             if let Ok(mut s) = config_sync_state.write() {
                 let changed = s.kb_hook_enabled != updated.kb_hook_enabled
                     || s.mouse_hook_enabled != updated.mouse_hook_enabled
-                    || s.restore_mouse_after_macro != updated.restore_mouse_after_macro;
+                    || s.restore_mouse_after_macro != updated.restore_mouse_after_macro
+                    || s.macro_emergency_stop_vk != updated.macro_emergency_stop_vk;
 
                 s.kb_hook_enabled = updated.kb_hook_enabled;
                 s.mouse_hook_enabled = updated.mouse_hook_enabled;
                 s.restore_mouse_after_macro = updated.restore_mouse_after_macro;
+                s.macro_emergency_stop_vk = updated.macro_emergency_stop_vk;
 
                 if changed {
                     info!(
-                        "Runtime config applied: keyboard={}, mouse={}, restore_mouse_after_macro={}",
+                        "Runtime config applied: keyboard={}, mouse={}, restore_mouse_after_macro={}, macro_emergency_stop_vk={}",
                         s.kb_hook_enabled,
                         s.mouse_hook_enabled,
-                        s.restore_mouse_after_macro
+                        s.restore_mouse_after_macro,
+                        s.macro_emergency_stop_vk
                     );
                 }
             }

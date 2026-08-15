@@ -43,6 +43,8 @@ pub struct DaemonState {
     pub last_latency_us: std::sync::atomic::AtomicU64,
     /// Return the cursor to its pre-macro position after playback finishes
     pub restore_mouse_after_macro: bool,
+    /// Emergency macro-stop VK (0 = disabled).
+    pub macro_emergency_stop_vk: u8,
     /// Macro recording state
     pub is_recording: std::sync::atomic::AtomicBool,
     pub record_ready: std::sync::atomic::AtomicBool,
@@ -79,6 +81,7 @@ impl DaemonState {
             keystrokes_processed: std::sync::atomic::AtomicUsize::new(0),
             last_latency_us: std::sync::atomic::AtomicU64::new(0),
             restore_mouse_after_macro: config.restore_mouse_after_macro,
+            macro_emergency_stop_vk: config.macro_emergency_stop_vk,
             is_recording: std::sync::atomic::AtomicBool::new(false),
             record_ready: std::sync::atomic::AtomicBool::new(false),
             record_mouse_moves: std::sync::atomic::AtomicBool::new(false),
@@ -114,6 +117,7 @@ impl Default for DaemonState {
             keystrokes_processed: std::sync::atomic::AtomicUsize::new(0),
             last_latency_us: std::sync::atomic::AtomicU64::new(0),
             restore_mouse_after_macro: true,
+            macro_emergency_stop_vk: 0x13,
             is_recording: std::sync::atomic::AtomicBool::new(false),
             record_ready: std::sync::atomic::AtomicBool::new(false),
             record_mouse_moves: std::sync::atomic::AtomicBool::new(false),

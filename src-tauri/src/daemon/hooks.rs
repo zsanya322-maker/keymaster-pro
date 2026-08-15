@@ -219,6 +219,20 @@ extern "system" fn keyboard_hook_callback(
                 return LRESULT(1);
             }
 
+            // Emergency stop is handled before recording/rule dispatch. It is a
+            // constant-time atomic/mutex signal into macro-player; no macro work
+            // happens inside the LL hook callback. 0 disables the hotkey.
+            if is_key_down
+                && s.macro_emergency_stop_vk != 0
+                && vk_code == s.macro_emergency_stop_vk
+            {
+                if let Some(simulator) = &s.simulator {
+                    simulator.cancel_all_macros();
+                }
+                tracing::warn!("Macro emergency stop triggered (VK={})", vk_code);
+                return LRESULT(1);
+            }
+
             // Перехват F12 для запуска / остановки записи макроса
             if vk_code == 0x7B { // F12
                 if is_key_down {

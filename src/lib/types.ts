@@ -112,6 +112,7 @@ export interface AppConfig {
   fontSize?: number
   rowPadding?: number
   restoreMouseAfterMacro?: boolean
+  macroEmergencyStopVk?: number
   tapHoldTimeoutMs?: number
   onboardingComplete?: boolean
 }

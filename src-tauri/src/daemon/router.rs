@@ -332,6 +332,53 @@ pub async fn dispatch(
             }
         }
 
+        // Macro playback / preview. Preview compiles through the same compiler
+        // helpers and executes through the same macro-player as a real rule.
+        "macro.preview" => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct MacroPreviewInput {
+                steps: Vec<crate::schemas::frontend::MacroStep>,
+                #[serde(default)]
+                playback: crate::schemas::frontend::MacroPlayback,
+            }
+
+            let input: MacroPreviewInput = serde_json::from_value(
+                params.ok_or_else(|| "Missing parameters".to_string())?
+            ).map_err(|e| e.to_string())?;
+            let commands = crate::daemon::compiler::compile_macro_commands(&input.steps);
+            let mut playback = crate::daemon::compiler::compile_macro_playback(&input.playback);
+            // A preview must always be bounded. Repeat count/speed are preserved,
+            // while "while held" is a source-input lifecycle concept.
+            playback.repeat_while_held = false;
+            let simulator = {
+                let s = state.read().map_err(|_| "Failed to lock state")?;
+                s.simulator.clone().ok_or_else(|| "Simulator is not ready".to_string())?
+            };
+            let job_id = simulator.send_macro(
+                commands,
+                playback,
+                crate::shared::calculate_hash(&"__macro_preview__"),
+            )?;
+            Ok(json!({ "success": true, "jobId": job_id }))
+        }
+        "macro.stop_playback" => {
+            let simulator = {
+                let s = state.read().map_err(|_| "Failed to lock state")?;
+                s.simulator.clone().ok_or_else(|| "Simulator is not ready".to_string())?
+            };
+            simulator.cancel_current_macro();
+            Ok(json!({ "success": true }))
+        }
+        "macro.emergency_stop" => {
+            let simulator = {
+                let s = state.read().map_err(|_| "Failed to lock state")?;
+                s.simulator.clone().ok_or_else(|| "Simulator is not ready".to_string())?
+            };
+            simulator.cancel_all_macros();
+            Ok(json!({ "success": true }))
+        }
+
         // Macro recording
         "macro.start_recording" => {
             let record_mouse_moves = params

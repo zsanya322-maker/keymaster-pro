@@ -31,6 +31,8 @@ pub struct AppConfig {
     pub active_profile_id: String,
     pub scale: f64,
     pub restore_mouse_after_macro: bool,
+    /// Single VK used to cancel every queued/running macro. 0 disables it.
+    pub macro_emergency_stop_vk: u8,
     pub onboarding_complete: bool,
     /// Legacy compatibility field. Tap-Hold timeout is stored per rule and the
     /// engine does not consume this global value.
@@ -53,6 +55,7 @@ impl Default for AppConfig {
             active_profile_id: "1".to_string(),
             scale: 0.85,
             restore_mouse_after_macro: true,
+            macro_emergency_stop_vk: 0x13, // Pause
             onboarding_complete: false,
             tap_hold_timeout_ms: 200,
             font_size: 12,
