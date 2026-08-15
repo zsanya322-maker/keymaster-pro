@@ -1,7 +1,7 @@
 // Предотвращаем создание консольного окна на Windows
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use clap::{Command, Arg};
+use clap::{Arg, Command};
 
 fn main() {
     let matches = Command::new("KeyMaster Pro")
@@ -11,13 +11,20 @@ fn main() {
             Arg::new("daemon")
                 .long("daemon")
                 .help("Запустить как daemon (background process без GUI)")
-                .action(clap::ArgAction::SetTrue)
+                .action(clap::ArgAction::SetTrue),
         )
         .arg(
             Arg::new("parent-pid")
                 .long("parent-pid")
                 .help("PID родительского процесса для мониторинга")
-                .value_parser(clap::value_parser!(u32))
+                .value_parser(clap::value_parser!(u32)),
+        )
+        .arg(
+            Arg::new("gui-delay-ms")
+                .long("gui-delay-ms")
+                .hide(true)
+                .help("Internal: delay GUI/Tauri initialization during process handoff")
+                .value_parser(clap::value_parser!(u64)),
         )
         .get_matches();
 
@@ -29,6 +36,13 @@ fn main() {
             std::process::exit(1);
         }
     } else {
+        // При Restart as Admin elevated-процесс создаётся до завершения старого
+        // GUI. Небольшая задержка ДО Tauri/single-instance даёт старому процессу
+        // освободить single-instance lock и исключает ложное закрытие новой копии.
+        if let Some(delay_ms) = matches.get_one::<u64>("gui-delay-ms").copied() {
+            std::thread::sleep(std::time::Duration::from_millis(delay_ms.min(5_000)));
+        }
+
         // GUI-процесс (Tauri)
         keymaster_pro_lib::run();
     }
