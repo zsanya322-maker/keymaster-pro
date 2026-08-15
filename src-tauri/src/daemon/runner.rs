@@ -14,9 +14,9 @@ use std::sync::OnceLock;
 use tracing::{error, info, warn};
 
 use crate::daemon::state::{DaemonState, DaemonStateRef};
+use crate::logging;
 use crate::shared::config;
 use crate::shared::constants;
-use crate::logging;
 
 /// Флаг для graceful shutdown (глобальный, читается из hook callback)
 static DAEMON_RUNNING: AtomicBool = AtomicBool::new(true);
@@ -40,6 +40,88 @@ where
     }
 }
 
+/// Разрешить профиль, с которым daemon должен стартовать.
+///
+/// Если `active_profile_id` указывает на пропавший файл, не создаём новый
+/// `is_default=true` поверх уже существующей конфигурации. Сначала используем
+/// существующий default, затем любой читаемый профиль, и только при реально
+/// пустом/нечитаемом наборе создаём новый default.
+fn resolve_startup_profile(
+    app_config: &mut crate::shared::types::AppConfig,
+) -> Result<crate::shared::types::Profile, String> {
+    let configured_id = app_config.active_profile_id.clone();
+    if let Ok(profile) = crate::shared::persistence::load_profile(&configured_id) {
+        info!("Profile '{}' successfully loaded from disk", configured_id);
+        return Ok(profile);
+    }
+
+    warn!(
+        "Configured active profile '{}' is unavailable; selecting safe fallback",
+        configured_id
+    );
+
+    let ids = crate::shared::persistence::list_profiles()?;
+    let had_profile_files = !ids.is_empty();
+    let mut first_readable = None;
+    let mut selected_default = None;
+
+    for id in ids {
+        if id == configured_id {
+            continue;
+        }
+        match crate::shared::persistence::load_profile(&id) {
+            Ok(profile) => {
+                if profile.is_default {
+                    selected_default = Some(profile);
+                    break;
+                }
+                if first_readable.is_none() {
+                    first_readable = Some(profile);
+                }
+            }
+            Err(error) => {
+                warn!("Skipping unreadable fallback profile '{}': {}", id, error);
+            }
+        }
+    }
+
+    let profile = if let Some(profile) = selected_default.or(first_readable) {
+        info!("Startup fallback profile selected: '{}'", profile.id);
+        profile
+    } else {
+        // Empty installation keeps the historical ID `1`. If files exist but
+        // none can be loaded, create a fresh UUID instead of risking overwrite
+        // of an incompatible/corrupt `1.json`.
+        let id = if had_profile_files {
+            uuid::Uuid::new_v4().to_string()
+        } else {
+            "1".to_string()
+        };
+        let default_profile = crate::shared::types::Profile {
+            id: id.clone(),
+            name: "Default".to_string(),
+            is_default: true,
+            linked_apps: vec![],
+            rules: vec![],
+            layers: vec![],
+        };
+        crate::shared::persistence::save_profile(&default_profile)?;
+        info!("Created startup default profile '{}'", id);
+        default_profile
+    };
+
+    if app_config.active_profile_id != profile.id {
+        app_config.active_profile_id = profile.id.clone();
+        config::save_config(app_config)?;
+        info!(
+            "Recovered activeProfileId in config -> '{}'",
+            app_config.active_profile_id
+        );
+    }
+
+    Ok(profile)
+}
+
 /// Запустить daemon-процесс
 ///
 /// Вызывается из main.rs когда передан флаг `--daemon`.
@@ -52,20 +134,28 @@ pub fn run_daemon(parent_pid: Option<u32>) -> Result<(), String> {
 
     // Initialize logger
     logging::init_logging()?;
-    info!("KeyMaster Pro Daemon v{} starting...", env!("CARGO_PKG_VERSION"));
+    info!(
+        "KeyMaster Pro Daemon v{} starting...",
+        env!("CARGO_PKG_VERSION")
+    );
 
     // Save main thread ID for request_shutdown()
     #[cfg(target_os = "windows")]
     unsafe {
-        MAIN_THREAD_ID.store(windows::Win32::System::Threading::GetCurrentThreadId(), Ordering::SeqCst);
+        MAIN_THREAD_ID.store(
+            windows::Win32::System::Threading::GetCurrentThreadId(),
+            Ordering::SeqCst,
+        );
     }
 
-    // Load configuration
-    let app_config = config::load_config().unwrap_or_else(|e| {
+    // Load configuration and resolve the startup profile before constructing
+    // DaemonState so active_profile_id and engine profile always agree.
+    let mut app_config = config::load_config().unwrap_or_else(|e| {
         warn!("Failed to load config: {}, using default", e);
         crate::shared::types::AppConfig::default()
     });
     info!("Configuration loaded. Language: {}", app_config.language);
+    let loaded_profile = resolve_startup_profile(&mut app_config)?;
 
     // Create shared state
     let state = DaemonState::from_config(&app_config).into_ref();
@@ -77,7 +167,9 @@ pub fn run_daemon(parent_pid: Option<u32>) -> Result<(), String> {
     }
 
     // Start Context Tracker
-    crate::trackers::context_tracker::spawn_context_tracker(crate::context::AppContextState::default());
+    crate::trackers::context_tracker::spawn_context_tracker(
+        crate::context::AppContextState::default(),
+    );
 
     // Start Tokio runtime for IPC and background tasks
     let tokio_rt = tokio::runtime::Builder::new_multi_thread()
@@ -108,7 +200,10 @@ pub fn run_daemon(parent_pid: Option<u32>) -> Result<(), String> {
             loop {
                 tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                 if !is_process_alive(pid) {
-                    warn!("Родительский процесс PID {} завершился. Самоликвидация daemon'а...", pid);
+                    warn!(
+                        "Родительский процесс PID {} завершился. Самоликвидация daemon'а...",
+                        pid
+                    );
                     request_shutdown();
                     break;
                 }
@@ -147,7 +242,10 @@ pub fn run_daemon(parent_pid: Option<u32>) -> Result<(), String> {
                 Ok(value) => value,
                 Err(_) => continue,
             };
-            if last_modified.as_ref().is_some_and(|previous| *previous == modified) {
+            if last_modified
+                .as_ref()
+                .is_some_and(|previous| *previous == modified)
+            {
                 continue;
             }
             last_modified = Some(modified);
@@ -195,7 +293,7 @@ pub fn run_daemon(parent_pid: Option<u32>) -> Result<(), String> {
         info!("Запущен фоновый ticker для Tap-Hold маппингов");
         loop {
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-            
+
             // Если daemon останавливается, выходим
             {
                 if let Ok(s) = taphold_state.read() {
@@ -204,35 +302,12 @@ pub fn run_daemon(parent_pid: Option<u32>) -> Result<(), String> {
                     }
                 }
             }
-            
+
             crate::daemon::engine::tick_tap_holds(Some(&taphold_state));
         }
     });
 
-    // Load active profile
-    let profile_id = app_config.active_profile_id.clone();
-    let loaded_profile = match crate::shared::persistence::load_profile(&profile_id) {
-        Ok(prof) => {
-            info!("Profile '{}' successfully loaded from disk", profile_id);
-            prof
-        }
-        Err(_) => {
-            info!("Profile '{}' not found on disk. Creating default profile.", profile_id);
-            let default_prof = crate::shared::types::Profile {
-                id: profile_id.clone(),
-                name: "Default".to_string(),
-                is_default: true,
-                linked_apps: vec![],
-                rules: vec![],
-                layers: vec![],
-            };
-            if let Err(e) = crate::shared::persistence::save_profile(&default_prof) {
-                error!("Failed to save default profile to disk: {}", e);
-            }
-            default_prof
-        }
-    };
-
+    // Compile the already-resolved startup profile into runtime state.
     {
         if let Ok(mut s) = state.write() {
             let frontend_config = crate::schemas::frontend::FrontendConfig {
@@ -241,6 +316,7 @@ pub fn run_daemon(parent_pid: Option<u32>) -> Result<(), String> {
                 tap_hold_timeout_ms: app_config.tap_hold_timeout_ms,
             };
             s.engine_schema = crate::daemon::compiler::compile_schema(&frontend_config);
+            s.active_profile_id = loaded_profile.id.clone();
             s.active_profile = Some(loaded_profile);
         }
     }
@@ -250,7 +326,9 @@ pub fn run_daemon(parent_pid: Option<u32>) -> Result<(), String> {
 
     // Update state
     {
-        let mut s = state.write().map_err(|e| format!("Failed to lock state: {}", e))?;
+        let mut s = state
+            .write()
+            .map_err(|e| format!("Failed to lock state: {}", e))?;
         s.hooks_installed = true;
     }
 
@@ -266,7 +344,9 @@ pub fn run_daemon(parent_pid: Option<u32>) -> Result<(), String> {
     DAEMON_RUNNING.store(false, Ordering::SeqCst);
 
     {
-        let mut s = shutdown_state.write().map_err(|e| format!("Ошибка блокировки state: {}", e))?;
+        let mut s = shutdown_state
+            .write()
+            .map_err(|e| format!("Ошибка блокировки state: {}", e))?;
         s.running = false;
     }
 
@@ -317,8 +397,7 @@ pub fn request_shutdown() {
 
     #[cfg(target_os = "windows")]
     {
-        use windows::Win32::UI::WindowsAndMessaging::PostThreadMessageW;
-        use windows::Win32::UI::WindowsAndMessaging::WM_QUIT;
+        use windows::Win32::UI::WindowsAndMessaging::{PostThreadMessageW, WM_QUIT};
 
         let thread_id = MAIN_THREAD_ID.load(Ordering::SeqCst);
         if thread_id != 0 {
@@ -338,8 +417,10 @@ pub fn request_shutdown() {
 fn is_process_alive(pid: u32) -> bool {
     #[cfg(target_os = "windows")]
     {
-        use windows::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, GetExitCodeProcess};
         use windows::Win32::Foundation::{CloseHandle, GetLastError};
+        use windows::Win32::System::Threading::{
+            GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+        };
 
         unsafe {
             let handle = match OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) {
@@ -376,10 +457,10 @@ pub fn is_daemon_running() -> bool {
     #[cfg(target_os = "windows")]
     {
         use windows::core::HSTRING;
-        use windows::Win32::Storage::FileSystem::CreateFileW;
         use windows::Win32::Foundation::CloseHandle;
+        use windows::Win32::Storage::FileSystem::CreateFileW;
         use windows::Win32::Storage::FileSystem::{
-            FILE_SHARE_READ, FILE_ATTRIBUTE_NORMAL, OPEN_EXISTING,
+            FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, OPEN_EXISTING,
         };
 
         let pipe_name = HSTRING::from(constants::IPC_PIPE_NAME);
