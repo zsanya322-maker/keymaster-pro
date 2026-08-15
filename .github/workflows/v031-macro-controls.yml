@@ -6,6 +6,7 @@ on:
       - dev/v0.3.1-mouse-macros
     paths:
       - scripts/v031_macro_controls.py
+      - scripts/v031_prebuild_fix.py
       - .github/workflows/v031-macro-controls.yml
 
 permissions:
@@ -27,6 +28,8 @@ jobs:
         with:
           version: 9
       - uses: dtolnay/rust-toolchain@stable
+      - name: Fix typed mouse rule tree coverage
+        run: python scripts/v031_prebuild_fix.py
       - name: Apply v0.3.1 completion
         run: python scripts/v031_macro_controls.py
       - name: Install dependencies
@@ -43,6 +46,7 @@ jobs:
         shell: pwsh
         run: |
           Remove-Item scripts/v031_macro_controls.py -Force
+          Remove-Item scripts/v031_prebuild_fix.py -Force
           Remove-Item .github/workflows/v031-macro-controls.yml -Force
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
