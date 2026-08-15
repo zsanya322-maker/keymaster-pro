@@ -87,7 +87,9 @@ pub fn build_atomic_chord_commands(
             .rev()
             .map(SimulatorCommand::ReleaseKey),
     );
-    commands.extend(press_modifier_commands(physical));
+    if physical != 0 {
+        commands.push(SimulatorCommand::RestorePhysicalModifiers { mask: physical });
+    }
     commands
 }
 
@@ -116,11 +118,8 @@ mod tests {
 
     #[test]
     fn ctrl_shift_to_alt_tab_has_safe_order() {
-        let commands = build_atomic_chord_commands(
-            0x09,
-            key_modifiers::ALT,
-            key_modifiers::LCTRL | key_modifiers::RSHIFT,
-        );
+        let source = key_modifiers::LCTRL | key_modifiers::RSHIFT;
+        let commands = build_atomic_chord_commands(0x09, key_modifiers::ALT, source);
         assert_eq!(
             commands,
             vec![
@@ -130,8 +129,7 @@ mod tests {
                 SimulatorCommand::PressKey(0x09),
                 SimulatorCommand::ReleaseKey(0x09),
                 SimulatorCommand::ReleaseKey(0xA4),
-                SimulatorCommand::PressKey(0xA2),
-                SimulatorCommand::PressKey(0xA1),
+                SimulatorCommand::RestorePhysicalModifiers { mask: source },
             ]
         );
     }
