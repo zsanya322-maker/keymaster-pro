@@ -1,14 +1,16 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
-import { MacroStep, MacroAction } from '../../lib/types';
+import { ArrowDown, ArrowUp, Circle, Plus, Square, Trash2 } from 'lucide-react';
+import type { MacroAction, MacroStep } from '../../lib/types';
 import { KeyPicker } from './KeyPicker';
-import { Trash2, ArrowUp, ArrowDown, Plus, Circle, Square } from 'lucide-react';
 
 interface MacroEditorProps {
   steps: MacroStep[];
   onChange: (steps: MacroStep[]) => void;
 }
+
+const inputClass = 'h-7 border border-app-border bg-app-bg px-1.5 text-[11px] text-app-text outline-none focus:border-app-primary disabled:opacity-50';
 
 export const MacroEditor: React.FC<MacroEditorProps> = ({ steps, onChange }) => {
   const { t } = useTranslation();
@@ -17,12 +19,11 @@ export const MacroEditor: React.FC<MacroEditorProps> = ({ steps, onChange }) => 
   const [recordMouseMoves, setRecordMouseMoves] = useState(false);
   const [recordMouseDragDropOnly, setRecordMouseDragDropOnly] = useState(true);
 
-  const isRecordingRef = useRef(isRecording);
+  const isRecordingRef = useRef(false);
   const recordMouseMovesRef = useRef(recordMouseMoves);
   const recordMouseDragDropOnlyRef = useRef(recordMouseDragDropOnly);
-  // Guard от двойного stop_recording: UI-клик и poll могут соревноваться.
-  // true = стоп инициирован кнопкой Stop, poll должен уступить.
   const isStoppingRef = useRef(false);
+  const onChangeRef = useRef(onChange);
 
   useEffect(() => {
     isRecordingRef.current = isRecording;
@@ -36,96 +37,84 @@ export const MacroEditor: React.FC<MacroEditorProps> = ({ steps, onChange }) => 
     recordMouseDragDropOnlyRef.current = recordMouseDragDropOnly;
   }, [recordMouseDragDropOnly]);
 
-  const syncSettings = (ready: boolean, moves: boolean, dragDrop: boolean, currentSteps?: MacroStep[]) => {
+  useEffect(() => {
+    onChangeRef.current = onChange;
+  }, [onChange]);
+
+  const syncSettings = (ready: boolean, moves: boolean, dragDrop: boolean, currentSteps: MacroStep[] = []) => {
     invoke('ipc_call', {
       method: 'macro.set_record_ready',
       params: {
         ready,
         recordMouseMoves: moves,
         recordMouseDragDropOnly: dragDrop,
-        existingSteps: currentSteps || [],
-      }
-    }).catch(e => {
-      console.error('Failed to set record ready with options', e);
-    });
+        existingSteps: currentSteps,
+      },
+    }).catch((error) => console.error('Failed to set macro recording options', error));
   };
 
-  const handleRecordMouseMovesChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = e.target.checked;
-    setRecordMouseMoves(val);
-    syncSettings(true, val, recordMouseDragDropOnly, steps);
-  };
-
-  const handleRecordMouseDragDropOnlyChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = e.target.checked;
-    setRecordMouseDragDropOnly(val);
-    syncSettings(true, recordMouseMoves, val, steps);
-  };
-
-  const stepsRef = useRef(steps);
   useEffect(() => {
-    stepsRef.current = steps;
-    // Синхронизируем шаги на бэкенде, если мы готовы к записи, но НЕ ведем саму запись сейчас
     if (!isRecordingRef.current) {
       syncSettings(true, recordMouseMovesRef.current, recordMouseDragDropOnlyRef.current, steps);
     }
   }, [steps]);
 
-  const onChangeRef = useRef(onChange);
   useEffect(() => {
-    onChangeRef.current = onChange;
-  }, [onChange]);
+    let disposed = false;
+    let timerId: number | null = null;
 
-  useEffect(() => {
-    const checkStatus = async () => {
+    const poll = async () => {
+      if (disposed) return;
+
       try {
-        const res = await invoke<{ isRecording: boolean; stepsCount: number }>('ipc_call', {
+        const result = await invoke<{ isRecording: boolean; stepsCount: number }>('ipc_call', {
           method: 'macro.get_recording_status',
         });
-        setRecordedCount(res.stepsCount);
-        setIsRecording(res.isRecording);
-      } catch (e) {
-        console.error('Failed to get initial recording status', e);
+        if (disposed) return;
+
+        setRecordedCount(result.stepsCount);
+        const wasRecording = isRecordingRef.current;
+
+        if (result.isRecording && !wasRecording) {
+          isStoppingRef.current = false;
+          isRecordingRef.current = true;
+          setIsRecording(true);
+        } else if (!result.isRecording && wasRecording && !isStoppingRef.current) {
+          isRecordingRef.current = false;
+          setIsRecording(false);
+          const stepsResult = await invoke<{ steps: MacroStep[] }>('ipc_call', { method: 'macro.stop_recording' });
+          if (!disposed && stepsResult.steps?.length) onChangeRef.current(stepsResult.steps);
+        }
+      } catch (error) {
+        if (!disposed) console.error('Failed to poll macro recording status', error);
+      }
+
+      if (!disposed) {
+        timerId = window.setTimeout(poll, isRecordingRef.current ? 250 : 1000);
       }
     };
-    checkStatus();
 
-    // Запускаем постоянный опрос каждые 300 мс
-    const interval = setInterval(async () => {
-      try {
-        const res = await invoke<{ isRecording: boolean; stepsCount: number }>('ipc_call', {
-          method: 'macro.get_recording_status',
-        });
-        setRecordedCount(res.stepsCount);
-
-        const wasRecording = isRecordingRef.current;
-        if (res.isRecording && !wasRecording) {
-          // Запись стартовала снаружи (F12) — синхронизируем UI.
-          isStoppingRef.current = false;
-          setIsRecording(true);
-        } else if (!res.isRecording && wasRecording && !isStoppingRef.current) {
-          // Запись остановлена снаружи (F12) и UI-кнопка Stop не при чём —
-          // забираем шаги. Если уже стопаем через кнопку, poll уступает (isStoppingRef=true).
-          setIsRecording(false);
-          const stepsRes = await invoke<{ steps: MacroStep[] }>('ipc_call', { method: 'macro.stop_recording' });
-          if (stepsRes.steps && stepsRes.steps.length > 0) {
-            onChangeRef.current(stepsRes.steps);
-          }
-        }
-      } catch (e) {
-        console.error('Failed to poll recording status', e);
-      }
-    }, 300);
+    void poll();
 
     return () => {
-      clearInterval(interval);
-      // Гарантированно стопаем запись при размонтировании: иначе бэкенд
-      // продолжит писать нажатия в recorded_steps даже после закрытия модалки.
+      disposed = true;
+      if (timerId !== null) window.clearTimeout(timerId);
       invoke('ipc_call', { method: 'macro.stop_recording' }).catch(() => {});
-      // Выключаем готовность к записи на бэкенде
       syncSettings(false, recordMouseMovesRef.current, recordMouseDragDropOnlyRef.current, []);
     };
   }, []);
+
+  const handleRecordMouseMovesChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const value = event.target.checked;
+    setRecordMouseMoves(value);
+    syncSettings(true, value, recordMouseDragDropOnly, steps);
+  };
+
+  const handleRecordMouseDragDropOnlyChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const value = event.target.checked;
+    setRecordMouseDragDropOnly(value);
+    syncSettings(true, recordMouseMoves, value, steps);
+  };
 
   const handleStartRecording = async () => {
     try {
@@ -135,362 +124,272 @@ export const MacroEditor: React.FC<MacroEditorProps> = ({ steps, onChange }) => 
           recordMouseMoves,
           recordMouseDragDropOnly,
           existingSteps: steps,
-        }
+        },
       });
+      isRecordingRef.current = true;
       setIsRecording(true);
       setRecordedCount(steps.length);
-    } catch (e) {
-      console.error('Failed to start recording', e);
+    } catch (error) {
+      console.error('Failed to start recording', error);
     }
   };
 
   const handleStopRecording = async () => {
-    // Взводим guard, чтобы poll не пытался забрать шаги параллельно.
     isStoppingRef.current = true;
     try {
-      const res = await invoke<{ steps: MacroStep[] }>('ipc_call', { method: 'macro.stop_recording' });
+      const result = await invoke<{ steps: MacroStep[] }>('ipc_call', { method: 'macro.stop_recording' });
+      isRecordingRef.current = false;
       setIsRecording(false);
-      if (res.steps && res.steps.length > 0) {
-        onChange(res.steps);
-      }
-    } catch (e) {
-      console.error('Failed to stop recording', e);
+      if (result.steps?.length) onChange(result.steps);
+    } catch (error) {
+      console.error('Failed to stop recording', error);
+      isRecordingRef.current = false;
       setIsRecording(false);
     } finally {
       isStoppingRef.current = false;
     }
   };
 
-  const handleAddStep = () => {
-    const newStep: MacroStep = {
-      action: { type: 'keyDown', code: 0 },
-      delayMs: 50,
-    };
-    onChange([...steps, newStep]);
+  const updateStep = (index: number, patch: Partial<MacroStep>) => {
+    const next = [...steps];
+    next[index] = { ...next[index], ...patch };
+    onChange(next);
   };
 
-  const handleRemoveStep = (index: number) => {
-    onChange(steps.filter((_, i) => i !== index));
+  const updateAction = (index: number, action: MacroAction) => updateStep(index, { action });
+
+  const moveStep = (index: number, direction: -1 | 1) => {
+    const targetIndex = index + direction;
+    if (targetIndex < 0 || targetIndex >= steps.length) return;
+    const next = [...steps];
+    [next[index], next[targetIndex]] = [next[targetIndex], next[index]];
+    onChange(next);
   };
 
-  const handleUpdateStepAction = (index: number, newAction: MacroAction) => {
-    const updated = [...steps];
-    updated[index] = {
-      ...updated[index],
-      action: newAction,
-    };
-    onChange(updated);
-  };
-
-  const handleUpdateStepDelay = (index: number, delayMs: number) => {
-    const updated = [...steps];
-    updated[index] = {
-      ...updated[index],
-      delayMs: Math.max(0, delayMs),
-    };
-    onChange(updated);
-  };
-
-  const handleMoveUp = (index: number) => {
-    if (index === 0) return;
-    const updated = [...steps];
-    const temp = updated[index];
-    updated[index] = updated[index - 1];
-    updated[index - 1] = temp;
-    onChange(updated);
-  };
-
-  const handleMoveDown = (index: number) => {
-    if (index === steps.length - 1) return;
-    const updated = [...steps];
-    const temp = updated[index];
-    updated[index] = updated[index + 1];
-    updated[index + 1] = temp;
-    onChange(updated);
+  const createDefaultAction = (type: MacroAction['type']): MacroAction => {
+    if (type === 'mouseMove') return { type, dx: 0, dy: 0 };
+    if (type === 'mouseScroll') return { type, delta: 0 };
+    if (type === 'mouseToAbsolute') return { type, x: 0, y: 0 };
+    if (type === 'mouseDown' || type === 'mouseUp') return { type, code: 1 };
+    return { type, code: 0 };
   };
 
   return (
-    <div className="space-y-4 border border-app-border rounded-lg p-4 bg-app-bg/30">
-      <div className="flex items-center justify-between">
-        <span className="text-xs font-bold text-app-muted uppercase tracking-wider">{t('macro.title')}</span>
-        <div className="flex gap-2">
+    <div className="border border-app-border bg-app-bg">
+      <div className="min-h-9 px-2 flex items-center gap-2 border-b border-app-border bg-app-surface/35">
+        <span className="text-[11px] font-semibold text-app-text">{t('macro.title')}</span>
+        <span className="text-[10px] text-app-muted">F12 — {t('macro.f12_hint', 'запуск/остановка записи')}</span>
+
+        <div className="ml-auto flex items-center gap-1.5 py-1">
           {isRecording ? (
             <button
               type="button"
-              onClick={handleStopRecording}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors shadow-md cursor-pointer animate-pulse"
+              onClick={() => void handleStopRecording()}
+              className="h-7 px-2 inline-flex items-center gap-1.5 border border-app-danger/60 bg-app-danger/10 text-[10px] font-medium text-app-danger hover:bg-app-danger/15"
             >
-              <Square size={12} fill="white" />
+              <Square size={11} fill="currentColor" />
               {t('macro.stop')} ({recordedCount})
             </button>
           ) : (
             <button
               type="button"
-              onClick={handleStartRecording}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-app-primary text-white rounded-lg hover:bg-app-primary/80 transition-colors shadow-md cursor-pointer"
+              onClick={() => void handleStartRecording()}
+              className="h-7 px-2 inline-flex items-center gap-1.5 border border-app-border bg-app-surface text-[10px] font-medium text-app-text hover:bg-app-surface-hover"
             >
-              <Circle size={12} fill="white" className="text-red-500" />
+              <Circle size={11} className="text-app-danger" fill="currentColor" />
               {t('macro.record_keystrokes')}
             </button>
           )}
           <button
             type="button"
-            onClick={handleAddStep}
+            onClick={() => onChange([...steps, { action: { type: 'keyDown', code: 0 }, delayMs: 50 }])}
             disabled={isRecording}
-            className="flex items-center gap-1 px-3 py-1.5 text-xs font-semibold bg-app-surface border border-app-border text-app-text rounded-lg hover:bg-app-surface-hover transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+            className="h-7 px-2 inline-flex items-center gap-1 border border-app-border bg-app-surface text-[10px] text-app-text hover:bg-app-surface-hover disabled:opacity-40"
           >
-            <Plus size={12} />
+            <Plus size={11} />
             {t('macro.add_step')}
           </button>
         </div>
       </div>
 
-      {/* Подсказка про F12 */}
-      <div className="bg-app-primary/5 border border-app-primary/10 rounded-lg p-2 flex items-center gap-2 text-[10px] text-app-muted">
-        <span className="bg-app-surface border border-app-border px-1.5 py-0.5 rounded font-mono text-[9px] font-bold text-app-text shrink-0 shadow-sm">F12</span>
-        <span>{t('macro.f12_hint', 'Нажмите F12 для запуска/остановки записи макроса')}</span>
-      </div>
-
-      {/* Настройки записи мыши */}
-      <div className="flex flex-col sm:flex-row gap-4 p-2.5 bg-app-surface/20 border border-app-border/40 rounded-lg text-xs">
-        <label className="flex items-center gap-2 cursor-pointer select-none text-app-text">
+      <div className="min-h-8 px-2 flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-app-border/60 bg-app-surface/15 text-[10px] text-app-text">
+        <label className="inline-flex items-center gap-1.5 cursor-pointer select-none">
           <input
             type="checkbox"
             checked={recordMouseMoves}
             disabled={isRecording}
             onChange={handleRecordMouseMovesChange}
-            className="rounded border-app-border bg-app-bg text-app-primary focus:ring-app-primary cursor-pointer w-4 h-4"
+            className="h-3.5 w-3.5 accent-app-primary"
           />
-          <span>{t('macro.record_mouse_moves', 'Записывать движения мыши')}</span>
+          {t('macro.record_mouse_moves', 'Записывать движения мыши')}
         </label>
-        
         {recordMouseMoves && (
-          <label className="flex items-center gap-2 cursor-pointer select-none text-app-text">
+          <label className="inline-flex items-center gap-1.5 cursor-pointer select-none">
             <input
               type="checkbox"
               checked={recordMouseDragDropOnly}
               disabled={isRecording}
               onChange={handleRecordMouseDragDropOnlyChange}
-              className="rounded border-app-border bg-app-bg text-app-primary focus:ring-app-primary cursor-pointer w-4 h-4"
+              className="h-3.5 w-3.5 accent-app-primary"
             />
-            <span>{t('macro.record_mouse_drag_drop_only', 'Только при перетаскивании (Drag-n-Drop)')}</span>
+            {t('macro.record_mouse_drag_drop_only', 'Только Drag-n-Drop')}
           </label>
         )}
       </div>
 
       {steps.length === 0 ? (
-        <div className="text-center py-8 border border-dashed border-app-border rounded-lg bg-app-bg/10">
-          <p className="text-xs text-app-muted">
-            {isRecording ? t('macro.empty_recording') : t('macro.empty_idle')}
-          </p>
+        <div className="px-3 py-6 text-center text-[11px] text-app-muted">
+          {isRecording ? t('macro.empty_recording') : t('macro.empty_idle')}
         </div>
       ) : (
-        <div className="max-h-[300px] overflow-y-auto space-y-2 pr-1 select-none">
-          {steps.map((step, index) => {
-            return (
-              <div
-                key={index}
-                className="flex items-center gap-2 bg-app-surface/40 hover:bg-app-surface/60 p-2 rounded-lg border border-app-border/60 transition-colors text-xs text-app-text"
-              >
-                {/* Reorder controls */}
-                <div className="flex flex-col gap-0.5">
-                  <button
-                    type="button"
-                    onClick={() => handleMoveUp(index)}
-                    disabled={index === 0 || isRecording}
-                    className="p-0.5 text-app-muted hover:text-app-text disabled:opacity-30 disabled:hover:text-app-muted cursor-pointer"
-                  >
-                    <ArrowUp size={11} />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleMoveDown(index)}
-                    disabled={index === steps.length - 1 || isRecording}
-                    className="p-0.5 text-app-muted hover:text-app-text disabled:opacity-30 disabled:hover:text-app-muted cursor-pointer"
-                  >
-                    <ArrowDown size={11} />
-                  </button>
-                </div>
-
-                {/* Step Index Label */}
-                <span className="w-5 text-center text-app-muted font-mono font-bold">
-                  {index + 1}
-                </span>
-
-                {/* Action Type Dropdown */}
-                <select
-                  value={step.action.type}
-                  disabled={isRecording}
-                  onChange={(e) => {
-                    const newType = e.target.value as MacroAction['type'];
-                    let defaultAction: MacroAction;
-                    if (newType === 'mouseMove') {
-                      defaultAction = { type: 'mouseMove', dx: 0, dy: 0 };
-                    } else if (newType === 'mouseScroll') {
-                      defaultAction = { type: 'mouseScroll', delta: 0 };
-                    } else if (newType === 'mouseToAbsolute') {
-                      defaultAction = { type: 'mouseToAbsolute', x: 0, y: 0 };
-                    } else if (newType === 'mouseDown' || newType === 'mouseUp') {
-                      defaultAction = { type: newType, code: 1 };
-                    } else {
-                      defaultAction = { type: newType, code: 0 } as any;
-                    }
-                    handleUpdateStepAction(index, defaultAction);
-                  }}
-                  className="bg-app-bg border border-app-border text-xs text-app-text rounded p-1 w-28 cursor-pointer disabled:opacity-50"
-                >
-                  <option value="keyDown">{t('macro.step_types.keyDown')}</option>
-                  <option value="keyUp">{t('macro.step_types.keyUp')}</option>
-                  <option value="mouseDown">{t('macro.step_types.mouseDown')}</option>
-                  <option value="mouseUp">{t('macro.step_types.mouseUp')}</option>
-                  <option value="mouseMove">{t('macro.step_types.mouseMove_rel')}</option>
-                  <option value="mouseScroll">{t('macro.step_types.mouseScroll')}</option>
-                  <option value="mouseToAbsolute">{t('macro.step_types.mouseMove_abs')}</option>
-                </select>
-
-                {/* Target input: KeyPicker, Mouse Dropdown or coordinates */}
-                <div className="flex-1 flex items-center min-w-0 gap-2">
-                  {step.action.type === 'mouseMove' && (
-                    <div className="flex items-center gap-1.5 w-full">
-                      <span className="text-[10px] text-app-muted font-mono font-semibold">dX:</span>
-                      <input
-                        type="number"
-                        value={step.action.dx}
-                        disabled={isRecording}
-                        onChange={(e) =>
-                          handleUpdateStepAction(index, {
-                            ...step.action,
-                            dx: parseInt(e.target.value) || 0,
-                          } as any)
-                        }
-                        className="bg-app-bg border border-app-border text-xs text-app-text rounded p-1 w-full text-right font-mono disabled:opacity-50"
-                      />
-                      <span className="text-[10px] text-app-muted font-mono font-semibold">dY:</span>
-                      <input
-                        type="number"
-                        value={step.action.dy}
-                        disabled={isRecording}
-                        onChange={(e) =>
-                          handleUpdateStepAction(index, {
-                            ...step.action,
-                            dy: parseInt(e.target.value) || 0,
-                          } as any)
-                        }
-                        className="bg-app-bg border border-app-border text-xs text-app-text rounded p-1 w-full text-right font-mono disabled:opacity-50"
-                      />
-                    </div>
-                  )}
-
-                  {step.action.type === 'mouseScroll' && (
-                    <div className="flex items-center gap-1.5 w-full">
-                      <span className="text-[10px] text-app-muted font-mono font-semibold">Delta:</span>
-                      <input
-                        type="number"
-                        value={step.action.delta}
-                        disabled={isRecording}
-                        onChange={(e) =>
-                          handleUpdateStepAction(index, {
-                            ...step.action,
-                            delta: parseInt(e.target.value) || 0,
-                          } as any)
-                        }
-                        placeholder={t('ruleBuilder.placeholders.delta')}
-                        className="bg-app-bg border border-app-border text-xs text-app-text rounded p-1 w-full text-right font-mono disabled:opacity-50"
-                      />
-                    </div>
-                  )}
-
-                  {step.action.type === 'mouseToAbsolute' && (
-                    <div className="flex items-center gap-1.5 w-full">
-                      <span className="text-[10px] text-app-muted font-mono font-semibold">X:</span>
-                      <input
-                        type="number"
-                        value={step.action.x}
-                        disabled={isRecording}
-                        onChange={(e) =>
-                          handleUpdateStepAction(index, {
-                            ...step.action,
-                            x: parseInt(e.target.value) || 0,
-                          } as any)
-                        }
-                        className="bg-app-bg border border-app-border text-xs text-app-text rounded p-1 w-full text-right font-mono disabled:opacity-50"
-                      />
-                      <span className="text-[10px] text-app-muted font-mono font-semibold">Y:</span>
-                      <input
-                        type="number"
-                        value={step.action.y}
-                        disabled={isRecording}
-                        onChange={(e) =>
-                          handleUpdateStepAction(index, {
-                            ...step.action,
-                            y: parseInt(e.target.value) || 0,
-                          } as any)
-                        }
-                        className="bg-app-bg border border-app-border text-xs text-app-text rounded p-1 w-full text-right font-mono disabled:opacity-50"
-                      />
-                    </div>
-                  )}
-
-                  {(step.action.type === 'mouseDown' || step.action.type === 'mouseUp') && (
-                    <select
-                      value={step.action.code}
-                      disabled={isRecording}
-                      onChange={(e) =>
-                        handleUpdateStepAction(index, {
-                          ...step.action,
-                          code: parseInt(e.target.value) || 1,
-                        } as any)
-                      }
-                      className="bg-app-bg border border-app-border text-xs text-app-text rounded p-1 w-full cursor-pointer disabled:opacity-50"
-                    >
-                      <option value="1">{t('ruleBuilder.action_options.mouse_left')}</option>
-                      <option value="2">{t('ruleBuilder.action_options.mouse_right')}</option>
-                      <option value="3">{t('ruleBuilder.action_options.mouse_middle')}</option>
-                      <option value="4">{t('ruleBuilder.action_options.mouse_x1')}</option>
-                      <option value="5">{t('ruleBuilder.action_options.mouse_x2')}</option>
-                    </select>
-                  )}
-
-                  {(step.action.type === 'keyDown' || step.action.type === 'keyUp') && (
-                    <KeyPicker
-                      value={step.action.code}
-                      onChange={(vk) =>
-                        handleUpdateStepAction(index, {
-                          ...step.action,
-                          code: vk,
-                        } as any)
-                      }
-                      className="w-full text-left"
-                    />
-                  )}
-                </div>
-
-                {/* Delay Input */}
-                <div className="flex items-center gap-1 w-20 shrink-0">
-                  <input
-                    type="number"
-                    value={step.delayMs}
-                    disabled={isRecording}
-                    onChange={(e) => handleUpdateStepDelay(index, parseInt(e.target.value) || 0)}
-                    placeholder={t('ruleBuilder.placeholders.delay')}
-                    className="bg-app-bg border border-app-border text-xs text-app-text rounded p-1 w-full text-right font-mono disabled:opacity-50"
-                  />
-                  <span className="text-[10px] text-app-muted font-semibold">ms</span>
-                </div>
-
-                {/* Remove step button */}
+        <div className="max-h-[320px] overflow-y-auto select-none">
+          {steps.map((step, index) => (
+            <div
+              key={index}
+              className="min-h-10 px-1.5 py-1.5 flex items-center gap-1.5 border-b last:border-b-0 border-app-border/55 hover:bg-app-surface/20"
+            >
+              <div className="w-5 shrink-0 flex flex-col items-center">
                 <button
                   type="button"
-                  onClick={() => handleRemoveStep(index)}
-                  disabled={isRecording}
-                  className="p-1 text-app-danger hover:text-red-400 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer shrink-0"
-                  title={t('macro.remove_step_tooltip')}
+                  onClick={() => moveStep(index, -1)}
+                  disabled={index === 0 || isRecording}
+                  className="h-3.5 text-app-muted hover:text-app-text disabled:opacity-25"
+                  title={t('common.move_up', 'Вверх')}
                 >
-                  <Trash2 size={13} />
+                  <ArrowUp size={10} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => moveStep(index, 1)}
+                  disabled={index === steps.length - 1 || isRecording}
+                  className="h-3.5 text-app-muted hover:text-app-text disabled:opacity-25"
+                  title={t('common.move_down', 'Вниз')}
+                >
+                  <ArrowDown size={10} />
                 </button>
               </div>
-            );
-          })}
+
+              <span className="w-5 shrink-0 text-right font-mono text-[10px] text-app-muted">{index + 1}</span>
+
+              <select
+                value={step.action.type}
+                disabled={isRecording}
+                onChange={(event) => updateAction(index, createDefaultAction(event.target.value as MacroAction['type']))}
+                className={`${inputClass} w-28 shrink-0 cursor-pointer`}
+              >
+                <option value="keyDown">{t('macro.step_types.keyDown')}</option>
+                <option value="keyUp">{t('macro.step_types.keyUp')}</option>
+                <option value="mouseDown">{t('macro.step_types.mouseDown')}</option>
+                <option value="mouseUp">{t('macro.step_types.mouseUp')}</option>
+                <option value="mouseMove">{t('macro.step_types.mouseMove_rel')}</option>
+                <option value="mouseScroll">{t('macro.step_types.mouseScroll')}</option>
+                <option value="mouseToAbsolute">{t('macro.step_types.mouseMove_abs')}</option>
+              </select>
+
+              <div className="flex-1 min-w-0 flex items-center gap-1.5">
+                {(step.action.type === 'keyDown' || step.action.type === 'keyUp') && (
+                  <KeyPicker
+                    value={step.action.code}
+                    onChange={(code) => updateAction(index, { ...step.action, code })}
+                    className="w-full min-w-0 text-left"
+                  />
+                )}
+
+                {(step.action.type === 'mouseDown' || step.action.type === 'mouseUp') && (
+                  <select
+                    value={step.action.code}
+                    disabled={isRecording}
+                    onChange={(event) => updateAction(index, { ...step.action, code: Number.parseInt(event.target.value, 10) || 1 })}
+                    className={`${inputClass} w-full cursor-pointer`}
+                  >
+                    <option value="1">{t('ruleBuilder.action_options.mouse_left')}</option>
+                    <option value="2">{t('ruleBuilder.action_options.mouse_right')}</option>
+                    <option value="3">{t('ruleBuilder.action_options.mouse_middle')}</option>
+                    <option value="4">{t('ruleBuilder.action_options.mouse_x1')}</option>
+                    <option value="5">{t('ruleBuilder.action_options.mouse_x2')}</option>
+                  </select>
+                )}
+
+                {step.action.type === 'mouseMove' && (
+                  <>
+                    <span className="text-[10px] text-app-muted">dX</span>
+                    <input
+                      type="number"
+                      value={step.action.dx}
+                      disabled={isRecording}
+                      onChange={(event) => updateAction(index, { ...step.action, dx: Number.parseInt(event.target.value, 10) || 0 })}
+                      className={`${inputClass} flex-1 min-w-0 text-right font-mono`}
+                    />
+                    <span className="text-[10px] text-app-muted">dY</span>
+                    <input
+                      type="number"
+                      value={step.action.dy}
+                      disabled={isRecording}
+                      onChange={(event) => updateAction(index, { ...step.action, dy: Number.parseInt(event.target.value, 10) || 0 })}
+                      className={`${inputClass} flex-1 min-w-0 text-right font-mono`}
+                    />
+                  </>
+                )}
+
+                {step.action.type === 'mouseScroll' && (
+                  <>
+                    <span className="text-[10px] text-app-muted">Delta</span>
+                    <input
+                      type="number"
+                      value={step.action.delta}
+                      disabled={isRecording}
+                      onChange={(event) => updateAction(index, { ...step.action, delta: Number.parseInt(event.target.value, 10) || 0 })}
+                      className={`${inputClass} w-full text-right font-mono`}
+                    />
+                  </>
+                )}
+
+                {step.action.type === 'mouseToAbsolute' && (
+                  <>
+                    <span className="text-[10px] text-app-muted">X</span>
+                    <input
+                      type="number"
+                      value={step.action.x}
+                      disabled={isRecording}
+                      onChange={(event) => updateAction(index, { ...step.action, x: Number.parseInt(event.target.value, 10) || 0 })}
+                      className={`${inputClass} flex-1 min-w-0 text-right font-mono`}
+                    />
+                    <span className="text-[10px] text-app-muted">Y</span>
+                    <input
+                      type="number"
+                      value={step.action.y}
+                      disabled={isRecording}
+                      onChange={(event) => updateAction(index, { ...step.action, y: Number.parseInt(event.target.value, 10) || 0 })}
+                      className={`${inputClass} flex-1 min-w-0 text-right font-mono`}
+                    />
+                  </>
+                )}
+              </div>
+
+              <div className="w-20 shrink-0 flex items-center gap-1">
+                <input
+                  type="number"
+                  min={0}
+                  value={step.delayMs}
+                  disabled={isRecording}
+                  onChange={(event) => updateStep(index, { delayMs: Math.max(0, Number.parseInt(event.target.value, 10) || 0) })}
+                  className={`${inputClass} w-full text-right font-mono`}
+                  title={t('ruleBuilder.placeholders.delay')}
+                />
+                <span className="text-[9px] text-app-muted">ms</span>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => onChange(steps.filter((_, itemIndex) => itemIndex !== index))}
+                disabled={isRecording}
+                className="h-7 w-7 shrink-0 inline-flex items-center justify-center text-app-muted hover:bg-app-surface hover:text-app-danger disabled:opacity-30"
+                title={t('macro.remove_step_tooltip')}
+              >
+                <Trash2 size={12} />
+              </button>
+            </div>
+          ))}
         </div>
       )}
     </div>
