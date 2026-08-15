@@ -5,12 +5,12 @@ import type { Profile } from '../lib/types'
 interface ProfileState {
   profiles: Profile[]
   activeProfileId: string | null
-  
-  loadProfiles: () => Promise<void>
-  activateProfile: (id: string) => Promise<void>
-  saveProfile: (profile: Profile) => Promise<void>
-  createProfile: (profile: Partial<Profile>) => Promise<void>
-  deleteProfile: (id: string) => Promise<void>
+
+  loadProfiles: () => Promise<boolean>
+  activateProfile: (id: string) => Promise<boolean>
+  saveProfile: (profile: Profile) => Promise<boolean>
+  createProfile: (profile: Partial<Profile>) => Promise<boolean>
+  deleteProfile: (id: string) => Promise<boolean>
 }
 
 export const useProfileStore = create<ProfileState>((set, get) => ({
@@ -20,12 +20,14 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
   loadProfiles: async () => {
     try {
       const res = await invoke<{ profiles: Profile[], active: string }>('ipc_call', { method: 'profile.list' })
-      set({ 
-        profiles: res.profiles, 
-        activeProfileId: res.active
+      set({
+        profiles: res.profiles,
+        activeProfileId: res.active,
       })
-    } catch (e) {
-      console.error('Failed to load profiles', e)
+      return true
+    } catch (error) {
+      console.error('Failed to load profiles', error)
+      return false
     }
   },
 
@@ -33,48 +35,51 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
     try {
       await invoke('ipc_call', { method: 'profile.activate', params: { id } })
       set({ activeProfileId: id })
-    } catch (e) {
-      console.error('Failed to activate profile', e)
+      return true
+    } catch (error) {
+      console.error('Failed to activate profile', error)
+      return false
     }
   },
 
   saveProfile: async (profile) => {
     try {
       await invoke('ipc_call', { method: 'profile.save', params: profile })
-      
       const { profiles } = get()
-      const newProfiles = profiles.map(p => p.id === profile.id ? profile : p)
-      
-      set({ profiles: newProfiles })
-    } catch (e) {
-      console.error('Failed to save profile', e)
+      set({ profiles: profiles.map(item => item.id === profile.id ? profile : item) })
+      return true
+    } catch (error) {
+      console.error('Failed to save profile', error)
+      return false
     }
   },
 
   createProfile: async (partial) => {
     try {
-      const newProfile = {
+      const newProfile: Profile = {
         id: crypto.randomUUID(),
         name: 'New Profile',
         isDefault: false,
         linkedApps: [],
         rules: [],
         layers: [],
-        ...partial
+        ...partial,
       }
       await invoke('ipc_call', { method: 'profile.create', params: newProfile })
-      await get().loadProfiles()
-    } catch (e) {
-      console.error('Failed to create profile', e)
+      return await get().loadProfiles()
+    } catch (error) {
+      console.error('Failed to create profile', error)
+      return false
     }
   },
 
   deleteProfile: async (id) => {
     try {
       await invoke('ipc_call', { method: 'profile.delete', params: { id } })
-      await get().loadProfiles()
-    } catch (e) {
-      console.error('Failed to delete profile', e)
+      return await get().loadProfiles()
+    } catch (error) {
+      console.error('Failed to delete profile', error)
+      return false
     }
-  }
+  },
 }))
