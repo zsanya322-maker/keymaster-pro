@@ -44,11 +44,16 @@ export interface FrontendRule {
   order: number
 }
 
+export type MouseWheelDirection = 'up' | 'down' | 'left' | 'right'
+
 export type FrontendTrigger =
   | { type: 'keyDown'; code: number; modifiers: number }
   | { type: 'keyUp'; code: number; modifiers: number }
   | { type: 'mouseDown'; code: number }
   | { type: 'mouseUp'; code: number }
+  | { type: 'mouseWheel'; direction: MouseWheelDirection }
+  | { type: 'mouseDoubleClick'; code: number }
+  | { type: 'mouseMove'; minDistance: number; cooldownMs: number }
   | { type: 'tapHoldKeyDown'; code: number; timeoutMs: number }
   | { type: 'typedText'; sequence: string }
 
