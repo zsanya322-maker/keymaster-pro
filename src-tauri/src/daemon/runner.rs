@@ -42,21 +42,20 @@ where
 
 /// Разрешить профиль, с которым daemon должен стартовать.
 ///
-/// Если `active_profile_id` указывает на пропавший файл, не создаём новый
-/// `is_default=true` поверх уже существующей конфигурации. Сначала используем
-/// существующий default, затем любой читаемый профиль, и только при реально
-/// пустом/нечитаемом наборе создаём новый default.
+/// Recovery-профиль от повреждённого/несовместимого файла никогда не становится
+/// активным runtime-профилем, если можно выбрать здоровый fallback. Исходный
+/// повреждённый файл при этом остаётся на диске и показывается GUI отдельно.
 fn resolve_startup_profile(
     app_config: &mut crate::shared::types::AppConfig,
 ) -> Result<crate::shared::types::Profile, String> {
     let configured_id = app_config.active_profile_id.clone();
-    if let Ok(profile) = crate::shared::persistence::load_profile(&configured_id) {
+    if let Ok(profile) = crate::shared::persistence::load_profile_checked(&configured_id) {
         info!("Profile '{}' successfully loaded from disk", configured_id);
         return Ok(profile);
     }
 
     warn!(
-        "Configured active profile '{}' is unavailable; selecting safe fallback",
+        "Configured active profile '{}' is unavailable/corrupt; selecting safe fallback",
         configured_id
     );
 
@@ -69,7 +68,7 @@ fn resolve_startup_profile(
         if id == configured_id {
             continue;
         }
-        match crate::shared::persistence::load_profile(&id) {
+        match crate::shared::persistence::load_profile_checked(&id) {
             Ok(profile) => {
                 if profile.is_default {
                     selected_default = Some(profile);
@@ -80,7 +79,7 @@ fn resolve_startup_profile(
                 }
             }
             Err(error) => {
-                warn!("Skipping unreadable fallback profile '{}': {}", id, error);
+                warn!("Skipping unhealthy fallback profile '{}': {}", id, error);
             }
         }
     }
@@ -90,7 +89,7 @@ fn resolve_startup_profile(
         profile
     } else {
         // Empty installation keeps the historical ID `1`. If files exist but
-        // none can be loaded, create a fresh UUID instead of risking overwrite
+        // none are healthy, create a fresh UUID instead of risking overwrite
         // of an incompatible/corrupt `1.json`.
         let id = if had_profile_files {
             uuid::Uuid::new_v4().to_string()
@@ -122,11 +121,26 @@ fn resolve_startup_profile(
     Ok(profile)
 }
 
+#[cfg(target_os = "windows")]
+fn prepare_main_thread_message_queue() {
+    use windows::Win32::UI::WindowsAndMessaging::{PeekMessageW, MSG, PM_NOREMOVE};
+
+    // PostThreadMessageW работает только после создания message queue у потока.
+    // Создаём её ДО запуска фоновых задач, чтобы ранний IPC/watchdog shutdown не
+    // потерял WM_QUIT в startup-гонке.
+    let mut msg = MSG::default();
+    unsafe {
+        let _ = PeekMessageW(&mut msg, None, 0, 0, PM_NOREMOVE);
+    }
+}
+
 /// Запустить daemon-процесс
 ///
 /// Вызывается из main.rs когда передан флаг `--daemon`.
 /// Блокирует текущий поток до получения сигнала завершения.
 pub fn run_daemon(parent_pid: Option<u32>) -> Result<(), String> {
+    DAEMON_RUNNING.store(true, Ordering::SeqCst);
+
     #[cfg(target_os = "windows")]
     unsafe {
         let _ = windows::Win32::UI::WindowsAndMessaging::SetProcessDPIAware();
@@ -139,21 +153,22 @@ pub fn run_daemon(parent_pid: Option<u32>) -> Result<(), String> {
         env!("CARGO_PKG_VERSION")
     );
 
-    // Save main thread ID for request_shutdown()
+    // Save main thread ID and create its message queue before any background
+    // task can call request_shutdown().
     #[cfg(target_os = "windows")]
     unsafe {
         MAIN_THREAD_ID.store(
             windows::Win32::System::Threading::GetCurrentThreadId(),
             Ordering::SeqCst,
         );
+        prepare_main_thread_message_queue();
     }
 
-    // Load configuration and resolve the startup profile before constructing
-    // DaemonState so active_profile_id and engine profile always agree.
-    let mut app_config = config::load_config().unwrap_or_else(|e| {
-        warn!("Failed to load config: {}, using default", e);
-        crate::shared::types::AppConfig::default()
-    });
+    // load_config сам безопасно восстанавливает повреждённый legacy config, но
+    // future schema / I/O failure считаются fatal: старый daemon не имеет права
+    // запускаться с дефолтами и затем случайно перезаписать более новый config.
+    let mut app_config = config::load_config()
+        .map_err(|e| format!("Не удалось безопасно загрузить config.json: {}", e))?;
     info!("Configuration loaded. Language: {}", app_config.language);
     let loaded_profile = resolve_startup_profile(&mut app_config)?;
 
@@ -185,7 +200,9 @@ pub fn run_daemon(parent_pid: Option<u32>) -> Result<(), String> {
     let ipc_state = state.clone();
     let shutdown_state = state.clone();
 
-    // Start IPC server in Tokio
+    // Start IPC server in Tokio. start_ipc_server enforces ownership of the
+    // first pipe instance, so a duplicate daemon exits instead of installing a
+    // second global hook engine against the same IPC name.
     tokio_rt.spawn(async move {
         if let Err(e) = crate::daemon::ipc::start_ipc_server(ipc_state).await {
             error!("IPC server stopped with error: {}", e);
@@ -294,12 +311,9 @@ pub fn run_daemon(parent_pid: Option<u32>) -> Result<(), String> {
         loop {
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
 
-            // Если daemon останавливается, выходим
-            {
-                if let Ok(s) = taphold_state.read() {
-                    if !s.running {
-                        break;
-                    }
+            if let Ok(s) = taphold_state.read() {
+                if !s.running {
+                    break;
                 }
             }
 
@@ -324,7 +338,6 @@ pub fn run_daemon(parent_pid: Option<u32>) -> Result<(), String> {
     // Install hooks (keyboard + mouse)
     crate::daemon::hooks::install_hooks(state.clone())?;
 
-    // Update state
     {
         let mut s = state
             .write()
@@ -335,8 +348,6 @@ pub fn run_daemon(parent_pid: Option<u32>) -> Result<(), String> {
     info!("KeyMaster Pro Daemon started and ready");
     info!("IPC Pipe: {}", constants::IPC_PIPE_NAME);
 
-    // Windows Message Loop - required for SetWindowsHookEx
-    // GetMessage blocks until WM_QUIT is received
     run_message_loop(&state);
 
     // Graceful shutdown
@@ -350,13 +361,8 @@ pub fn run_daemon(parent_pid: Option<u32>) -> Result<(), String> {
         s.running = false;
     }
 
-    // Снять хуки
     crate::daemon::hooks::uninstall_hooks();
-
-    // Остановить tokio runtime
     tokio_rt.shutdown_background();
-
-    // Остановить трекер контекста
     crate::trackers::context_tracker::stop_context_tracker();
 
     info!("KeyMaster Pro Daemon остановлен");
@@ -372,19 +378,29 @@ fn run_message_loop(_state: &DaemonStateRef) {
     {
         use windows::Win32::UI::WindowsAndMessaging::{GetMessageW, MSG};
 
+        // Если startup-задача уже запросила shutdown (например duplicate daemon
+        // не смог получить first pipe instance), не блокируемся в GetMessage.
+        if !DAEMON_RUNNING.load(Ordering::SeqCst) {
+            return;
+        }
+
         let mut msg = MSG::default();
         unsafe {
-            // GetMessage блокируется, пока не получит WM_QUIT
-            // Возвращает >0 если есть сообщение, 0 при WM_QUIT, -1 при ошибке
-            while GetMessageW(&mut msg, None, 0, 0).0 > 0 {
-                // Hook callbacks вызываются Windows напрямую
+            loop {
+                let result = GetMessageW(&mut msg, None, 0, 0).0;
+                if result > 0 {
+                    continue;
+                }
+                if result < 0 {
+                    error!("GetMessageW завершился с ошибкой; daemon останавливается");
+                }
+                break;
             }
         }
     }
 
     #[cfg(not(target_os = "windows"))]
     {
-        // На не-Windows просто ждём shutdown сигнал
         while DAEMON_RUNNING.load(Ordering::SeqCst) {
             std::thread::sleep(std::time::Duration::from_millis(100));
         }
@@ -402,12 +418,14 @@ pub fn request_shutdown() {
         let thread_id = MAIN_THREAD_ID.load(Ordering::SeqCst);
         if thread_id != 0 {
             unsafe {
-                let _ = PostThreadMessageW(
+                if let Err(e) = PostThreadMessageW(
                     thread_id,
                     WM_QUIT,
                     windows::Win32::Foundation::WPARAM(0),
                     windows::Win32::Foundation::LPARAM(0),
-                );
+                ) {
+                    warn!("Не удалось отправить WM_QUIT главному потоку daemon: {}", e);
+                }
             }
         }
     }
@@ -427,7 +445,6 @@ fn is_process_alive(pid: u32) -> bool {
                 Ok(h) => h,
                 Err(_) => {
                     let err = GetLastError();
-                    // Если отказано в доступе (ERROR_ACCESS_DENIED), то процесс живет, просто у нас нет прав
                     return err == windows::Win32::Foundation::ERROR_ACCESS_DENIED;
                 }
             };
@@ -450,38 +467,28 @@ fn is_process_alive(pid: u32) -> bool {
     }
 }
 
-/// Проверить, запущен ли daemon (для GUI)
+/// Проверить наличие daemon Named Pipe, не подключаясь к нему.
 ///
-/// Пытаемся подключиться к Named Pipe. Если pipe существует — daemon работает.
+/// Старый CreateFileW-probe сам становился клиентом pipe и создавал лишний
+/// accept/disconnect цикл. WaitNamedPipeW проверяет наличие/занятость без такого
+/// побочного эффекта.
 pub fn is_daemon_running() -> bool {
     #[cfg(target_os = "windows")]
     {
         use windows::core::HSTRING;
-        use windows::Win32::Foundation::CloseHandle;
-        use windows::Win32::Storage::FileSystem::CreateFileW;
-        use windows::Win32::Storage::FileSystem::{
-            FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, OPEN_EXISTING,
-        };
+        use windows::Win32::Foundation::{ERROR_PIPE_BUSY, ERROR_SEM_TIMEOUT};
+        use windows::Win32::System::Pipes::WaitNamedPipeW;
 
         let pipe_name = HSTRING::from(constants::IPC_PIPE_NAME);
-
         unsafe {
-            // CreateFileW в windows 0.62 возвращает Result<HANDLE>
-            match CreateFileW(
-                &pipe_name,
-                0,
-                FILE_SHARE_READ,
-                None,
-                OPEN_EXISTING,
-                FILE_ATTRIBUTE_NORMAL,
-                None,
-            ) {
-                Ok(handle) => {
-                    let _ = CloseHandle(handle);
-                    true
-                }
+            match WaitNamedPipeW(&pipe_name, 0) {
+                Ok(()) => true,
                 Err(e) => {
-                    e.code() == windows::Win32::Foundation::ERROR_PIPE_BUSY.to_hresult()
+                    let code = e.code();
+                    // Timeout/busy означает, что pipe существует, просто сейчас
+                    // нет свободного instance. Это всё ещё "daemon running".
+                    code == ERROR_SEM_TIMEOUT.to_hresult()
+                        || code == ERROR_PIPE_BUSY.to_hresult()
                 }
             }
         }
