@@ -221,12 +221,16 @@ pub fn greet(name: &str) -> String {
 /// пользователь всё равно должен иметь возможность закрыть приложение, а
 /// parent-PID watchdog останется аварийной страховкой.
 #[tauri::command]
-pub async fn quit_app(app_handle: tauri::AppHandle, state: State<'_, GuiState>) {
+pub async fn quit_app(
+    app_handle: tauri::AppHandle,
+    state: State<'_, GuiState>,
+) -> Result<(), String> {
     info!("quit_app: explicit application exit");
     if let Err(error) = stop_daemon_before_process_transition("quit_app", &state).await {
         warn!("quit_app: продолжаем выход после ошибки daemon: {}", error);
     }
     app_handle.exit(0);
+    Ok(())
 }
 
 /// Перезапустить приложение (используется после обновления).
