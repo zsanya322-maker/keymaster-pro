@@ -94,6 +94,14 @@ function formatTriggerKey(trigger: FrontendTrigger): string {
     case 'mouseUp':
     case 'tapHoldKeyDown':
       return vkToName(trigger.code);
+    case 'mouseWheel': {
+      const arrow = { up: '↑', down: '↓', left: '←', right: '→' }[trigger.direction];
+      return `Wheel ${arrow}`;
+    }
+    case 'mouseDoubleClick':
+      return `2× ${vkToName(trigger.code)}`;
+    case 'mouseMove':
+      return 'Mouse move';
     case 'typedText':
       return `“${trigger.sequence}”`;
   }
@@ -105,6 +113,9 @@ function formatTriggerType(trigger: FrontendTrigger, t: TFunction): string {
     case 'keyUp': return t('rules.trigger_key_up');
     case 'mouseDown': return t('rules.trigger_mouse_down');
     case 'mouseUp': return t('rules.trigger_mouse_up');
+    case 'mouseWheel': return t('ruleBuilder.trigger_types.mouseWheel');
+    case 'mouseDoubleClick': return t('ruleBuilder.trigger_types.mouseDoubleClick');
+    case 'mouseMove': return t('ruleBuilder.trigger_types.mouseMove');
     case 'tapHoldKeyDown': return t('rules.trigger_tap_hold');
     case 'typedText': return t('rules.trigger_typed');
   }
@@ -196,7 +207,10 @@ function changeTriggerType(rule: FrontendRule, type: FrontendTrigger['type']): F
   if (type === 'keyDown') return { ...rule, trigger: { type: 'keyDown', code: 0, modifiers: 0 } };
   if (type === 'keyUp') return { ...rule, trigger: { type: 'keyUp', code: 0, modifiers: 0 } };
   if (type === 'mouseDown') return { ...rule, trigger: { type: 'mouseDown', code: 1 } };
-  return { ...rule, trigger: { type: 'mouseUp', code: 1 } };
+  if (type === 'mouseUp') return { ...rule, trigger: { type: 'mouseUp', code: 1 } };
+  if (type === 'mouseWheel') return { ...rule, trigger: { type: 'mouseWheel', direction: 'up' } };
+  if (type === 'mouseDoubleClick') return { ...rule, trigger: { type: 'mouseDoubleClick', code: 1 } };
+  return { ...rule, trigger: { type: 'mouseMove', minDistance: 24, cooldownMs: 120 } };
 }
 
 export const RulesPage: React.FC<RulesPageProps> = ({ mode = 'all' }) => {
@@ -654,6 +668,9 @@ export const RulesPage: React.FC<RulesPageProps> = ({ mode = 'all' }) => {
                       <option value="keyUp">{t('ruleBuilder.trigger_types.keyUp')}</option>
                       <option value="mouseDown">{t('ruleBuilder.trigger_types.mouseDown')}</option>
                       <option value="mouseUp">{t('ruleBuilder.trigger_types.mouseUp')}</option>
+                      <option value="mouseWheel">{t('ruleBuilder.trigger_types.mouseWheel')}</option>
+                      <option value="mouseDoubleClick">{t('ruleBuilder.trigger_types.mouseDoubleClick')}</option>
+                      <option value="mouseMove">{t('ruleBuilder.trigger_types.mouseMove')}</option>
                       <option value="tapHoldKeyDown">{t('ruleBuilder.trigger_types.tapHoldKeyDown')}</option>
                       <option value="typedText">{t('ruleBuilder.trigger_types.typedText')}</option>
                     </select>
@@ -726,17 +743,22 @@ export const RulesPage: React.FC<RulesPageProps> = ({ mode = 'all' }) => {
                       </>
                     )}
 
-                    {(draftRule.trigger.type === 'mouseDown' || draftRule.trigger.type === 'mouseUp') && (
+                    {(draftRule.trigger.type === 'mouseDown' || draftRule.trigger.type === 'mouseUp' || draftRule.trigger.type === 'mouseDoubleClick') && (
                       <select
                         value={draftRule.trigger.code}
                         disabled={saving}
-                        onChange={(event) => setDraftRule({
-                          ...draftRule,
-                          trigger: {
-                            type: draftRule.trigger.type === 'mouseUp' ? 'mouseUp' : 'mouseDown',
-                            code: Number.parseInt(event.target.value, 10) || 1,
-                          },
-                        })}
+                        onChange={(event) => {
+                          const code = Number.parseInt(event.target.value, 10) || 1;
+                          const type = draftRule.trigger.type;
+                          setDraftRule({
+                            ...draftRule,
+                            trigger: type === 'mouseUp'
+                              ? { type: 'mouseUp', code }
+                              : type === 'mouseDoubleClick'
+                                ? { type: 'mouseDoubleClick', code }
+                                : { type: 'mouseDown', code },
+                          });
+                        }}
                         className={`${selectClass} flex-1 min-w-0 max-w-[520px] disabled:opacity-50`}
                       >
                         <option value="1">{t('ruleBuilder.action_options.mouse_left')}</option>
@@ -745,6 +767,75 @@ export const RulesPage: React.FC<RulesPageProps> = ({ mode = 'all' }) => {
                         <option value="4">{t('ruleBuilder.action_options.mouse_x1')}</option>
                         <option value="5">{t('ruleBuilder.action_options.mouse_x2')}</option>
                       </select>
+                    )}
+
+                    {draftRule.trigger.type === 'mouseWheel' && (
+                      <select
+                        value={draftRule.trigger.direction}
+                        disabled={saving}
+                        onChange={(event) => setDraftRule({
+                          ...draftRule,
+                          trigger: {
+                            type: 'mouseWheel',
+                            direction: event.target.value as 'up' | 'down' | 'left' | 'right',
+                          },
+                        })}
+                        className={`${selectClass} flex-1 min-w-0 max-w-[520px] disabled:opacity-50`}
+                      >
+                        <option value="up">{t('ruleBuilder.mouse_options.wheel_up')}</option>
+                        <option value="down">{t('ruleBuilder.mouse_options.wheel_down')}</option>
+                        <option value="left">{t('ruleBuilder.mouse_options.wheel_left')}</option>
+                        <option value="right">{t('ruleBuilder.mouse_options.wheel_right')}</option>
+                      </select>
+                    )}
+
+                    {draftRule.trigger.type === 'mouseMove' && (
+                      <>
+                        <div className="h-7 flex-1 min-w-0 max-w-[420px] px-2 inline-flex items-center border border-app-border bg-app-surface/20 text-[10px] text-app-muted">
+                          {t('ruleBuilder.mouse_options.move_hint')}
+                        </div>
+                        <details className="relative shrink-0">
+                          <summary className="list-none h-7 px-2 inline-flex items-center border border-app-border bg-app-bg text-[9px] text-app-muted hover:bg-app-surface cursor-pointer">
+                            {t('common.advanced', { defaultValue: 'Доп.' })}
+                          </summary>
+                          <div className="absolute z-30 right-0 top-8 w-52 border border-app-border bg-app-bg shadow-lg p-2 space-y-2">
+                            <label className="block">
+                              <span className="block mb-1 text-[9px] text-app-muted">{t('ruleBuilder.mouse_options.move_distance')}</span>
+                              <input
+                                type="number"
+                                min={1}
+                                max={2000}
+                                value={draftRule.trigger.minDistance}
+                                disabled={saving}
+                                onChange={(event) => {
+                                  const minDistance = Math.max(1, Number.parseInt(event.target.value, 10) || 24);
+                                  setDraftRule((current) => current?.trigger.type === 'mouseMove'
+                                    ? { ...current, trigger: { ...current.trigger, minDistance } }
+                                    : current);
+                                }}
+                                className={`${inputClass} w-full font-mono disabled:opacity-50`}
+                              />
+                            </label>
+                            <label className="block">
+                              <span className="block mb-1 text-[9px] text-app-muted">{t('ruleBuilder.mouse_options.move_cooldown')}</span>
+                              <input
+                                type="number"
+                                min={0}
+                                max={60000}
+                                value={draftRule.trigger.cooldownMs}
+                                disabled={saving}
+                                onChange={(event) => {
+                                  const cooldownMs = Math.max(0, Number.parseInt(event.target.value, 10) || 0);
+                                  setDraftRule((current) => current?.trigger.type === 'mouseMove'
+                                    ? { ...current, trigger: { ...current.trigger, cooldownMs } }
+                                    : current);
+                                }}
+                                className={`${inputClass} w-full font-mono disabled:opacity-50`}
+                              />
+                            </label>
+                          </div>
+                        </details>
+                      </>
                     )}
                   </div>
                 </EditorSection>

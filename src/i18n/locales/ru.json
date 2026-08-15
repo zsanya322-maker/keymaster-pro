@@ -185,7 +185,10 @@
       "mouseDown": "Нажатие мыши (Mouse Down)",
       "mouseUp": "Отпускание мыши (Mouse Up)",
       "tapHoldKeyDown": "Тап-удержание (Tap-Hold)",
-      "typedText": "Ввод текста (Typed Text)"
+      "typedText": "Ввод текста (Typed Text)",
+      "mouseWheel": "Колесо мыши",
+      "mouseDoubleClick": "Двойной клик",
+      "mouseMove": "Движение мыши"
     },
     "condition_types": {
       "layerActive": "Слой активен (LayerActive)",
@@ -239,7 +242,16 @@
       "title": "Заголовок содержит (напр. Блокнот)"
     },
     "remove_action_tooltip": "Удалить действие",
-    "remove_condition_tooltip": "Удалить условие"
+    "remove_condition_tooltip": "Удалить условие",
+    "mouse_options": {
+      "wheel_up": "Колесо вверх",
+      "wheel_down": "Колесо вниз",
+      "wheel_left": "Горизонтально влево",
+      "wheel_right": "Горизонтально вправо",
+      "move_hint": "Срабатывает при заметном движении указателя",
+      "move_distance": "Порог движения, px",
+      "move_cooldown": "Пауза между срабатываниями, мс"
+    }
   },
   "macro": {
     "title": "Шаги макроса",

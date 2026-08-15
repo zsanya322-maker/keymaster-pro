@@ -185,7 +185,10 @@
       "mouseDown": "Mouse Down (Mouse Down)",
       "mouseUp": "Mouse Up (Mouse Up)",
       "tapHoldKeyDown": "Tap-Hold Key (Tap-Hold)",
-      "typedText": "Typed Text (Expansion)"
+      "typedText": "Typed Text (Expansion)",
+      "mouseWheel": "Mouse wheel",
+      "mouseDoubleClick": "Double click",
+      "mouseMove": "Mouse movement"
     },
     "condition_types": {
       "layerActive": "Layer Active (LayerActive)",
@@ -239,7 +242,16 @@
       "title": "Title contains (e.g. VS Code)"
     },
     "remove_action_tooltip": "Remove Action",
-    "remove_condition_tooltip": "Remove Condition"
+    "remove_condition_tooltip": "Remove Condition",
+    "mouse_options": {
+      "wheel_up": "Wheel up",
+      "wheel_down": "Wheel down",
+      "wheel_left": "Horizontal left",
+      "wheel_right": "Horizontal right",
+      "move_hint": "Triggers after meaningful pointer movement",
+      "move_distance": "Movement threshold, px",
+      "move_cooldown": "Trigger cooldown, ms"
+    }
   },
   "macro": {
     "title": "Macro Steps",
