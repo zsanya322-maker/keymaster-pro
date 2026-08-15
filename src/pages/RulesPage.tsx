@@ -13,6 +13,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { useProfileStore } from '../store/profileStore';
+import { useKeyMasterStore } from '../store/keyMasterStore';
 import { useAppStore } from '../stores/app-store';
 import { ActionEditor } from '../components/ruleBuilder/ActionEditor';
 import { ConditionEditor } from '../components/ruleBuilder/ConditionEditor';
@@ -181,6 +182,7 @@ export const RulesPage: React.FC<RulesPageProps> = ({ mode = 'all' }) => {
   const { t } = useTranslation();
   const { profiles, activeProfileId, saveProfile } = useProfileStore();
   const daemonConnected = useAppStore((state) => state.daemonConnected);
+  const setRulesDirty = useKeyMasterStore((state) => state.setRulesDirty);
   const activeProfile = profiles.find((profile) => profile.id === activeProfileId) || null;
 
   const [selectedRuleId, setSelectedRuleId] = useState<string | null>(null);
@@ -214,6 +216,14 @@ export const RulesPage: React.FC<RulesPageProps> = ({ mode = 'all' }) => {
   }, [modeRules, query, t]);
 
   const isDirty = Boolean(draftRule) && JSON.stringify(draftRule) !== baseline;
+
+  useEffect(() => {
+    setRulesDirty(isDirty);
+  }, [isDirty, setRulesDirty]);
+
+  useEffect(() => () => {
+    useKeyMasterStore.getState().setRulesDirty(false);
+  }, []);
 
   const openExistingRule = (rule: FrontendRule) => {
     const copy = structuredClone(rule);
