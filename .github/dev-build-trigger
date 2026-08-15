@@ -1,1 +1,1 @@
-checkpoint-3: inline editor, config persistence, shell guard, runtime settings sync
+checkpoint-4: guarded native exits, atomic config, deterministic daemon restart, classic dialogs
