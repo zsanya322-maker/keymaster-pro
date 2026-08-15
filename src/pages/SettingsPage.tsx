@@ -11,7 +11,7 @@ import {
   Shield,
   Terminal,
 } from 'lucide-react';
-import { useAppStore } from '../stores/app-store';
+import { useAppStore } from '../store/appStore';
 import { invoke } from '../lib/ipc';
 import { triggerToast } from '../lib/toast';
 
