@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { check } from '@tauri-apps/plugin-updater';
 import { disable, enable } from '@tauri-apps/plugin-autostart';
 import {
+  Activity,
   Download,
   FolderOpen,
   RefreshCw,
@@ -15,6 +16,7 @@ import { invoke } from '../lib/ipc';
 import { triggerToast } from '../lib/toast';
 
 type SettingsTab = 'general' | 'daemon' | 'logs';
+type UpdateInfo = Awaited<ReturnType<typeof check>>;
 
 interface SettingRowProps {
   title: ReactNode;
@@ -67,27 +69,17 @@ function Section({ title, children }: { title: ReactNode; children: ReactNode })
 
 export function SettingsPage() {
   const { t, i18n } = useTranslation();
-  const { config, setConfig, daemonConnected } = useAppStore();
+  const { config, setConfig, daemonConnected, diagnostics } = useAppStore();
   const [activeTab, setActiveTab] = useState<SettingsTab>('general');
   const [isElevated, setIsElevated] = useState(false);
+  const [daemonBusy, setDaemonBusy] = useState(false);
 
   const [updateStatus, setUpdateStatus] = useState('');
   const [updateError, setUpdateError] = useState(false);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
-  const [updateAvailable, setUpdateAvailable] = useState<any>(null);
+  const [updateAvailable, setUpdateAvailable] = useState<UpdateInfo>(null);
   const [downloading, setDownloading] = useState(false);
   const [progress, setProgress] = useState(0);
-
-  const [logs, setLogs] = useState<string[]>([
-    '[12:01:05] [INFO] KeyMaster Pro Daemon v0.1.0 starting...',
-    '[12:01:05] [INFO] Loading configuration from C:\\Users\\user\\AppData\\Roaming\\KeyMaster Pro\\config.json...',
-    '[12:01:05] [INFO] Active profile loaded: Default (1)',
-    '[12:01:06] [INFO] IPC server listening on local pipe: \\\\.\\pipe\\keymaster-pro-ipc',
-    '[12:01:06] [INFO] Initializing Windows input hook filters...',
-    '[12:01:06] [INFO] WH_KEYBOARD_LL hook set up successfully.',
-    '[12:01:06] [INFO] WH_MOUSE_LL hook set up successfully.',
-    '[12:01:06] [INFO] KeyMaster Pro Daemon ready and intercepting.',
-  ]);
 
   useEffect(() => {
     invoke<boolean>('is_elevated')
@@ -110,9 +102,9 @@ export function SettingsPage() {
         await disable();
         triggerToast(t('settings.autostart_disabled'), 'success');
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       setConfig({ autostart: Boolean(previousValue) });
-      triggerToast(t('settings.toast_autostart_failed', { error }), 'error');
+      triggerToast(t('settings.toast_autostart_failed', { error: String(error) }), 'error');
     }
   };
 
@@ -135,9 +127,9 @@ export function SettingsPage() {
         setUpdateAvailable(null);
         setUpdateStatus(t('settings.updater_latest'));
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       triggerToast(t('settings.toast_update_check_failed'), 'error');
-      setUpdateStatus(t('settings.updater_failed_check', { error: error?.message || error }));
+      setUpdateStatus(t('settings.updater_failed_check', { error: String(error) }));
       setUpdateError(true);
     } finally {
       setCheckingUpdate(false);
@@ -155,7 +147,7 @@ export function SettingsPage() {
     try {
       let downloaded = 0;
       let contentLength = 0;
-      await updateAvailable.downloadAndInstall((event: any) => {
+      await updateAvailable.downloadAndInstall((event) => {
         if (event.event === 'Started') {
           contentLength = event.data.contentLength || 0;
         } else if (event.event === 'Progress') {
@@ -165,39 +157,51 @@ export function SettingsPage() {
       });
 
       setUpdateStatus(t('settings.updater_installed'));
-      setTimeout(() => {
+      window.setTimeout(() => {
         invoke('restart_app').catch(() => triggerToast(t('settings.toast_restart_failed'), 'error'));
       }, 1500);
-    } catch (error: any) {
+    } catch (error: unknown) {
       triggerToast(t('settings.toast_install_failed'), 'error');
-      setUpdateStatus(t('settings.updater_failed_install', { error: error?.message || error }));
+      setUpdateStatus(t('settings.updater_failed_install', { error: String(error) }));
       setUpdateError(true);
       setDownloading(false);
     }
   };
 
   const handleRestartDaemon = async () => {
+    if (daemonBusy) return;
+    setDaemonBusy(true);
     try {
+      if (daemonConnected) {
+        await invoke('stop_daemon');
+        await new Promise((resolve) => window.setTimeout(resolve, 450));
+      }
       await invoke('spawn_daemon');
       triggerToast(t('settings.toast_daemon_start_requested'), 'success');
-    } catch (error: any) {
-      triggerToast(t('settings.toast_daemon_start_failed', { error }), 'error');
+    } catch (error: unknown) {
+      triggerToast(t('settings.toast_daemon_start_failed', { error: String(error) }), 'error');
+    } finally {
+      setDaemonBusy(false);
     }
   };
 
   const handleRestartAsAdmin = async () => {
     try {
       await invoke('restart_as_admin');
-    } catch (error: any) {
-      triggerToast(t('settings.toast_admin_restart_failed', { error }), 'error');
+    } catch (error: unknown) {
+      triggerToast(t('settings.toast_admin_restart_failed', { error: String(error) }), 'error');
     }
   };
 
   const handleOpenLogsFolder = async () => {
+    if (!daemonConnected) {
+      triggerToast(t('status.daemon_disconnected', { defaultValue: 'Демон отключён' }), 'warning');
+      return;
+    }
     try {
       await invoke('ipc_call', { method: 'open_log_folder' });
-    } catch (error: any) {
-      triggerToast(t('settings.toast_open_logs_failed', { error }), 'error');
+    } catch (error: unknown) {
+      triggerToast(t('settings.toast_open_logs_failed', { error: String(error) }), 'error');
     }
   };
 
@@ -211,7 +215,7 @@ export function SettingsPage() {
     <div className="h-full min-h-0 flex bg-app-bg overflow-hidden">
       <aside className="w-48 shrink-0 border-r border-app-border bg-app-surface/25 flex flex-col">
         <div className="h-11 px-3 flex items-center border-b border-app-border bg-app-surface/45">
-          <span className="text-sm font-semibold text-app-text">{t('nav.settings', 'Настройки')}</span>
+          <span className="text-sm font-semibold text-app-text">{t('nav.settings', { defaultValue: 'Настройки' })}</span>
         </div>
         <nav className="py-1.5">
           {navItems.map(({ id, label, icon: Icon }) => (
@@ -255,20 +259,6 @@ export function SettingsPage() {
                 </SettingRow>
                 <SettingRow title={t('settings.close_to_tray')} description={t('settings.close_to_tray_desc')}>
                   <div className="flex justify-end"><Toggle checked={config.minimizeToTray} onChange={() => void handleToggle('minimizeToTray')} /></div>
-                </SettingRow>
-                <SettingRow title={t('settings.tap_hold_timeout')} description={t('settings.tap_hold_timeout_desc')}>
-                  <div className="flex items-center gap-3">
-                    <input
-                      type="range"
-                      min="50"
-                      max="1000"
-                      step="50"
-                      value={config.tapHoldTimeoutMs || 200}
-                      onChange={(event) => setConfig({ tapHoldTimeoutMs: Number.parseInt(event.target.value, 10) })}
-                      className="flex-1 accent-app-primary"
-                    />
-                    <span className="w-16 text-right text-xs font-mono text-app-text">{config.tapHoldTimeoutMs || 200} ms</span>
-                  </div>
                 </SettingRow>
               </Section>
 
@@ -370,7 +360,7 @@ export function SettingsPage() {
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
-                      onClick={handleCheckForUpdates}
+                      onClick={() => void handleCheckForUpdates()}
                       disabled={checkingUpdate || downloading}
                       className="h-8 px-3 inline-flex items-center gap-2 border border-app-border bg-app-surface text-xs text-app-text hover:bg-app-surface-hover disabled:opacity-50"
                     >
@@ -380,7 +370,7 @@ export function SettingsPage() {
                     {updateAvailable && !downloading && (
                       <button
                         type="button"
-                        onClick={handleInstallUpdate}
+                        onClick={() => void handleInstallUpdate()}
                         className="h-8 px-3 inline-flex items-center gap-2 border border-app-primary bg-app-primary text-xs font-medium text-white hover:bg-app-primary-hover"
                       >
                         <Download size={13} />
@@ -433,10 +423,11 @@ export function SettingsPage() {
                     )}
                     <button
                       type="button"
+                      disabled={daemonBusy}
                       onClick={() => void handleRestartDaemon()}
-                      className="h-8 px-3 inline-flex items-center gap-2 border border-app-border bg-app-surface text-xs text-app-text hover:bg-app-surface-hover"
+                      className="h-8 px-3 inline-flex items-center gap-2 border border-app-border bg-app-surface text-xs text-app-text hover:bg-app-surface-hover disabled:opacity-45"
                     >
-                      <RefreshCw size={13} />
+                      <RefreshCw size={13} className={daemonBusy ? 'animate-spin' : ''} />
                       {t('settings.daemon_restart_label')}
                     </button>
                     {!isElevated && (
@@ -454,10 +445,16 @@ export function SettingsPage() {
               </Section>
 
               <Section title={t('settings.daemon_channels')}>
-                <SettingRow title={t('settings.daemon_kb_hook')} description={t('settings.daemon_channels_desc')}>
+                <SettingRow
+                  title={t('settings.daemon_kb_hook')}
+                  description={t('settings.daemon_channels_desc')}
+                >
                   <div className="flex justify-end"><Toggle checked={config.kbHookEnabled} onChange={() => void handleToggle('kbHookEnabled')} /></div>
                 </SettingRow>
-                <SettingRow title={t('settings.daemon_mouse_hook')}>
+                <SettingRow
+                  title={t('settings.daemon_mouse_hook')}
+                  description={t('settings.runtime_apply_hint', { defaultValue: 'Изменение применяется работающим daemon автоматически.' })}
+                >
                   <div className="flex justify-end"><Toggle checked={config.mouseHookEnabled} onChange={() => void handleToggle('mouseHookEnabled')} /></div>
                 </SettingRow>
               </Section>
@@ -465,30 +462,59 @@ export function SettingsPage() {
           )}
 
           {activeTab === 'logs' && (
-            <div className="h-full min-h-[320px] max-w-5xl flex flex-col border border-app-border bg-app-bg">
-              <div className="h-10 px-3 flex items-center gap-2 border-b border-app-border bg-app-surface/45 shrink-0">
-                <span className="text-[11px] text-app-muted">{t('settings.logs_desc')}</span>
-                <div className="ml-auto flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => void handleOpenLogsFolder()}
-                    className="h-7 px-2.5 inline-flex items-center gap-1.5 border border-app-border bg-app-surface text-[11px] text-app-text hover:bg-app-surface-hover"
-                  >
-                    <FolderOpen size={12} />
-                    {t('settings.logs_open_folder')}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setLogs([`[${new Date().toLocaleTimeString()}] [INFO] ${t('settings.logs_cleared')}`])}
-                    className="h-7 px-2.5 border border-app-border bg-app-surface text-[11px] text-app-text hover:bg-app-surface-hover"
-                  >
-                    {t('settings.logs_clear')}
-                  </button>
-                </div>
-              </div>
-              <div className="flex-1 min-h-0 overflow-auto bg-[#0b0e12] p-3 font-mono text-[11px] leading-5 text-app-success">
-                {logs.map((log, index) => <div key={`${index}-${log}`} className="whitespace-pre-wrap">{log}</div>)}
-              </div>
+            <div className="max-w-4xl space-y-4">
+              <Section title={t('settings.logs_title')}>
+                <SettingRow title={t('settings.logs_open_folder')} description={t('settings.logs_desc')}>
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      disabled={!daemonConnected}
+                      onClick={() => void handleOpenLogsFolder()}
+                      className="h-8 px-3 inline-flex items-center gap-2 border border-app-border bg-app-surface text-xs text-app-text hover:bg-app-surface-hover disabled:opacity-45"
+                    >
+                      <FolderOpen size={13} />
+                      {t('settings.logs_open_folder')}
+                    </button>
+                  </div>
+                </SettingRow>
+              </Section>
+
+              <Section title={t('settings.daemon_title')}>
+                <SettingRow title={t('settings.daemon_pipe')}>
+                  <div className="flex justify-end items-center gap-2 text-[11px]">
+                    <span className={`h-2 w-2 rounded-full ${daemonConnected ? 'bg-app-success' : 'bg-app-danger'}`} />
+                    <span className="text-app-text">{daemonConnected ? t('status.connected') : t('status.disconnected')}</span>
+                  </div>
+                </SettingRow>
+                <SettingRow title={t('settings.logs_runtime_metrics', { defaultValue: 'Текущая диагностика' })} stacked>
+                  <div className="grid grid-cols-2 lg:grid-cols-4 border border-app-border bg-app-bg">
+                    <div className="p-3 border-r border-b lg:border-b-0 border-app-border/60">
+                      <div className="text-[10px] text-app-muted">Keystrokes</div>
+                      <div className="mt-1 text-xs font-mono text-app-text">{diagnostics.keystrokes}</div>
+                    </div>
+                    <div className="p-3 border-b lg:border-b-0 lg:border-r border-app-border/60">
+                      <div className="text-[10px] text-app-muted">CPU</div>
+                      <div className="mt-1 text-xs font-mono text-app-text">{diagnostics.cpu.toFixed(1)}%</div>
+                    </div>
+                    <div className="p-3 border-r border-app-border/60">
+                      <div className="text-[10px] text-app-muted">RAM</div>
+                      <div className="mt-1 text-xs font-mono text-app-text">{diagnostics.ram.toFixed(1)} MB</div>
+                    </div>
+                    <div className="p-3">
+                      <div className="text-[10px] text-app-muted">Latency</div>
+                      <div className="mt-1 text-xs font-mono text-app-text">{diagnostics.latency.toFixed(2)} ms</div>
+                    </div>
+                  </div>
+                </SettingRow>
+                <SettingRow
+                  title={t('settings.logs_live_note', { defaultValue: 'Отображение логов' })}
+                  description={t('settings.logs_live_note_desc', {
+                    defaultValue: 'Здесь больше не показываются тестовые строки. Полный журнал открывается из реальной папки логов daemon.',
+                  })}
+                >
+                  <div className="flex justify-end text-app-muted"><Activity size={14} /></div>
+                </SettingRow>
+              </Section>
             </div>
           )}
         </div>
