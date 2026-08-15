@@ -3,12 +3,14 @@
 /// Клиент для GUI-процесса. Подключается к Named Pipe daemon'а,
 /// отправляет JSON-RPC 2.0 запросы и получает ответы.
 
-use tokio::net::windows::named_pipe::ClientOptions;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::net::windows::named_pipe::ClientOptions;
 use tracing::debug;
 
-use crate::shared::constants;
 use super::ipc_types::*;
+use crate::shared::constants;
+
+const IPC_RESPONSE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// Отправить JSON-RPC запрос в Daemon и получить ответ
 ///
@@ -56,14 +58,19 @@ pub async fn call(method: &str, params: Option<serde_json::Value>) -> Result<ser
         .map_err(|e| format!("Ошибка сериализации запроса: {}", e))?;
     request_bytes.push('\n');
 
-    // Отправляем запрос
+    // Отправляем запрос и явно flush'им pipe перед ожиданием ответа.
     let (reader, mut writer) = tokio::io::split(pipe);
     writer.write_all(request_bytes.as_bytes()).await
         .map_err(|e| format!("Ошибка отправки запроса: {}", e))?;
+    writer.flush().await
+        .map_err(|e| format!("Ошибка flush IPC-запроса: {}", e))?;
 
-    // Читаем ответ (одна строка)
+    // Читаем ответ (одна строка). Если daemon завис после принятия соединения,
+    // не оставляем вызывающую UI-операцию висеть бесконечно.
     let mut lines = BufReader::new(reader).lines();
-    let response_line = lines.next_line().await
+    let response_line = tokio::time::timeout(IPC_RESPONSE_TIMEOUT, lines.next_line())
+        .await
+        .map_err(|_| format!("IPC timeout: daemon не ответил на '{}' за {} сек.", method, IPC_RESPONSE_TIMEOUT.as_secs()))?
         .map_err(|e| format!("Ошибка чтения ответа: {}", e))?
         .ok_or("Пустой ответ от daemon")?;
 
