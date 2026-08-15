@@ -62,11 +62,12 @@ function queueConfigUpdate(partial: Partial<AppConfig>) {
 
     // Сериализуем записи: следующий пакет отправляется только после предыдущего,
     // поэтому старое значение не может завершиться позже нового и затереть его.
+    // Запись идёт напрямую через Tauri в config.json и не зависит от Daemon.
     configUpdateInFlight = configUpdateInFlight
       .catch(() => undefined)
-      .then(() => invoke('ipc_call', { method: 'update_config', params: payload }))
-      .catch(() => {
-        // Offline fallback: локальный UI продолжает работать.
+      .then(() => invoke<AppConfig>('update_gui_config', { patch: payload }))
+      .catch((error) => {
+        console.error('Failed to persist GUI config', error)
       })
   }, 150)
 }
@@ -82,7 +83,7 @@ export const useAppStore = create<AppState>((set) => ({
       const serverConfig = await invoke<AppConfig>('get_gui_config')
       if (serverConfig) set({ config: serverConfig })
     } catch {
-      // Offline fallback.
+      // Offline/browser fallback.
     }
   },
 
