@@ -16,6 +16,8 @@ interface ActionEditorProps {
 const controlClass = 'h-7 border border-app-border bg-app-bg px-2 text-[11px] text-app-text outline-none focus:border-app-primary';
 const selectClass = `${controlClass} cursor-pointer`;
 
+type WindowActionName = 'snap_left' | 'snap_right' | 'snap_center' | 'minimize' | 'maximize' | 'close';
+
 export const ActionEditor: React.FC<ActionEditorProps> = ({ action, onChange, onRemove }) => {
   const { t } = useTranslation();
   const { activeProfileId, profiles } = useProfileStore();
@@ -151,7 +153,7 @@ export const ActionEditor: React.FC<ActionEditorProps> = ({ action, onChange, on
             {action.type === 'windowAction' && (
               <select
                 value={action.action}
-                onChange={(event) => onChange({ ...action, action: event.target.value as FrontendAction & string })}
+                onChange={(event) => onChange({ ...action, action: event.target.value as WindowActionName })}
                 className={`${selectClass} flex-1 min-w-0`}
               >
                 <option value="snap_left">{t('ruleBuilder.action_options.window_snap_left')}</option>
