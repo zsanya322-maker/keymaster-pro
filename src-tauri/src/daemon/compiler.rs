@@ -171,6 +171,7 @@ fn compile_mouse_move_rule(
     cooldown_ms: u32,
 ) -> CompiledMouseMoveRule {
     CompiledMouseMoveRule {
+        rule_id_hash: calculate_hash(&rule.id),
         priority: rule.priority,
         min_distance: min_distance.max(1),
         cooldown_ms,

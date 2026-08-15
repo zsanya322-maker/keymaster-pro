@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::sync::{atomic::{AtomicU16, Ordering}, LazyLock, Mutex, RwLockReadGuard};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use tracing::error;
 
@@ -11,6 +11,9 @@ use crate::schemas::frontend::key_modifiers;
 use crate::daemon::chord_output::{
     build_atomic_chord_commands, isolate_macro_commands, modifier_vks,
     release_modifier_commands, shell_mask_commands,
+};
+use crate::daemon::mouse_triggers::{
+    system_double_click_limits, wheel_key, DoubleClickDetector, MoveGate,
 };
 use crate::shared::calculate_hash;
 
@@ -68,6 +71,10 @@ static ACTIVE_MOUSE_DOWN_ACTIONS: LazyLock<Mutex<HashMap<u8, Vec<EngineAction>>>
     LazyLock::new(|| Mutex::new(HashMap::new()));
 static PENDING_MOUSE_UP_ACTIONS: LazyLock<Mutex<HashMap<u8, Vec<EngineAction>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
+static DOUBLE_CLICK_DETECTOR: LazyLock<Mutex<DoubleClickDetector>> =
+    LazyLock::new(|| Mutex::new(DoubleClickDetector::default()));
+static MOUSE_MOVE_GATES: LazyLock<Mutex<HashMap<u64, MoveGate>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 pub fn modifier_bit_for_vk(vk: u8) -> u16 {
     match vk {
@@ -121,6 +128,12 @@ pub fn reset_modifier_state() {
     }
     if let Ok(mut pending) = PENDING_MOUSE_UP_ACTIONS.lock() {
         pending.clear();
+    }
+    if let Ok(mut detector) = DOUBLE_CLICK_DETECTOR.lock() {
+        detector.clear();
+    }
+    if let Ok(mut gates) = MOUSE_MOVE_GATES.lock() {
+        gates.clear();
     }
 }
 
@@ -775,9 +788,11 @@ pub fn process_keyboard_event(
 
 pub fn process_mouse_event(
     button: u8,
-    _x: i32,
-    _y: i32,
-    _delta: i32,
+    x: i32,
+    y: i32,
+    delta: i32,
+    horizontal_wheel: bool,
+    is_move: bool,
     _flags: u32,
     is_down: bool,
     state: Option<&DaemonStateRef>,
@@ -806,14 +821,108 @@ pub fn process_mouse_event(
         Some(sim) => sim,
         None => return EventAction::PassThrough,
     };
-
     let engine_schema = &s.engine_schema;
-
     let ctx_arc = match crate::trackers::context_tracker::get_context() {
         Some(c) => c,
         None => return EventAction::PassThrough,
     };
 
+    // Wheel/hwheel are standalone source events, so matched wheel rules can be
+    // consumed immediately without creating a down/up lifecycle.
+    if delta != 0 {
+        if let Some(key) = wheel_key(delta, horizontal_wheel) {
+            if let Some(rules) = engine_schema.mouse_wheel_map.get(&key) {
+                let Some(ctx) = try_read_ctx(&ctx_arc) else {
+                    return EventAction::PassThrough;
+                };
+                for rule in rules {
+                    if !check_conditions(&rule.conditions, &ctx) {
+                        continue;
+                    }
+                    let actions = rule.actions.clone();
+                    drop(ctx);
+                    execute_actions(&actions, simulator, &ctx_arc, true, state, 0);
+                    execute_actions(&actions, simulator, &ctx_arc, false, state, 0);
+                    return EventAction::Block;
+                }
+            }
+        }
+        return EventAction::PassThrough;
+    }
+
+    // Movement triggers are additive. Blocking WM_MOUSEMOVE would freeze the
+    // pointer; no waiting or platform query happens in this hot path.
+    if is_move {
+        if !engine_schema.mouse_move_rules.is_empty() {
+            let Some(ctx) = try_read_ctx(&ctx_arc) else {
+                return EventAction::PassThrough;
+            };
+            let now = Instant::now();
+            for rule in &engine_schema.mouse_move_rules {
+                if !check_conditions(&rule.conditions, &ctx) {
+                    continue;
+                }
+                let should_fire = MOUSE_MOVE_GATES
+                    .lock()
+                    .map(|mut gates| {
+                        gates.entry(rule.rule_id_hash).or_default().should_fire(
+                            x,
+                            y,
+                            now,
+                            rule.min_distance,
+                            Duration::from_millis(u64::from(rule.cooldown_ms)),
+                        )
+                    })
+                    .unwrap_or(false);
+                if should_fire {
+                    let actions = rule.actions.clone();
+                    drop(ctx);
+                    execute_actions(&actions, simulator, &ctx_arc, true, state, 0);
+                    execute_actions(&actions, simulator, &ctx_arc, false, state, 0);
+                    break;
+                }
+            }
+        }
+        return EventAction::PassThrough;
+    }
+
+    // Double-click detection is also additive: the first click is never delayed
+    // while waiting for a possible second click.
+    if is_down && button != 255 {
+        if let Some(rules) = engine_schema.mouse_double_click_map.get(&button) {
+            let (interval, max_dx, max_dy) = system_double_click_limits();
+            let is_double = DOUBLE_CLICK_DETECTOR
+                .lock()
+                .map(|mut detector| {
+                    detector.register_down(
+                        button,
+                        x,
+                        y,
+                        Instant::now(),
+                        interval,
+                        max_dx,
+                        max_dy,
+                    )
+                })
+                .unwrap_or(false);
+            if is_double {
+                if let Some(ctx) = try_read_ctx(&ctx_arc) {
+                    for rule in rules {
+                        if !check_conditions(&rule.conditions, &ctx) {
+                            continue;
+                        }
+                        let actions = rule.actions.clone();
+                        drop(ctx);
+                        execute_actions(&actions, simulator, &ctx_arc, true, state, 0);
+                        execute_actions(&actions, simulator, &ctx_arc, false, state, 0);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    // Ordinary button down/up lifecycle stays exactly as before.
     if !is_down {
         if let Ok(mut pending) = PENDING_MOUSE_UP_ACTIONS.lock() {
             if let Some(actions) = pending.remove(&button) {
@@ -852,14 +961,12 @@ pub fn process_mouse_event(
                 let actions = rule.actions.clone();
                 let trigger_on_down = rule.trigger_on_down;
                 drop(ctx);
-
                 if trigger_on_down {
                     if let Ok(mut active) = ACTIVE_MOUSE_DOWN_ACTIONS.lock() {
                         active.insert(button, actions.clone());
                     }
                     return execute_actions(&actions, simulator, &ctx_arc, true, state, 0);
                 }
-
                 if let Ok(mut pending) = PENDING_MOUSE_UP_ACTIONS.lock() {
                     pending.insert(button, actions);
                 }

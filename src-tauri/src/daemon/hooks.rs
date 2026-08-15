@@ -519,7 +519,17 @@ extern "system" fn mouse_hook_callback(
     }
 
     let start = std::time::Instant::now();
-    let action = engine::process_mouse_event(button, x, y, delta, flags, is_mouse_down, state_ref);
+    let action = engine::process_mouse_event(
+        button,
+        x,
+        y,
+        delta,
+        msg_type == WM_MOUSEHWHEEL as u32,
+        msg_type == WM_MOUSEMOVE as u32,
+        flags,
+        is_mouse_down,
+        state_ref,
+    );
 
     let elapsed = start.elapsed().as_micros() as u64;
     if let Some(s_ref) = state_ref {
