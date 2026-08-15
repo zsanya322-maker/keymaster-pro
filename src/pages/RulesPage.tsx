@@ -2,14 +2,12 @@ import React, { useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
 import {
-  ChevronRight,
   FileText,
   Keyboard,
   ListPlus,
   Mouse,
   RotateCcw,
   Save,
-  Search,
   Trash2,
 } from 'lucide-react';
 import { useProfileStore } from '../store/profileStore';
@@ -40,15 +38,47 @@ type EditorIntent =
 const inputClass = 'h-7 border border-app-border bg-app-bg px-2 text-[11px] text-app-text outline-none focus:border-app-primary';
 const selectClass = `${inputClass} cursor-pointer`;
 
-function EditorSection({ title, action, children }: { title: ReactNode; action?: ReactNode; children: ReactNode }) {
+function EditorSection({
+  title,
+  action,
+  children,
+}: {
+  title: ReactNode;
+  action?: ReactNode;
+  children: ReactNode;
+}) {
   return (
     <section className="border border-app-border bg-app-bg">
-      <div className="h-8 px-2.5 flex items-center border-b border-app-border bg-app-surface/55">
-        <span className="text-[11px] font-semibold text-app-text">{title}</span>
+      <div className="h-7 px-2 flex items-center border-b border-app-border bg-app-surface/45">
+        <span className="text-[10px] font-semibold text-app-text">{title}</span>
         {action && <div className="ml-auto">{action}</div>}
       </div>
-      <div className="p-2.5">{children}</div>
+      <div>{children}</div>
     </section>
+  );
+}
+
+function PropertyRow({
+  label,
+  children,
+  hint,
+  last = false,
+}: {
+  label: ReactNode;
+  children: ReactNode;
+  hint?: ReactNode;
+  last?: boolean;
+}) {
+  return (
+    <div className={`grid grid-cols-[116px_minmax(0,1fr)] min-h-9 ${last ? '' : 'border-b border-app-border/55'}`}>
+      <div className="px-2 flex items-center border-r border-app-border/55 bg-app-surface/15 text-[10px] text-app-muted">
+        {label}
+      </div>
+      <div className="px-1.5 py-1 flex items-center gap-2 min-w-0">
+        {children}
+        {hint && <span className="text-[9px] text-app-muted truncate">{hint}</span>}
+      </div>
+    </div>
   );
 }
 
@@ -89,7 +119,7 @@ function formatConditionLabel(condition: FrontendCondition, t: TFunction): strin
     case 'layerActive':
       return `${t('ruleBuilder.condition_types.layerActive')}: ${condition.layerId || '—'}`;
     case 'virtualDesktop':
-      return `${t('ruleBuilder.condition_types.virtualDesktop', { defaultValue: 'Виртуальный рабочий стол' })}: ${condition.id}`;
+      return `${t('ruleBuilder.condition_types.virtualDesktop')}: ${condition.id}`;
     case 'windowMatch': {
       const parts: string[] = [];
       if (condition.process) parts.push(condition.process);
@@ -124,7 +154,7 @@ function formatRuleSummary(rule: FrontendRule, t: TFunction): string {
   const firstAction = rule.actions[0];
   if (!firstAction) return '—';
   const first = formatActionLabel(firstAction, t);
-  return rule.actions.length > 1 ? `${first} +${rule.actions.length - 1}` : first;
+  return rule.actions.length > 1 ? `${first}  +${rule.actions.length - 1}` : first;
 }
 
 function matchesMode(rule: FrontendRule, mode: RulesViewMode): boolean {
@@ -372,10 +402,10 @@ export const RulesPage: React.FC<RulesPageProps> = ({ mode = 'all' }) => {
   }
 
   const viewTitle = mode === 'macros'
-    ? t('nav.macros', { defaultValue: 'Макросы' })
+    ? t('nav.macros')
     : mode === 'text'
-      ? t('nav.text', { defaultValue: 'Текст' })
-      : t('rules.title', { defaultValue: 'Список правил' });
+      ? t('nav.text')
+      : t('rules.title');
 
   const saveDisabled = !draftRule
     || draftRule.actions.length === 0
@@ -386,22 +416,15 @@ export const RulesPage: React.FC<RulesPageProps> = ({ mode = 'all' }) => {
   return (
     <>
       <div className="h-full min-h-0 flex bg-app-bg overflow-hidden">
-        <section className="w-[40%] min-w-[330px] max-w-[560px] flex flex-col border-r border-app-border bg-app-bg min-h-0">
-          <div className="h-10 px-3 flex items-center border-b border-app-border bg-app-surface/45 shrink-0">
-            <h2 className="text-xs font-semibold text-app-text">{viewTitle}</h2>
-            <span className="ml-auto text-[10px] text-app-muted">{modeRules.length}</span>
-          </div>
-
-          <div className="px-2 py-2 border-b border-app-border/70 shrink-0">
-            <label className="relative block min-w-0">
-              <Search size={13} className="absolute left-2 top-1/2 -translate-y-1/2 text-app-muted pointer-events-none" />
-              <input
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder={t('rules.search_placeholder', { defaultValue: 'Поиск правил' })}
-                className="w-full h-7 pl-7 pr-2 text-[11px] bg-app-bg border border-app-border outline-none focus:border-app-primary"
-              />
-            </label>
+        <section className="w-[34%] min-w-[300px] max-w-[455px] flex flex-col border-r border-app-border bg-app-bg min-h-0">
+          <div className="h-9 px-2.5 flex items-center border-b border-app-border bg-app-surface/35 shrink-0">
+            <h2 className="text-[11px] font-semibold text-app-text">{viewTitle}</h2>
+            {query && (
+              <span className="ml-2 text-[9px] text-app-primary truncate">
+                “{query}”
+              </span>
+            )}
+            <span className="ml-auto text-[9px] font-mono text-app-muted">{filteredRules.length}/{modeRules.length}</span>
           </div>
 
           <div className="flex-1 min-h-0 overflow-y-auto">
@@ -420,23 +443,24 @@ export const RulesPage: React.FC<RulesPageProps> = ({ mode = 'all' }) => {
                   type="button"
                   disabled={saving}
                   onClick={() => requestIntent({ type: 'select', id: rule.id })}
-                  className={`w-full min-h-[52px] px-2.5 py-1.5 text-left border-b border-app-border/55 flex items-start gap-2 transition-colors disabled:opacity-60 ${
+                  className={`w-full min-h-[44px] px-2 py-1 text-left border-b border-app-border/50 flex items-center gap-1.5 transition-colors disabled:opacity-60 ${
                     selected
                       ? 'bg-app-primary/10 shadow-[inset_2px_0_0_var(--color-primary)]'
-                      : 'hover:bg-app-surface-hover/35'
+                      : 'hover:bg-app-surface-hover/30'
                   }`}
                 >
-                  <ChevronRight size={12} className="mt-1.5 shrink-0 text-app-muted" />
-                  <TriggerIcon size={14} className={`mt-1 shrink-0 ${invalidMouse ? 'text-app-danger' : 'text-app-primary'}`} />
+                  <TriggerIcon size={13} className={`shrink-0 ${invalidMouse ? 'text-app-danger' : selected ? 'text-app-primary' : 'text-app-muted'}`} />
                   <span className="min-w-0 flex-1">
-                    <span className="flex items-center gap-2 min-w-0">
+                    <span className="flex items-center gap-1.5 min-w-0 leading-4">
                       <strong className="text-[11px] font-semibold text-app-text truncate">
                         {rule.name?.trim() || formatTriggerKey(rule.trigger)}
                       </strong>
-                      <span className="text-[10px] text-app-muted truncate">{formatTriggerType(rule.trigger, t)}</span>
+                      <span className="text-[9px] text-app-muted shrink-0">{formatTriggerType(rule.trigger, t)}</span>
                     </span>
-                    <span className={`block mt-0.5 text-[10px] leading-4 truncate ${invalidMouse ? 'text-app-danger' : 'text-app-muted'}`}>
-                      {invalidMouse ? t('rules.invalid_mouse_code') : formatRuleSummary(rule, t)}
+                    <span className={`block text-[9px] leading-4 truncate ${invalidMouse ? 'text-app-danger' : 'text-app-muted'}`}>
+                      {invalidMouse
+                        ? t('rules.invalid_mouse_code')
+                        : `${formatTriggerKey(rule.trigger)}  →  ${formatRuleSummary(rule, t)}`}
                     </span>
                   </span>
                 </button>
@@ -444,10 +468,8 @@ export const RulesPage: React.FC<RulesPageProps> = ({ mode = 'all' }) => {
             })}
 
             {filteredRules.length === 0 && (
-              <div className="py-8 px-4 text-center text-[11px] text-app-muted">
-                {query
-                  ? t('rules.search_empty', { defaultValue: 'Ничего не найдено' })
-                  : t('rules.empty_state')}
+              <div className="py-7 px-4 text-center text-[10px] text-app-muted">
+                {query ? t('rules.search_empty') : t('rules.empty_state')}
               </div>
             )}
 
@@ -455,37 +477,35 @@ export const RulesPage: React.FC<RulesPageProps> = ({ mode = 'all' }) => {
               type="button"
               disabled={saving}
               onClick={() => requestIntent({ type: 'new' })}
-              className="w-full h-9 px-3 text-left text-[11px] text-app-muted hover:text-app-primary hover:bg-app-surface flex items-center gap-2 border-b border-app-border/45 disabled:opacity-40"
+              className="w-full h-8 px-2 text-left text-[10px] text-app-muted hover:text-app-primary hover:bg-app-surface/45 flex items-center gap-1.5 border-b border-app-border/45 disabled:opacity-40"
             >
-              <ListPlus size={13} />
+              <ListPlus size={12} />
               {t('rules.add_rule')}
             </button>
           </div>
 
-          <div className="h-8 px-3 flex items-center border-t border-app-border bg-app-surface/35 text-[10px] text-app-muted shrink-0">
-            {t('rules.total_rules', { defaultValue: 'Всего правил' })}: {modeRules.length}
+          <div className="h-7 px-2.5 flex items-center border-t border-app-border bg-app-surface/25 text-[9px] text-app-muted shrink-0">
+            {t('rules.total_rules')}: <strong className="ml-1 font-mono text-app-text">{modeRules.length}</strong>
           </div>
         </section>
 
         <section className="flex-1 min-w-0 flex flex-col bg-app-bg min-h-0">
-          <div className="h-10 px-3 flex items-center border-b border-app-border bg-app-surface/45 shrink-0">
-            <h2 className="text-xs font-semibold text-app-text">
-              {isNewRule
-                ? t('ruleBuilder.modal.create_title')
-                : t('rules.editor_title', { defaultValue: 'Редактор правила' })}
+          <div className="h-9 px-2.5 flex items-center border-b border-app-border bg-app-surface/35 shrink-0">
+            <h2 className="text-[11px] font-semibold text-app-text">
+              {isNewRule ? t('ruleBuilder.modal.create_title') : t('rules.editor_title')}
             </h2>
-            {isDirty && <span className="ml-2 text-[10px] text-app-warning">● {t('rules.unsaved', { defaultValue: 'изменено' })}</span>}
-            {saving && <span className="ml-2 text-[10px] text-app-primary">{t('common.saving', { defaultValue: 'Сохранение…' })}</span>}
+            {isDirty && <span className="ml-2 text-[9px] text-app-warning">● {t('rules.unsaved')}</span>}
+            {saving && <span className="ml-2 text-[9px] text-app-primary">{t('common.saving', { defaultValue: 'Сохранение…' })}</span>}
 
             {draftRule && (
-              <div className="ml-auto flex items-center gap-1.5">
+              <div className="ml-auto flex items-center gap-1">
                 <button
                   type="button"
                   onClick={resetDraft}
                   disabled={saving || (!isDirty && !isNewRule)}
-                  className="h-7 px-2 inline-flex items-center gap-1.5 border border-app-border bg-app-bg text-[10px] text-app-text hover:bg-app-surface-hover disabled:opacity-35"
+                  className="h-6 px-2 inline-flex items-center gap-1 border border-app-border bg-app-bg text-[9px] text-app-text hover:bg-app-surface disabled:opacity-30"
                 >
-                  <RotateCcw size={11} />
+                  <RotateCcw size={10} />
                   {t('ruleBuilder.buttons.cancel')}
                 </button>
                 {!isNewRule && (
@@ -493,19 +513,19 @@ export const RulesPage: React.FC<RulesPageProps> = ({ mode = 'all' }) => {
                     type="button"
                     disabled={saving}
                     onClick={() => setRuleToDelete(draftRule)}
-                    className="h-7 w-7 inline-flex items-center justify-center border border-app-border bg-app-bg text-app-muted hover:bg-app-surface hover:text-app-danger disabled:opacity-35"
-                    title={t('rules.delete_rule', { defaultValue: 'Удалить' })}
+                    className="h-6 w-6 inline-flex items-center justify-center border border-app-border bg-app-bg text-app-muted hover:bg-app-surface hover:text-app-danger disabled:opacity-30"
+                    title={t('rules.delete_rule')}
                   >
-                    <Trash2 size={12} />
+                    <Trash2 size={11} />
                   </button>
                 )}
                 <button
                   type="button"
                   onClick={() => void handleSaveRule()}
                   disabled={saveDisabled}
-                  className="h-7 px-3 inline-flex items-center gap-1.5 border border-app-primary bg-app-primary text-[10px] font-semibold text-white hover:bg-app-primary-hover disabled:opacity-35"
+                  className="h-6 px-2.5 inline-flex items-center gap-1 border border-app-primary bg-app-primary text-[9px] font-semibold text-white hover:bg-app-primary-hover disabled:opacity-30"
                 >
-                  <Save size={11} />
+                  <Save size={10} />
                   {t('ruleBuilder.buttons.save_rule')}
                 </button>
               </div>
@@ -513,52 +533,45 @@ export const RulesPage: React.FC<RulesPageProps> = ({ mode = 'all' }) => {
           </div>
 
           {!draftRule ? (
-            <div className="flex-1 flex items-center justify-center text-[11px] text-app-muted">
-              {t('rules.select_rule_hint', { defaultValue: 'Выберите правило слева или создайте новое' })}
+            <div className="flex-1 flex items-center justify-center text-[10px] text-app-muted">
+              {t('rules.select_rule_hint')}
             </div>
           ) : (
-            <div className="flex-1 min-h-0 overflow-y-auto p-3">
-              <div className="max-w-5xl space-y-3">
-                <EditorSection title={t('ruleBuilder.tabs.name', { defaultValue: 'Основные свойства' })}>
-                  <div className="grid grid-cols-[130px_minmax(0,1fr)] border border-app-border/70">
-                    <label className="min-h-9 px-2.5 flex items-center border-b border-r border-app-border/70 bg-app-surface/25 text-[10px] text-app-muted">
-                      {t('ruleBuilder.tabs.name')}
-                    </label>
-                    <div className="min-h-9 p-1.5 border-b border-app-border/70">
-                      <input
-                        type="text"
-                        value={draftRule.name || ''}
-                        disabled={saving}
-                        onChange={(event) => setDraftRule({ ...draftRule, name: event.target.value })}
-                        placeholder={t('ruleBuilder.placeholders.name')}
-                        className={`${inputClass} w-full disabled:opacity-50`}
-                      />
-                    </div>
-                    <label className="min-h-9 px-2.5 flex items-center border-r border-app-border/70 bg-app-surface/25 text-[10px] text-app-muted">
-                      {t('ruleBuilder.priority', { defaultValue: 'Приоритет' })}
-                    </label>
-                    <div className="min-h-9 p-1.5 flex items-center gap-2">
-                      <input
-                        type="number"
-                        value={draftRule.priority}
-                        disabled={saving}
-                        onChange={(event) => setDraftRule({ ...draftRule, priority: Number.parseInt(event.target.value, 10) || 0 })}
-                        className={`${inputClass} w-24 font-mono disabled:opacity-50`}
-                      />
-                      <span className="text-[10px] text-app-muted">
-                        {t('ruleBuilder.priority_hint', { defaultValue: 'Большее значение выполняется раньше' })}
-                      </span>
-                    </div>
-                  </div>
+            <div className="flex-1 min-h-0 overflow-y-auto p-2">
+              <div className="w-full max-w-[840px] space-y-2">
+                <EditorSection title={t('ruleBuilder.tabs.name')}>
+                  <PropertyRow label={t('common.name', { defaultValue: 'Название' })}>
+                    <input
+                      type="text"
+                      value={draftRule.name || ''}
+                      disabled={saving}
+                      onChange={(event) => setDraftRule({ ...draftRule, name: event.target.value })}
+                      placeholder={t('ruleBuilder.placeholders.name')}
+                      className={`${inputClass} w-full max-w-[520px] disabled:opacity-50`}
+                    />
+                  </PropertyRow>
+                  <PropertyRow
+                    label={t('ruleBuilder.priority')}
+                    hint={t('ruleBuilder.priority_hint')}
+                    last
+                  >
+                    <input
+                      type="number"
+                      value={draftRule.priority}
+                      disabled={saving}
+                      onChange={(event) => setDraftRule({ ...draftRule, priority: Number.parseInt(event.target.value, 10) || 0 })}
+                      className={`${inputClass} w-24 font-mono disabled:opacity-50`}
+                    />
+                  </PropertyRow>
                 </EditorSection>
 
                 <EditorSection title={t('ruleBuilder.tabs.trigger')}>
-                  <div className="grid grid-cols-[180px_minmax(0,1fr)] gap-2">
+                  <div className="p-1.5 flex items-center gap-1.5 min-w-0">
                     <select
                       value={draftRule.trigger.type}
                       disabled={saving}
                       onChange={(event) => setDraftRule(changeTriggerType(draftRule, event.target.value as FrontendTrigger['type']))}
-                      className={`${selectClass} bg-app-surface/45 disabled:opacity-50`}
+                      className={`${selectClass} w-[190px] shrink-0 bg-app-surface/35 disabled:opacity-50`}
                     >
                       <option value="keyDown">{t('ruleBuilder.trigger_types.keyDown')}</option>
                       <option value="keyUp">{t('ruleBuilder.trigger_types.keyUp')}</option>
@@ -568,54 +581,52 @@ export const RulesPage: React.FC<RulesPageProps> = ({ mode = 'all' }) => {
                       <option value="typedText">{t('ruleBuilder.trigger_types.typedText')}</option>
                     </select>
 
-                    <div className="flex gap-2 min-w-0">
-                      {draftRule.trigger.type === 'typedText' ? (
-                        <input
-                          type="text"
-                          value={draftRule.trigger.sequence}
-                          disabled={saving}
-                          onChange={(event) => setDraftRule({ ...draftRule, trigger: { type: 'typedText', sequence: event.target.value } })}
-                          placeholder={t('ruleBuilder.placeholders.sequence')}
-                          className={`${inputClass} flex-1 min-w-0 disabled:opacity-50`}
-                        />
-                      ) : (
-                        <KeyPicker
-                          value={draftRule.trigger.code}
-                          onChange={(code) => setDraftRule({
-                            ...draftRule,
-                            trigger: { ...draftRule.trigger, code } as FrontendTrigger,
-                          })}
-                          className="flex-1 min-w-0 text-left"
-                        />
-                      )}
+                    {draftRule.trigger.type === 'typedText' ? (
+                      <input
+                        type="text"
+                        value={draftRule.trigger.sequence}
+                        disabled={saving}
+                        onChange={(event) => setDraftRule({ ...draftRule, trigger: { type: 'typedText', sequence: event.target.value } })}
+                        placeholder={t('ruleBuilder.placeholders.sequence')}
+                        className={`${inputClass} flex-1 min-w-0 max-w-[520px] disabled:opacity-50`}
+                      />
+                    ) : (
+                      <KeyPicker
+                        value={draftRule.trigger.code}
+                        onChange={(code) => setDraftRule({
+                          ...draftRule,
+                          trigger: { ...draftRule.trigger, code } as FrontendTrigger,
+                        })}
+                        className="flex-1 min-w-0 max-w-[520px] text-left"
+                      />
+                    )}
 
-                      {draftRule.trigger.type === 'tapHoldKeyDown' && (
-                        <div className="flex items-center gap-1 shrink-0">
-                          <input
-                            type="number"
-                            min={1}
-                            value={draftRule.trigger.timeoutMs}
-                            disabled={saving}
-                            onChange={(event) => {
-                              const timeoutMs = Math.max(1, Number.parseInt(event.target.value, 10) || 200);
-                              setDraftRule((current) => {
-                                if (!current || current.trigger.type !== 'tapHoldKeyDown') return current;
-                                return {
-                                  ...current,
-                                  trigger: {
-                                    type: 'tapHoldKeyDown',
-                                    code: current.trigger.code,
-                                    timeoutMs,
-                                  },
-                                };
-                              });
-                            }}
-                            className={`${inputClass} w-20 font-mono disabled:opacity-50`}
-                          />
-                          <span className="text-[9px] text-app-muted">ms</span>
-                        </div>
-                      )}
-                    </div>
+                    {draftRule.trigger.type === 'tapHoldKeyDown' && (
+                      <div className="flex items-center gap-1 shrink-0">
+                        <input
+                          type="number"
+                          min={1}
+                          value={draftRule.trigger.timeoutMs}
+                          disabled={saving}
+                          onChange={(event) => {
+                            const timeoutMs = Math.max(1, Number.parseInt(event.target.value, 10) || 200);
+                            setDraftRule((current) => {
+                              if (!current || current.trigger.type !== 'tapHoldKeyDown') return current;
+                              return {
+                                ...current,
+                                trigger: {
+                                  type: 'tapHoldKeyDown',
+                                  code: current.trigger.code,
+                                  timeoutMs,
+                                },
+                              };
+                            });
+                          }}
+                          className={`${inputClass} w-20 font-mono disabled:opacity-50`}
+                        />
+                        <span className="text-[9px] text-app-muted">ms</span>
+                      </div>
+                    )}
                   </div>
                 </EditorSection>
 
@@ -629,33 +640,37 @@ export const RulesPage: React.FC<RulesPageProps> = ({ mode = 'all' }) => {
                         ...draftRule,
                         conditions: [...draftRule.conditions, { type: 'windowMatch', process: '', title: '' }],
                       })}
-                      className="h-6 px-2 border border-app-border bg-app-bg text-[10px] text-app-primary hover:bg-app-surface disabled:opacity-40"
+                      className="h-5 px-1.5 text-[9px] text-app-primary hover:bg-app-surface disabled:opacity-40"
                     >
                       + {t('ruleBuilder.buttons.add_condition')}
                     </button>
                   )}
                 >
-                  {draftRule.conditions.length === 0 ? (
-                    <div className="py-1.5 text-[11px] text-app-muted">{t('ruleBuilder.hints.no_conditions_global')}</div>
-                  ) : (
-                    <div className={`space-y-1.5 ${saving ? 'pointer-events-none opacity-60' : ''}`}>
-                      {draftRule.conditions.map((condition, index) => (
-                        <ConditionEditor
-                          key={index}
-                          condition={condition}
-                          onChange={(nextCondition) => {
-                            const conditions = [...draftRule.conditions];
-                            conditions[index] = nextCondition;
-                            setDraftRule({ ...draftRule, conditions });
-                          }}
-                          onRemove={() => setDraftRule({
-                            ...draftRule,
-                            conditions: draftRule.conditions.filter((_, itemIndex) => itemIndex !== index),
-                          })}
-                        />
-                      ))}
-                    </div>
-                  )}
+                  <div className="p-1.5">
+                    {draftRule.conditions.length === 0 ? (
+                      <div className="h-7 px-1 flex items-center text-[10px] text-app-muted">
+                        {t('ruleBuilder.hints.no_conditions_global')}
+                      </div>
+                    ) : (
+                      <div className={`space-y-1 ${saving ? 'pointer-events-none opacity-60' : ''}`}>
+                        {draftRule.conditions.map((condition, index) => (
+                          <ConditionEditor
+                            key={index}
+                            condition={condition}
+                            onChange={(nextCondition) => {
+                              const conditions = [...draftRule.conditions];
+                              conditions[index] = nextCondition;
+                              setDraftRule({ ...draftRule, conditions });
+                            }}
+                            onRemove={() => setDraftRule({
+                              ...draftRule,
+                              conditions: draftRule.conditions.filter((_, itemIndex) => itemIndex !== index),
+                            })}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </EditorSection>
 
                 <EditorSection
@@ -668,33 +683,37 @@ export const RulesPage: React.FC<RulesPageProps> = ({ mode = 'all' }) => {
                         ...draftRule,
                         actions: [...draftRule.actions, { type: 'typeText', text: '' }],
                       })}
-                      className="h-6 px-2 border border-app-border bg-app-bg text-[10px] text-app-primary hover:bg-app-surface disabled:opacity-40"
+                      className="h-5 px-1.5 text-[9px] text-app-primary hover:bg-app-surface disabled:opacity-40"
                     >
                       + {t('ruleBuilder.buttons.add_action')}
                     </button>
                   )}
                 >
-                  {draftRule.actions.length === 0 ? (
-                    <div className="py-1.5 text-[11px] text-app-danger">{t('ruleBuilder.hints.must_have_action')}</div>
-                  ) : (
-                    <div className={`space-y-1.5 ${saving ? 'pointer-events-none opacity-60' : ''}`}>
-                      {draftRule.actions.map((action, index) => (
-                        <ActionEditor
-                          key={index}
-                          action={action}
-                          onChange={(nextAction) => {
-                            const actions = [...draftRule.actions];
-                            actions[index] = nextAction;
-                            setDraftRule({ ...draftRule, actions });
-                          }}
-                          onRemove={() => setDraftRule({
-                            ...draftRule,
-                            actions: draftRule.actions.filter((_, itemIndex) => itemIndex !== index),
-                          })}
-                        />
-                      ))}
-                    </div>
-                  )}
+                  <div className="p-1.5">
+                    {draftRule.actions.length === 0 ? (
+                      <div className="h-7 px-1 flex items-center text-[10px] text-app-danger">
+                        {t('ruleBuilder.hints.must_have_action')}
+                      </div>
+                    ) : (
+                      <div className={`space-y-1 ${saving ? 'pointer-events-none opacity-60' : ''}`}>
+                        {draftRule.actions.map((action, index) => (
+                          <ActionEditor
+                            key={index}
+                            action={action}
+                            onChange={(nextAction) => {
+                              const actions = [...draftRule.actions];
+                              actions[index] = nextAction;
+                              setDraftRule({ ...draftRule, actions });
+                            }}
+                            onRemove={() => setDraftRule({
+                              ...draftRule,
+                              actions: draftRule.actions.filter((_, itemIndex) => itemIndex !== index),
+                            })}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </EditorSection>
 
                 {isTapHold && (
@@ -708,33 +727,37 @@ export const RulesPage: React.FC<RulesPageProps> = ({ mode = 'all' }) => {
                           ...draftRule,
                           holdActions: [...(draftRule.holdActions || []), { type: 'holdLayer', layerId: '' }],
                         })}
-                        className="h-6 px-2 border border-app-border bg-app-bg text-[10px] text-app-primary hover:bg-app-surface disabled:opacity-40"
+                        className="h-5 px-1.5 text-[9px] text-app-primary hover:bg-app-surface disabled:opacity-40"
                       >
                         + {t('ruleBuilder.buttons.add_hold_action')}
                       </button>
                     )}
                   >
-                    {!draftRule.holdActions || draftRule.holdActions.length === 0 ? (
-                      <div className="py-1.5 text-[11px] text-app-muted">{t('ruleBuilder.hints.no_hold_actions')}</div>
-                    ) : (
-                      <div className={`space-y-1.5 ${saving ? 'pointer-events-none opacity-60' : ''}`}>
-                        {draftRule.holdActions.map((action, index) => (
-                          <ActionEditor
-                            key={index}
-                            action={action}
-                            onChange={(nextAction) => {
-                              const holdActions = [...(draftRule.holdActions || [])];
-                              holdActions[index] = nextAction;
-                              setDraftRule({ ...draftRule, holdActions });
-                            }}
-                            onRemove={() => setDraftRule({
-                              ...draftRule,
-                              holdActions: (draftRule.holdActions || []).filter((_, itemIndex) => itemIndex !== index),
-                            })}
-                          />
-                        ))}
-                      </div>
-                    )}
+                    <div className="p-1.5">
+                      {!draftRule.holdActions || draftRule.holdActions.length === 0 ? (
+                        <div className="h-7 px-1 flex items-center text-[10px] text-app-muted">
+                          {t('ruleBuilder.hints.no_hold_actions')}
+                        </div>
+                      ) : (
+                        <div className={`space-y-1 ${saving ? 'pointer-events-none opacity-60' : ''}`}>
+                          {draftRule.holdActions.map((action, index) => (
+                            <ActionEditor
+                              key={index}
+                              action={action}
+                              onChange={(nextAction) => {
+                                const holdActions = [...(draftRule.holdActions || [])];
+                                holdActions[index] = nextAction;
+                                setDraftRule({ ...draftRule, holdActions });
+                              }}
+                              onRemove={() => setDraftRule({
+                                ...draftRule,
+                                holdActions: (draftRule.holdActions || []).filter((_, itemIndex) => itemIndex !== index),
+                              })}
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </EditorSection>
                 )}
               </div>
@@ -745,9 +768,9 @@ export const RulesPage: React.FC<RulesPageProps> = ({ mode = 'all' }) => {
 
       <ConfirmDialog
         open={pendingIntent !== null}
-        title={t('ruleBuilder.unsaved_title', { defaultValue: 'Несохранённые изменения' })}
-        message={t('ruleBuilder.unsaved_message', { defaultValue: 'Отбросить изменения и перейти дальше?' })}
-        confirmLabel={t('ruleBuilder.discard_changes', { defaultValue: 'Отбросить' })}
+        title={t('ruleBuilder.unsaved_title')}
+        message={t('ruleBuilder.unsaved_message')}
+        confirmLabel={t('ruleBuilder.discard_changes')}
         danger
         onCancel={() => setPendingIntent(null)}
         onConfirm={() => {
@@ -759,9 +782,9 @@ export const RulesPage: React.FC<RulesPageProps> = ({ mode = 'all' }) => {
 
       <ConfirmDialog
         open={ruleToDelete !== null}
-        title={t('rules.delete_rule', { defaultValue: 'Удалить правило' })}
-        message={t('rules.confirm_delete', { defaultValue: 'Удалить выбранное правило?' })}
-        confirmLabel={t('profiles_menu.delete_btn', { defaultValue: 'Удалить' })}
+        title={t('rules.delete_rule')}
+        message={t('rules.confirm_delete')}
+        confirmLabel={t('profiles_menu.delete_btn')}
         danger
         onCancel={() => { if (!saving) setRuleToDelete(null); }}
         onConfirm={async () => {
