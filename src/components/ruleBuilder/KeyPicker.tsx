@@ -73,9 +73,9 @@ export function KeyPicker(props: KeyPickerProps): React.ReactElement {
   const emit = (next: KeyChord) => {
     const current = propsRef.current;
     if (typeof current.value === 'number') {
-      current.onChange(next.code);
+      (current.onChange as (code: number) => void)(next.code);
     } else {
-      current.onChange(next);
+      (current.onChange as (chord: KeyChord) => void)(next);
     }
   };
 
