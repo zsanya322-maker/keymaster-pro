@@ -4,7 +4,7 @@ import { Download, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { triggerToast } from '../lib/toast'
 import { useKeyMasterStore } from '../store/keyMasterStore'
-import { useAppStore } from '../stores/app-store'
+import { useAppStore } from '../store/appStore'
 
 type UpdateInfo = Awaited<ReturnType<typeof check>>
 
