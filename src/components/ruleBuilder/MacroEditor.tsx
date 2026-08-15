@@ -290,7 +290,7 @@ export const MacroEditor: React.FC<MacroEditorProps> = ({ steps, onChange }) => 
                 {(step.action.type === 'keyDown' || step.action.type === 'keyUp') && (
                   <KeyPicker
                     value={step.action.code}
-                    onChange={(code) => updateAction(index, { ...step.action, code })}
+                    onChange={(code) => updateAction(index, { type: step.action.type, code })}
                     className="w-full min-w-0 text-left"
                   />
                 )}
@@ -299,7 +299,10 @@ export const MacroEditor: React.FC<MacroEditorProps> = ({ steps, onChange }) => 
                   <select
                     value={step.action.code}
                     disabled={isRecording}
-                    onChange={(event) => updateAction(index, { ...step.action, code: Number.parseInt(event.target.value, 10) || 1 })}
+                    onChange={(event) => updateAction(index, {
+                      type: step.action.type,
+                      code: Number.parseInt(event.target.value, 10) || 1,
+                    })}
                     className={`${inputClass} w-full cursor-pointer`}
                   >
                     <option value="1">{t('ruleBuilder.action_options.mouse_left')}</option>
@@ -317,7 +320,11 @@ export const MacroEditor: React.FC<MacroEditorProps> = ({ steps, onChange }) => 
                       type="number"
                       value={step.action.dx}
                       disabled={isRecording}
-                      onChange={(event) => updateAction(index, { ...step.action, dx: Number.parseInt(event.target.value, 10) || 0 })}
+                      onChange={(event) => updateAction(index, {
+                        type: 'mouseMove',
+                        dx: Number.parseInt(event.target.value, 10) || 0,
+                        dy: step.action.dy,
+                      })}
                       className={`${inputClass} flex-1 min-w-0 text-right font-mono`}
                     />
                     <span className="text-[10px] text-app-muted">dY</span>
@@ -325,7 +332,11 @@ export const MacroEditor: React.FC<MacroEditorProps> = ({ steps, onChange }) => 
                       type="number"
                       value={step.action.dy}
                       disabled={isRecording}
-                      onChange={(event) => updateAction(index, { ...step.action, dy: Number.parseInt(event.target.value, 10) || 0 })}
+                      onChange={(event) => updateAction(index, {
+                        type: 'mouseMove',
+                        dx: step.action.dx,
+                        dy: Number.parseInt(event.target.value, 10) || 0,
+                      })}
                       className={`${inputClass} flex-1 min-w-0 text-right font-mono`}
                     />
                   </>
@@ -338,7 +349,10 @@ export const MacroEditor: React.FC<MacroEditorProps> = ({ steps, onChange }) => 
                       type="number"
                       value={step.action.delta}
                       disabled={isRecording}
-                      onChange={(event) => updateAction(index, { ...step.action, delta: Number.parseInt(event.target.value, 10) || 0 })}
+                      onChange={(event) => updateAction(index, {
+                        type: 'mouseScroll',
+                        delta: Number.parseInt(event.target.value, 10) || 0,
+                      })}
                       className={`${inputClass} w-full text-right font-mono`}
                     />
                   </>
@@ -351,7 +365,11 @@ export const MacroEditor: React.FC<MacroEditorProps> = ({ steps, onChange }) => 
                       type="number"
                       value={step.action.x}
                       disabled={isRecording}
-                      onChange={(event) => updateAction(index, { ...step.action, x: Number.parseInt(event.target.value, 10) || 0 })}
+                      onChange={(event) => updateAction(index, {
+                        type: 'mouseToAbsolute',
+                        x: Number.parseInt(event.target.value, 10) || 0,
+                        y: step.action.y,
+                      })}
                       className={`${inputClass} flex-1 min-w-0 text-right font-mono`}
                     />
                     <span className="text-[10px] text-app-muted">Y</span>
@@ -359,7 +377,11 @@ export const MacroEditor: React.FC<MacroEditorProps> = ({ steps, onChange }) => 
                       type="number"
                       value={step.action.y}
                       disabled={isRecording}
-                      onChange={(event) => updateAction(index, { ...step.action, y: Number.parseInt(event.target.value, 10) || 0 })}
+                      onChange={(event) => updateAction(index, {
+                        type: 'mouseToAbsolute',
+                        x: step.action.x,
+                        y: Number.parseInt(event.target.value, 10) || 0,
+                      })}
                       className={`${inputClass} flex-1 min-w-0 text-right font-mono`}
                     />
                   </>
