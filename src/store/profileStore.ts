@@ -81,6 +81,22 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
   },
 
   deleteProfile: async (id) => {
+    const state = get()
+    const profile = state.profiles.find(item => item.id === id)
+
+    if (!profile) {
+      triggerToast('Профиль для удаления не найден', 'error')
+      return false
+    }
+    if (profile.isDefault) {
+      triggerToast('Профиль по умолчанию нельзя удалить', 'warning')
+      return false
+    }
+    if (state.activeProfileId === id) {
+      triggerToast('Сначала переключитесь на другой профиль, затем удалите этот', 'warning')
+      return false
+    }
+
     try {
       await invoke('ipc_call', { method: 'profile.delete', params: { id } })
       return await get().loadProfiles()
