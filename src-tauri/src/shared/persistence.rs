@@ -20,7 +20,7 @@ use crate::shared::types::Profile;
 /// `schemaVersion` хранится в JSON на границе persistence и не входит в
 /// runtime-структуру `Profile`, поэтому существующий IPC/frontend контракт
 /// остаётся совместимым.
-pub const PROFILE_SCHEMA_VERSION: u32 = 1;
+pub const PROFILE_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone)]
 struct LoadedProfile {
@@ -91,10 +91,48 @@ fn migrate_profile_value(mut value: Value) -> Result<(Value, bool), String> {
     while version < PROFILE_SCHEMA_VERSION {
         match version {
             0 => {
-                // v0 -> v1: существующие данные не преобразуются — добавляется
-                // только явная версия схемы.
+                // v0 -> v1: историческая миграция — только явная версия схемы.
                 object.insert("schemaVersion".to_string(), json!(1));
                 version = 1;
+            }
+            1 => {
+                // v1 -> v2: rule model v2. Старые single-key правила остаются
+                // семантически теми же, но получают modifiers=0 и tree metadata.
+                object.entry("folders".to_string()).or_insert_with(|| json!([]));
+
+                if let Some(rules) = object.get_mut("rules").and_then(Value::as_array_mut) {
+                    for (index, rule) in rules.iter_mut().enumerate() {
+                        let Some(rule_obj) = rule.as_object_mut() else { continue; };
+                        rule_obj.entry("enabled".to_string()).or_insert_with(|| json!(true));
+                        rule_obj.entry("folderId".to_string()).or_insert(Value::Null);
+                        rule_obj.entry("order".to_string()).or_insert_with(|| json!(index as i32));
+
+                        if let Some(trigger) = rule_obj.get_mut("trigger").and_then(Value::as_object_mut) {
+                            let is_keyboard = matches!(
+                                trigger.get("type").and_then(Value::as_str),
+                                Some("keyDown" | "keyUp")
+                            );
+                            if is_keyboard {
+                                trigger.entry("modifiers".to_string()).or_insert_with(|| json!(0));
+                            }
+                        }
+
+                        for action_field in ["actions", "holdActions"] {
+                            let Some(actions) = rule_obj.get_mut(action_field).and_then(Value::as_array_mut) else {
+                                continue;
+                            };
+                            for action in actions {
+                                let Some(action_obj) = action.as_object_mut() else { continue; };
+                                if action_obj.get("type").and_then(Value::as_str) == Some("remapKey") {
+                                    action_obj.entry("modifiers".to_string()).or_insert_with(|| json!(0));
+                                }
+                            }
+                        }
+                    }
+                }
+
+                object.insert("schemaVersion".to_string(), json!(2));
+                version = 2;
             }
             other => return Err(format!("Нет миграции для версии профиля {}", other)),
         }
@@ -192,6 +230,7 @@ fn recovery_profile(id: &str) -> Profile {
         linked_apps: vec![],
         rules: vec![],
         layers: vec![],
+        folders: vec![],
     }
 }
 

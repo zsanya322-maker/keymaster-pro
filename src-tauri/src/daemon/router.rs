@@ -77,6 +77,7 @@ pub async fn dispatch(
                     linked_apps: vec![],
                     rules: vec![],
                     layers: vec![],
+                    folders: vec![],
                 };
                 crate::shared::persistence::save_profile(&default_prof)?;
                 ids.push("1".to_string());
@@ -156,6 +157,7 @@ pub async fn dispatch(
                     linked_apps: input.linked_apps.unwrap_or_default(),
                     rules: vec![],
                     layers: vec![],
+                    folders: vec![],
                 };
 
                 crate::shared::persistence::save_profile(&prof)?;
@@ -256,17 +258,21 @@ pub async fn dispatch(
 
                 modify_profile(&active_id, state, |prof| {
                     use crate::schemas::frontend::{
-                        FrontendAction, FrontendRule, FrontendTrigger, MacroAction, MacroStep,
+                        FrontendAction, FrontendRule, FrontendTrigger, KeyChord, MacroAction,
+                        MacroStep,
                     };
                     let new_rule = match example_type {
                         "remap" => FrontendRule {
                             id: uuid::Uuid::new_v4().to_string(),
                             name: Some("Caps Lock -> Backspace".to_string()),
-                            trigger: FrontendTrigger::KeyDown { code: 20 }, // VK_CAPITAL (Caps Lock)
-                            actions: vec![FrontendAction::RemapKey { code: 8 }], // VK_BACK (Backspace)
+                            trigger: FrontendTrigger::KeyDown { chord: KeyChord::single(20) }, // VK_CAPITAL
+                            actions: vec![FrontendAction::RemapKey { chord: KeyChord::single(8) }], // VK_BACK
                             hold_actions: None,
                             conditions: vec![],
                             priority: 10,
+                            enabled: true,
+                            folder_id: None,
+                            order: prof.rules.len() as i32,
                         },
                         "expansion" => FrontendRule {
                             id: uuid::Uuid::new_v4().to_string(),
@@ -280,11 +286,14 @@ pub async fn dispatch(
                             hold_actions: None,
                             conditions: vec![],
                             priority: 10,
+                            enabled: true,
+                            folder_id: None,
+                            order: prof.rules.len() as i32,
                         },
                         "macro" => FrontendRule {
                             id: uuid::Uuid::new_v4().to_string(),
                             name: Some("Demo Macro".to_string()),
-                            trigger: FrontendTrigger::KeyDown { code: 123 }, // F12
+                            trigger: FrontendTrigger::KeyDown { chord: KeyChord::single(123) }, // F12
                             actions: vec![FrontendAction::RunMacro {
                                 steps: vec![
                                     MacroStep {
@@ -308,6 +317,9 @@ pub async fn dispatch(
                             hold_actions: None,
                             conditions: vec![],
                             priority: 10,
+                            enabled: true,
+                            folder_id: None,
+                            order: prof.rules.len() as i32,
                         },
                         _ => unreachable!(),
                     };
@@ -449,12 +461,33 @@ pub async fn dispatch(
                     .store(active, std::sync::atomic::Ordering::Relaxed);
                 // Сбрасываем предыдущий захваченный код при включении/выключении,
                 // чтобы GUI не подхватило «залежавшееся» значение.
+                if let Ok(mut captured) = s.last_captured_key.lock() {
+                    *captured = None;
+                }
                 if let Ok(mut captured) = s.last_captured_mouse.lock() {
                     *captured = None;
                 }
                 Ok(json!({ "success": true, "active": active }))
             } else {
                 Err("Missing parameters".into())
+            }
+        }
+
+        "keycapture.get_captured_key" => {
+            let chord = {
+                let s = state.read().map_err(|_| "Failed to lock state")?;
+                if !s.key_capture_active.load(std::sync::atomic::Ordering::Relaxed) {
+                    return Ok(json!({ "code": 0, "modifiers": 0 }));
+                }
+                let mut captured = s
+                    .last_captured_key
+                    .lock()
+                    .map_err(|_| "Failed to lock last_captured_key")?;
+                captured.take()
+            };
+            match chord {
+                Some(chord) => Ok(json!({ "code": chord.code, "modifiers": chord.modifiers })),
+                None => Ok(json!({ "code": 0, "modifiers": 0 })),
             }
         }
 

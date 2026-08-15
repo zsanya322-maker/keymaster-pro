@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::{LazyLock, Mutex, RwLockReadGuard};
+use std::sync::{atomic::{AtomicU16, Ordering}, LazyLock, Mutex, RwLockReadGuard};
 use std::time::Instant;
 
 use tracing::error;
@@ -7,6 +7,7 @@ use tracing::error;
 use crate::context::AppContext;
 use crate::daemon::state::DaemonStateRef;
 use crate::schemas::engine::{EngineAction, EngineCondition, SimulatorCommand};
+use crate::schemas::frontend::key_modifiers;
 use crate::shared::calculate_hash;
 
 /// Тип результата обработки события
@@ -44,6 +45,137 @@ pub struct PendingTapHold {
 pub static PENDING_TAP_HOLDS: LazyLock<Mutex<HashMap<u8, PendingTapHold>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
+static PHYSICAL_MODIFIERS: AtomicU16 = AtomicU16::new(0);
+static ACTIVE_COMBO_ACTIONS: LazyLock<Mutex<HashMap<u8, Vec<EngineAction>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+pub fn modifier_bit_for_vk(vk: u8) -> u16 {
+    match vk {
+        0xA2 => key_modifiers::LCTRL,
+        0xA3 => key_modifiers::RCTRL,
+        0xA4 => key_modifiers::LALT,
+        0xA5 => key_modifiers::RALT,
+        0xA0 => key_modifiers::LSHIFT,
+        0xA1 => key_modifiers::RSHIFT,
+        0x5B => key_modifiers::LWIN,
+        0x5C => key_modifiers::RWIN,
+        0x11 => key_modifiers::CTRL,
+        0x12 => key_modifiers::ALT,
+        0x10 => key_modifiers::SHIFT,
+        _ => 0,
+    }
+}
+
+pub fn is_modifier_vk(vk: u8) -> bool {
+    modifier_bit_for_vk(vk) != 0
+}
+
+/// Update physical modifier state and return the modifier snapshot that belongs
+/// to this event. For a modifier key itself, its own bit is excluded so legacy
+/// single-modifier rules still behave like an ordinary key trigger.
+pub fn update_modifier_state(vk: u8, is_down: bool) -> u16 {
+    let bit = modifier_bit_for_vk(vk);
+    if bit == 0 {
+        return PHYSICAL_MODIFIERS.load(Ordering::Relaxed) & key_modifiers::ALL;
+    }
+
+    if is_down {
+        let before = PHYSICAL_MODIFIERS.fetch_or(bit, Ordering::Relaxed);
+        before & key_modifiers::ALL
+    } else {
+        let before = PHYSICAL_MODIFIERS.fetch_and(!bit, Ordering::Relaxed);
+        (before & !bit) & key_modifiers::ALL
+    }
+}
+
+pub fn reset_modifier_state() {
+    PHYSICAL_MODIFIERS.store(0, Ordering::Relaxed);
+    if let Ok(mut active) = ACTIVE_COMBO_ACTIONS.lock() {
+        active.clear();
+    }
+}
+
+fn family_matches(required: u16, actual: u16, generic: u16, left: u16, right: u16) -> bool {
+    let req_generic = required & generic != 0;
+    let req_sides = required & (left | right);
+    let actual_family = actual & (generic | left | right);
+
+    if req_generic {
+        return actual_family != 0;
+    }
+    if req_sides != 0 {
+        return actual_family & req_sides == req_sides
+            && actual_family & (left | right) & !req_sides == 0
+            && actual_family & generic == 0;
+    }
+    actual_family == 0
+}
+
+fn modifiers_match(required: u16, actual: u16) -> bool {
+    let required = required & key_modifiers::ALL;
+    let actual = actual & key_modifiers::ALL;
+    family_matches(required, actual, key_modifiers::CTRL, key_modifiers::LCTRL, key_modifiers::RCTRL)
+        && family_matches(required, actual, key_modifiers::ALT, key_modifiers::LALT, key_modifiers::RALT)
+        && family_matches(required, actual, key_modifiers::SHIFT, key_modifiers::LSHIFT, key_modifiers::RSHIFT)
+        && family_matches(required, actual, key_modifiers::WIN, key_modifiers::LWIN, key_modifiers::RWIN)
+}
+
+fn modifier_vks(mask: u16) -> Vec<u8> {
+    let mut result = Vec::with_capacity(4);
+    if mask & key_modifiers::CTRL != 0 { result.push(0xA2); }
+    else {
+        if mask & key_modifiers::LCTRL != 0 { result.push(0xA2); }
+        if mask & key_modifiers::RCTRL != 0 { result.push(0xA3); }
+    }
+    if mask & key_modifiers::ALT != 0 { result.push(0xA4); }
+    else {
+        if mask & key_modifiers::LALT != 0 { result.push(0xA4); }
+        if mask & key_modifiers::RALT != 0 { result.push(0xA5); }
+    }
+    if mask & key_modifiers::SHIFT != 0 { result.push(0xA0); }
+    else {
+        if mask & key_modifiers::LSHIFT != 0 { result.push(0xA0); }
+        if mask & key_modifiers::RSHIFT != 0 { result.push(0xA1); }
+    }
+    if mask & key_modifiers::WIN != 0 { result.push(0x5B); }
+    else {
+        if mask & key_modifiers::LWIN != 0 { result.push(0x5B); }
+        if mask & key_modifiers::RWIN != 0 { result.push(0x5C); }
+    }
+    result
+}
+
+fn send_atomic_chord(
+    simulator: &crate::simulator::SimulatorSender,
+    code: u8,
+    modifiers: u16,
+) {
+    let physical = PHYSICAL_MODIFIERS.load(Ordering::Relaxed) & key_modifiers::ALL;
+    let physical_vks = modifier_vks(physical);
+    let output_vks = modifier_vks(modifiers & key_modifiers::ALL);
+
+    // Neutralize the physical trigger modifiers so Ctrl+Shift+F2 -> Alt+Tab
+    // does not accidentally become Ctrl+Shift+Alt+Tab in the foreground app.
+    for vk in physical_vks.iter().rev() {
+        let _ = simulator.send(SimulatorCommand::ReleaseKey(*vk));
+    }
+    for vk in &output_vks {
+        let _ = simulator.send(SimulatorCommand::PressKey(*vk));
+    }
+    if code != 0 {
+        let _ = simulator.send(SimulatorCommand::PressKey(code));
+        let _ = simulator.send(SimulatorCommand::ReleaseKey(code));
+    }
+    for vk in output_vks.iter().rev() {
+        let _ = simulator.send(SimulatorCommand::ReleaseKey(*vk));
+    }
+    // Restore the OS-visible modifier state to the keys that are still
+    // physically held. Injected events are ignored by our LL hook.
+    for vk in &physical_vks {
+        let _ = simulator.send(SimulatorCommand::PressKey(*vk));
+    }
+}
+
 fn check_conditions(conditions: &[EngineCondition], ctx: &crate::context::AppContext) -> bool {
     for cond in conditions {
         match cond {
@@ -53,7 +185,9 @@ fn check_conditions(conditions: &[EngineCondition], ctx: &crate::context::AppCon
                 }
             }
             EngineCondition::VirtualDesktop { .. } => {
-                // Not implemented yet. Не расширяем функциональность в v0.3 UI/stability.
+                // Defensive fail-closed. The compiler currently converts legacy
+                // VirtualDesktop conditions to an impossible WindowMatch too.
+                return false;
             }
             EngineCondition::WindowMatch {
                 process_hash,
@@ -107,11 +241,18 @@ fn execute_actions(
     ctx_arc: &std::sync::Arc<std::sync::RwLock<crate::context::AppContext>>,
     is_down: bool,
     state: Option<&DaemonStateRef>,
+    trigger_modifiers: u16,
 ) -> EventAction {
     for action in actions {
         match action {
-            EngineAction::RemapKey { code } => {
-                if is_down {
+            EngineAction::RemapKey { code, modifiers } => {
+                // Chord remaps are emitted atomically. Legacy single-key -> single-key
+                // remaps keep their down/up lifecycle and therefore preserve hold/repeat.
+                if trigger_modifiers != 0 || *modifiers != 0 {
+                    if is_down {
+                        send_atomic_chord(simulator, *code, *modifiers);
+                    }
+                } else if is_down {
                     let _ = simulator.send(SimulatorCommand::PressKey(*code));
                 } else {
                     let _ = simulator.send(SimulatorCommand::ReleaseKey(*code));
@@ -290,7 +431,7 @@ pub fn tick_tap_holds(state: Option<&DaemonStateRef>) {
             if let Some(simulator) = &s.simulator {
                 if let Some(ctx_state) = crate::trackers::context_tracker::get_context() {
                     for actions in to_trigger_hold {
-                        execute_actions(&actions, simulator, &ctx_state, true, Some(state_ref));
+                        execute_actions(&actions, simulator, &ctx_state, true, Some(state_ref), 0);
                     }
                 }
             }
@@ -303,6 +444,7 @@ pub fn process_keyboard_event(
     _scan_code: u16,
     is_key_down: bool,
     _flags: u32,
+    event_modifiers: u16,
     state: Option<&DaemonStateRef>,
 ) -> EventAction {
     let state_ref = match state {
@@ -388,8 +530,8 @@ pub fn process_keyboard_event(
                         let _ = simulator.send(SimulatorCommand::ReleaseKey(0x08));
                     }
 
-                    execute_actions(&rule.actions, simulator, &ctx_arc, true, state);
-                    execute_actions(&rule.actions, simulator, &ctx_arc, false, state);
+                    execute_actions(&rule.actions, simulator, &ctx_arc, true, state, 0);
+                    execute_actions(&rule.actions, simulator, &ctx_arc, false, state, 0);
 
                     return EventAction::Block;
                 }
@@ -413,7 +555,7 @@ pub fn process_keyboard_event(
             }
         }
         for actions in early_trigger {
-            execute_actions(&actions, simulator, &ctx_arc, true, state);
+            execute_actions(&actions, simulator, &ctx_arc, true, state, 0);
         }
 
         if let Some(rules) = engine_schema.tap_hold_map.get(&vk_code) {
@@ -454,11 +596,27 @@ pub fn process_keyboard_event(
         }
 
         if let Some(actions) = tap_actions {
-            execute_actions(&actions, simulator, &ctx_arc, true, state);
-            execute_actions(&actions, simulator, &ctx_arc, false, state);
+            execute_actions(&actions, simulator, &ctx_arc, true, state, 0);
+            execute_actions(&actions, simulator, &ctx_arc, false, state, 0);
             return EventAction::Block;
         } else if let Some(actions) = hold_actions {
-            execute_actions(&actions, simulator, &ctx_arc, false, state);
+            execute_actions(&actions, simulator, &ctx_arc, false, state, 0);
+            return EventAction::Block;
+        }
+    }
+
+    // If a modifier-combo rule matched on key-down, its release must run even
+    // when the user releases Ctrl/Alt/Shift/Win before the primary key. This is
+    // especially important for HoldLayer actions.
+    if !is_key_down {
+        if let Ok(mut active) = ACTIVE_COMBO_ACTIONS.lock() {
+            if let Some(actions) = active.remove(&vk_code) {
+                drop(active);
+                return execute_actions(&actions, simulator, &ctx_arc, false, state, 0);
+            }
+        }
+    } else if let Ok(active) = ACTIVE_COMBO_ACTIONS.lock() {
+        if active.contains_key(&vk_code) {
             return EventAction::Block;
         }
     }
@@ -468,9 +626,25 @@ pub fn process_keyboard_event(
             return EventAction::PassThrough;
         };
         for rule in rules {
-            if check_conditions(&rule.conditions, &ctx) {
+            if modifiers_match(rule.required_modifiers, event_modifiers)
+                && check_conditions(&rule.conditions, &ctx)
+            {
+                let actions = rule.actions.clone();
+                let required_modifiers = rule.required_modifiers;
                 drop(ctx);
-                return execute_actions(&rule.actions, simulator, &ctx_arc, is_key_down, state);
+                if is_key_down && required_modifiers != 0 {
+                    if let Ok(mut active) = ACTIVE_COMBO_ACTIONS.lock() {
+                        active.insert(vk_code, actions.clone());
+                    }
+                }
+                return execute_actions(
+                    &actions,
+                    simulator,
+                    &ctx_arc,
+                    is_key_down,
+                    state,
+                    required_modifiers,
+                );
             }
         }
     }
@@ -526,7 +700,7 @@ pub fn process_mouse_event(
         for rule in rules {
             if check_conditions(&rule.conditions, &ctx) {
                 drop(ctx);
-                return execute_actions(&rule.actions, simulator, &ctx_arc, is_down, state);
+                return execute_actions(&rule.actions, simulator, &ctx_arc, is_down, state, 0);
             }
         }
     }

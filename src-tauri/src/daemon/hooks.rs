@@ -84,6 +84,7 @@ pub fn install_hooks(state: DaemonStateRef) -> Result<HookHandles, String> {
 pub fn uninstall_hooks() {
     KB_HOOK_INSTALLED.store(false, Ordering::SeqCst);
     MOUSE_HOOK_INSTALLED.store(false, Ordering::SeqCst);
+    engine::reset_modifier_state();
     info!("Хуки деинсталлированы");
 }
 
@@ -190,6 +191,7 @@ extern "system" fn keyboard_hook_callback(
     let scan_code = kb_struct.scanCode as u16;
     let is_key_down = wparam.0 == WM_KEYDOWN as usize
         || wparam.0 == WM_SYSKEYDOWN as usize;
+    let event_modifiers = engine::update_modifier_state(vk_code, is_key_down);
 
     tracing::debug!("Keyboard hook: vkCode={}, scanCode={}, is_key_down={}", vk_code, scan_code, is_key_down);
 
@@ -197,12 +199,24 @@ extern "system" fn keyboard_hook_callback(
 
     if let Some(s_ref) = state_ref {
         if let Ok(s) = s_ref.read() {
-            // Режим захвата клавиши для KeyPicker: пропускаем клавишу мимо engine,
-            // чтобы GUI мог её записать даже если правило её блокирует.
-            // F12 (служебная клавиша записи макроса) здесь не фильтруем —
-            // её перехватываем ниже как обычно.
-            if s.key_capture_active.load(Ordering::Relaxed) && vk_code != 0x7B {
-                return unsafe { CallNextHookEx(None, code, wparam, lparam) };
+            // Daemon-side chord capture. We block keyboard events while listening
+            // so Win/Alt combinations can be recorded without launching Windows UI or
+            // switching apps before KeyPicker receives the chord.
+            if s.key_capture_active.load(Ordering::Relaxed) {
+                if is_key_down && !engine::is_modifier_vk(vk_code) {
+                    let captured = if vk_code == 0x1B {
+                        crate::schemas::frontend::KeyChord::single(0)
+                    } else {
+                        crate::schemas::frontend::KeyChord {
+                            code: vk_code,
+                            modifiers: event_modifiers,
+                        }
+                    };
+                    if let Ok(mut slot) = s.last_captured_key.lock() {
+                        *slot = Some(captured);
+                    }
+                }
+                return LRESULT(1);
             }
 
             // Перехват F12 для запуска / остановки записи макроса
@@ -268,6 +282,7 @@ extern "system" fn keyboard_hook_callback(
         scan_code,
         is_key_down,
         flags.0,
+        event_modifiers,
         state_ref,
     );
 
