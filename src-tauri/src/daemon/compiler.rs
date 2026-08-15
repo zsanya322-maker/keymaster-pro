@@ -136,8 +136,6 @@ fn compile_action(a: &FrontendAction) -> EngineAction {
         FrontendAction::WindowAction { action } => EngineAction::WindowAction { action: action.clone() },
         FrontendAction::LaunchApp { path } => EngineAction::LaunchApp { path: path.clone() },
         FrontendAction::FocusProcess { process, title } => {
-            // Чистим и фильтруем пустые поля: None вместо пустых строк,
-            // чтобы engine корректно искал по ИЛИ.
             let clean_process = process
                 .as_deref()
                 .map(|p| crate::shared::clean_process_name(p))
@@ -159,13 +157,14 @@ fn compile_action(a: &FrontendAction) -> EngineAction {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::schemas::frontend::{FrontendConfig, FrontendRule, FrontendTrigger, FrontendAction};
+    use crate::schemas::frontend::{FrontendAction, FrontendConfig, FrontendRule, FrontendTrigger};
 
     #[test]
     fn test_compile_schema_distribution() {
         let rules = vec![
             FrontendRule {
                 id: "1".into(),
+                name: None,
                 priority: 10,
                 trigger: FrontendTrigger::KeyDown { code: 0x41 },
                 conditions: vec![],
@@ -174,6 +173,7 @@ mod tests {
             },
             FrontendRule {
                 id: "2".into(),
+                name: None,
                 priority: 20,
                 trigger: FrontendTrigger::KeyDown { code: 0x41 },
                 conditions: vec![],
@@ -182,6 +182,7 @@ mod tests {
             },
             FrontendRule {
                 id: "3".into(),
+                name: None,
                 priority: 15,
                 trigger: FrontendTrigger::MouseDown { code: 1 },
                 conditions: vec![],
@@ -190,6 +191,7 @@ mod tests {
             },
             FrontendRule {
                 id: "4".into(),
+                name: None,
                 priority: 5,
                 trigger: FrontendTrigger::TapHoldKeyDown { code: 0x20, timeout_ms: 200 },
                 conditions: vec![],
@@ -198,6 +200,7 @@ mod tests {
             },
             FrontendRule {
                 id: "5".into(),
+                name: None,
                 priority: 1,
                 trigger: FrontendTrigger::TypedText { sequence: "test".into() },
                 conditions: vec![],
