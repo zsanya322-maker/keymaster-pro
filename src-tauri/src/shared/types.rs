@@ -17,6 +17,9 @@ pub struct Profile {
 #[serde(rename_all = "camelCase", default)]
 pub struct AppConfig {
     pub language: String,
+    /// False for legacy configs that predate explicit locale tracking. The GUI
+    /// then chooses ru/en from the Windows/WebView locale once and persists it.
+    pub language_user_selected: bool,
     pub theme: String,
     pub autostart: bool,
     pub minimize_to_tray: bool,
@@ -38,6 +41,7 @@ impl Default for AppConfig {
     fn default() -> Self {
         Self {
             language: "ru".to_string(),
+            language_user_selected: false,
             theme: "light".to_string(),
             autostart: false,
             minimize_to_tray: true,
