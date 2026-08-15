@@ -18,7 +18,7 @@ fn profile_exists(id: &str) -> Result<bool, String> {
 
 fn default_profile_id() -> Result<Option<String>, String> {
     for id in crate::shared::persistence::list_profiles()? {
-        if let Ok(profile) = crate::shared::persistence::load_profile(&id) {
+        if let Ok(profile) = crate::shared::persistence::load_profile_checked(&id) {
             if profile.is_default {
                 return Ok(Some(id));
             }
@@ -44,12 +44,14 @@ fn update_active_profile_runtime(
     Ok(())
 }
 
-/// Helper function to load, modify, save, and update the active profile in DaemonState
+/// Helper function to load, modify, save, and update the active profile in DaemonState.
+/// Recovery placeholders are intentionally rejected here: a broken source is
+/// visible in profile.list but can never be edited into a new empty profile.
 fn modify_profile<F>(profile_id: &str, state: &DaemonStateRef, f: F) -> Result<(), String>
 where
     F: FnOnce(&mut crate::shared::types::Profile),
 {
-    let mut profile = crate::shared::persistence::load_profile(profile_id)?;
+    let mut profile = crate::shared::persistence::load_profile_checked(profile_id)?;
     f(&mut profile);
     crate::shared::persistence::save_profile(&profile)?;
     update_active_profile_runtime(profile, state)
@@ -81,6 +83,8 @@ pub async fn dispatch(
             }
             let mut list = Vec::new();
             for id in ids {
+                // Deliberately use recovery-capable load here: damaged files
+                // must remain visible to the user as "Ошибка загрузки" entries.
                 if let Ok(prof) = crate::shared::persistence::load_profile(&id) {
                     list.push(prof);
                 }
@@ -97,7 +101,7 @@ pub async fn dispatch(
                 .and_then(|v| v.get("id"))
                 .and_then(|i| i.as_str())
                 .unwrap_or("");
-            let profile = crate::shared::persistence::load_profile(id)?;
+            let profile = crate::shared::persistence::load_profile_checked(id)?;
 
             // Persist first. If config.json cannot be updated, do not switch only
             // the in-memory engine and then silently revert after next restart.
@@ -173,9 +177,8 @@ pub async fn dispatch(
                 }
 
                 // isDefault is a protected identity flag, not an ordinary editable
-                // field. Otherwise a direct IPC save could remove the only default
-                // or promote a second profile to default.
-                let existing = crate::shared::persistence::load_profile(&prof.id)?;
+                // field. Checked load also prevents saving over a recovery placeholder.
+                let existing = crate::shared::persistence::load_profile_checked(&prof.id)?;
                 if existing.is_default != prof.is_default {
                     return Err(format!(
                         "Флаг профиля по умолчанию для '{}' нельзя менять через profile.save",
@@ -192,8 +195,9 @@ pub async fn dispatch(
         }
         "profile.import" => {
             if let Some(p) = params {
-                let mut prof: crate::shared::types::Profile =
-                    serde_json::from_value(p).map_err(|e| e.to_string())?;
+                // Import is schema-aware: legacy v0 is accepted/migrated in memory,
+                // future or malformed schema is rejected before anything reaches disk.
+                let mut prof = crate::shared::persistence::import_profile_value(p)?;
                 if profile_exists(&prof.id)? {
                     return Err(format!(
                         "Профиль с ID '{}' уже существует; импорт не может перезаписывать существующий профиль",
@@ -220,6 +224,8 @@ pub async fn dispatch(
                 .and_then(|v| v.get("id"))
                 .and_then(|i| i.as_str())
                 .unwrap_or("");
+            // Recovery-capable load is intentional here: a broken *inactive*
+            // profile may be deleted after persistence creates its mandatory backup.
             let profile = crate::shared::persistence::load_profile(id)?;
             if profile.is_default {
                 return Err("Профиль по умолчанию нельзя удалить".to_string());
