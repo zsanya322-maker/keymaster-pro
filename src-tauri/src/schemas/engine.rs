@@ -53,7 +53,7 @@ pub enum EngineCondition {
     },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum SimulatorCommand {
     PressKey(u8),
     ReleaseKey(u8),
@@ -64,6 +64,9 @@ pub enum SimulatorCommand {
     MouseMove { dx: i32, dy: i32 },
     MouseScroll { delta: i32 },
     MouseAbsolute { x: i32, y: i32 },
+    /// Re-assert only source modifiers that are still physically held when the
+    /// command executes. Used at the end of asynchronous macro jobs.
+    RestorePhysicalModifiers { mask: u16 },
 }
 
 #[derive(Debug, Clone)]
