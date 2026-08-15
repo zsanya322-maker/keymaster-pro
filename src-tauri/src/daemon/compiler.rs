@@ -181,7 +181,12 @@ fn compile_mouse_move_rule(
         min_distance: min_distance.max(1),
         cooldown_ms,
         conditions: rule.conditions.iter().map(compile_condition).collect(),
-        actions: rule.actions.iter().map(compile_action).collect(),
+        actions: rule
+            .actions
+            .iter()
+            .enumerate()
+            .map(|(index, action)| compile_action(action, macro_action_key(&rule.id, false, index)))
+            .collect(),
     }
 }
 
