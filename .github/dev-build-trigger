@@ -1,1 +1,1 @@
-checkpoint-4: guarded native exits, atomic config, deterministic daemon restart, classic dialogs
+checkpoint-5: single GUI instance, graceful daemon lifecycle, safe UAC handoff, config flush
