@@ -5,8 +5,8 @@
 ///
 /// Protocol: Newline-delimited JSON (one JSON line + \n per message).
 
-use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
 use tracing::{info, warn};
 
 use crate::daemon::state::DaemonStateRef;
@@ -16,29 +16,44 @@ use super::ipc_types::*;
 
 /// Start the IPC server.
 ///
-/// Creates named pipe and serves connections in a loop.
+/// Первый pipe instance создаётся с FILE_FLAG_FIRST_PIPE_INSTANCE. Это делает
+/// имя pipe межпроцессным single-owner lock: второй daemon не может тихо
+/// установить второй комплект глобальных hooks и обслуживать тот же IPC name.
 pub async fn start_ipc_server(state: DaemonStateRef) -> Result<(), String> {
     let pipe_path = constants::IPC_PIPE_NAME;
     info!("IPC сервер запускается на {}", pipe_path);
 
+    let mut first_instance = true;
+
     loop {
-        // Create new pipe instance
-        let server = match ServerOptions::new()
-            .first_pipe_instance(false)
+        let mut options = ServerOptions::new();
+        options
+            .first_pipe_instance(first_instance)
             .max_instances(16)
             .out_buffer_size(65536)
-            .in_buffer_size(65536)
-            .create(pipe_path)
-        {
-            Ok(s) => s,
+            .in_buffer_size(65536);
+
+        let server = match options.create(pipe_path) {
+            Ok(server) => {
+                if first_instance {
+                    info!("IPC: first pipe instance acquired exclusively");
+                    first_instance = false;
+                }
+                server
+            }
+            Err(e) if first_instance => {
+                return Err(format!(
+                    "Не удалось получить first Named Pipe instance '{}': {}. Вероятно, другой daemon уже запущен.",
+                    pipe_path, e
+                ));
+            }
             Err(e) => {
-                warn!("Failed to create Named Pipe: {}. Retrying in 100ms...", e);
+                warn!("Failed to create next Named Pipe instance: {}. Retrying in 100ms...", e);
                 tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                 continue;
             }
         };
 
-        // Wait for client connection
         info!("IPC: waiting for client connection...");
         if let Err(e) = server.connect().await {
             warn!("Connection error: {}. Retrying in 50ms...", e);
@@ -47,7 +62,6 @@ pub async fn start_ipc_server(state: DaemonStateRef) -> Result<(), String> {
         }
         info!("IPC: client connected");
 
-        // Handle client in a separate task
         let state = state.clone();
         tokio::spawn(async move {
             if let Err(e) = handle_client(server, state).await {
@@ -318,6 +332,8 @@ async fn handle_get_status(state: &DaemonStateRef) -> Result<serde_json::Value, 
 
     Ok(serde_json::json!({
         "running": s.running,
+        "pid": std::process::id(),
+        "version": env!("CARGO_PKG_VERSION"),
         "hooks_installed": s.hooks_installed,
         "kb_hook_enabled": s.kb_hook_enabled,
         "mouse_hook_enabled": s.mouse_hook_enabled,
@@ -448,7 +464,6 @@ async fn handle_update_config(
         data: None,
     })?;
 
-    // Load current config
     let mut config = crate::shared::config::load_config().map_err(|e| JsonRpcError {
         code: INTERNAL_ERROR,
         message: format!("Failed to load config: {}", e),
@@ -457,7 +472,6 @@ async fn handle_update_config(
 
     let old_timeout = config.tap_hold_timeout_ms;
 
-    // Apply updates
     if let Some(lang) = obj.get("language").and_then(|v| v.as_str()) {
         config.language = lang.to_string();
     }
@@ -516,20 +530,17 @@ async fn handle_update_config(
         config.row_padding = row_padding as u32;
     }
 
-    // Save config
     crate::shared::config::save_config(&config).map_err(|e| JsonRpcError {
         code: INTERNAL_ERROR,
         message: format!("Failed to save config: {}", e),
         data: None,
     })?;
 
-    // Update daemon state
     if let Ok(mut s) = state.write() {
         s.kb_hook_enabled = config.kb_hook_enabled;
         s.mouse_hook_enabled = config.mouse_hook_enabled;
         s.restore_mouse_after_macro = config.restore_mouse_after_macro;
 
-        // If tap_hold_timeout_ms changed, recompile schema
         if config.tap_hold_timeout_ms != old_timeout {
             if let Some(ref prof) = s.active_profile {
                 let frontend_config = crate::schemas::frontend::FrontendConfig {
