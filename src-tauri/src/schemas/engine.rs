@@ -22,6 +22,8 @@ impl Default for EngineSchema {
 #[derive(Debug, Clone)]
 pub struct CompiledRule {
     pub priority: i32,
+    /// Keyboard-only modifier requirement. Non-keyboard rules keep this at 0.
+    pub required_modifiers: u16,
     pub conditions: Vec<EngineCondition>,
     pub actions: Vec<EngineAction>,
 }
@@ -62,7 +64,7 @@ pub enum SimulatorCommand {
 
 #[derive(Debug, Clone)]
 pub enum EngineAction {
-    RemapKey { code: u8 },
+    RemapKey { code: u8, modifiers: u16 },
     RemapMouse { code: u8 },
     TypeText { text: String },
     MacroCommands { commands: Vec<SimulatorCommand> },
