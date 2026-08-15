@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Check, ChevronRight, Keyboard, PlaySquare, Shield, Type } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { invoke } from '../lib/ipc'
-import { useAppStore } from '../stores/app-store'
+import { useAppStore } from '../store/appStore'
 import { useProfileStore } from '../store/profileStore'
 
 export function OnboardingWizard() {
