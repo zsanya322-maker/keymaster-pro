@@ -1,4 +1,5 @@
 use std::sync::mpsc::{self, Receiver, SendError, Sender};
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 use tracing::info;
@@ -50,16 +51,24 @@ impl SimulatorSender {
     }
 }
 
-pub fn spawn_simulator_thread() -> SimulatorSender {
+type CommandExecutor = Arc<dyn Fn(SimulatorCommand) + Send + Sync + 'static>;
+
+/// Внутренний конструктор worker'ов с внедряемым executor.
+///
+/// В production executor вызывает Win32 SendInput. В тестах можно подставить
+/// детерминированный наблюдатель и проверить именно архитектуру очередей, не
+/// генерируя реальные нажатия клавиш на CI-машине.
+fn spawn_simulator_with_executor(executor: CommandExecutor) -> SimulatorSender {
     let (immediate_tx, immediate_rx): (Sender<SimulatorCommand>, Receiver<SimulatorCommand>) = mpsc::channel();
     let (macro_tx, macro_rx): (Sender<Vec<SimulatorCommand>>, Receiver<Vec<SimulatorCommand>>) = mpsc::channel();
 
+    let immediate_executor = Arc::clone(&executor);
     thread::Builder::new()
         .name("km-simulator".to_string())
         .spawn(move || {
             info!("Immediate simulator thread started.");
             while let Ok(command) = immediate_rx.recv() {
-                execute_command(command);
+                immediate_executor(command);
             }
             info!("Immediate simulator thread channel closed, exiting.");
         })
@@ -71,7 +80,7 @@ pub fn spawn_simulator_thread() -> SimulatorSender {
             info!("Macro player thread started.");
             while let Ok(commands) = macro_rx.recv() {
                 for command in commands {
-                    execute_command(command);
+                    executor(command);
                 }
             }
             info!("Macro player thread channel closed, exiting.");
@@ -82,6 +91,10 @@ pub fn spawn_simulator_thread() -> SimulatorSender {
         immediate_tx,
         macro_tx,
     }
+}
+
+pub fn spawn_simulator_thread() -> SimulatorSender {
+    spawn_simulator_with_executor(Arc::new(execute_command))
 }
 
 fn execute_command(cmd: SimulatorCommand) {
@@ -280,3 +293,94 @@ fn move_mouse_absolute(x: i32, y: i32) {
 
 #[cfg(not(target_os = "windows"))]
 fn move_mouse_absolute(_x: i32, _y: i32) {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Condvar, Mutex};
+    use std::time::Duration;
+
+    #[test]
+    fn macro_delay_does_not_block_immediate_queue() {
+        let delay_gate = Arc::new((Mutex::new(false), Condvar::new()));
+        let delay_gate_for_executor = Arc::clone(&delay_gate);
+
+        let (delay_started_tx, delay_started_rx) = mpsc::channel::<()>();
+        let (observed_tx, observed_rx) = mpsc::channel::<String>();
+
+        let executor: CommandExecutor = Arc::new(move |command| match command {
+            SimulatorCommand::Delay(_) => {
+                let _ = delay_started_tx.send(());
+                let (lock, condvar) = &*delay_gate_for_executor;
+                let mut released = lock.lock().expect("delay gate poisoned");
+                while !*released {
+                    released = condvar.wait(released).expect("delay gate poisoned");
+                }
+            }
+            SimulatorCommand::TypeString(text) => {
+                let _ = observed_tx.send(text);
+            }
+            _ => {}
+        });
+
+        let sender = spawn_simulator_with_executor(executor);
+        sender
+            .send_macro(vec![
+                SimulatorCommand::Delay(10_000),
+                SimulatorCommand::TypeString("macro-finished".to_string()),
+            ])
+            .expect("macro queue should be available");
+
+        delay_started_rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("macro worker did not enter delay");
+
+        sender
+            .send(SimulatorCommand::TypeString("immediate".to_string()))
+            .expect("immediate queue should be available");
+
+        assert_eq!(
+            observed_rx.recv_timeout(Duration::from_secs(1)).unwrap(),
+            "immediate",
+            "immediate command must execute while macro worker is blocked",
+        );
+
+        {
+            let (lock, condvar) = &*delay_gate;
+            let mut released = lock.lock().expect("delay gate poisoned");
+            *released = true;
+            condvar.notify_all();
+        }
+
+        assert_eq!(
+            observed_rx.recv_timeout(Duration::from_secs(1)).unwrap(),
+            "macro-finished",
+        );
+    }
+
+    #[test]
+    fn macro_jobs_remain_serial_and_ordered() {
+        let (observed_tx, observed_rx) = mpsc::channel::<String>();
+        let executor: CommandExecutor = Arc::new(move |command| {
+            if let SimulatorCommand::TypeString(text) = command {
+                let _ = observed_tx.send(text);
+            }
+        });
+
+        let sender = spawn_simulator_with_executor(executor);
+        sender
+            .send_macro(vec![
+                SimulatorCommand::TypeString("a".to_string()),
+                SimulatorCommand::TypeString("b".to_string()),
+            ])
+            .unwrap();
+        sender
+            .send_macro(vec![SimulatorCommand::TypeString("c".to_string())])
+            .unwrap();
+
+        let observed = (0..3)
+            .map(|_| observed_rx.recv_timeout(Duration::from_secs(1)).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(observed, vec!["a", "b", "c"]);
+    }
+}
