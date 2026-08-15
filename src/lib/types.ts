@@ -1,8 +1,20 @@
 /**
- * TypeScript типы — зеркалируют Rust типы
+ * TypeScript types mirror the Rust IPC/profile schema.
  */
 
 export type Uuid = string
+
+export interface KeyChord {
+  code: number
+  modifiers: number
+}
+
+export interface RuleFolder {
+  id: Uuid
+  name: string
+  parentId?: string | null
+  order: number
+}
 
 export interface Profile {
   id: Uuid
@@ -11,6 +23,7 @@ export interface Profile {
   linkedApps: string[]
   rules: FrontendRule[]
   layers: LayerMeta[]
+  folders: RuleFolder[]
 }
 
 export interface LayerMeta {
@@ -26,18 +39,21 @@ export interface FrontendRule {
   holdActions?: FrontendAction[] | null
   conditions: FrontendCondition[]
   priority: number
+  enabled: boolean
+  folderId?: string | null
+  order: number
 }
 
 export type FrontendTrigger =
-  | { type: 'keyDown'; code: number }
-  | { type: 'keyUp'; code: number }
+  | { type: 'keyDown'; code: number; modifiers: number }
+  | { type: 'keyUp'; code: number; modifiers: number }
   | { type: 'mouseDown'; code: number }
   | { type: 'mouseUp'; code: number }
   | { type: 'tapHoldKeyDown'; code: number; timeoutMs: number }
   | { type: 'typedText'; sequence: string }
 
 export type FrontendAction =
-  | { type: 'remapKey'; code: number }
+  | { type: 'remapKey'; code: number; modifiers: number }
   | { type: 'remapMouse'; code: number }
   | { type: 'typeText'; text: string }
   | { type: 'runMacro'; steps: MacroStep[] }
