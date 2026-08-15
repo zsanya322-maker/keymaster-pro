@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react'
-import { Check, X } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { Download, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { triggerToast } from '../lib/toast'
 
 export function UpdateBanner() {
   const { t } = useTranslation()
@@ -9,59 +10,65 @@ export function UpdateBanner() {
   const [isUpdating, setIsUpdating] = useState(false)
 
   useEffect(() => {
+    let disposed = false
+
     async function checkForUpdates() {
       try {
         const { check } = await import('@tauri-apps/plugin-updater')
         const update = await check()
-        if (update) {
-          setUpdateInfo(update)
-        }
-      } catch (e) {
-        console.error('Failed to check for updates', e)
+        if (!disposed && update) setUpdateInfo(update)
+      } catch (error) {
+        // Автопроверка не должна мешать запуску приложения.
+        console.warn('Background update check failed', error)
       }
     }
-    
-    // Check after 2 seconds to not block initialization
-    const timer = setTimeout(checkForUpdates, 2000)
-    return () => clearTimeout(timer)
+
+    const timer = window.setTimeout(() => void checkForUpdates(), 2000)
+    return () => {
+      disposed = true
+      window.clearTimeout(timer)
+    }
   }, [])
 
   if (!updateInfo || isDismissed) return null
 
   const handleUpdate = async () => {
+    if (isUpdating) return
     setIsUpdating(true)
     try {
       await updateInfo.downloadAndInstall()
       const { invoke } = await import('@tauri-apps/api/core')
       await invoke('restart_app')
-    } catch (e) {
-      console.error('Failed to update', e)
+    } catch (error) {
+      console.error('Failed to update', error)
+      triggerToast(t('settings.toast_install_failed'), 'error')
       setIsUpdating(false)
     }
   }
 
   return (
-    <div className="fixed bottom-12 left-1/2 -translate-x-1/2 z-[100] flex items-center gap-4 bg-app-primary text-white px-4 py-2 rounded-full shadow-2xl animate-fade-in-up border border-app-primary/50">
-      <div className="flex items-center gap-2">
-        <div className="bg-white/20 p-1 rounded-full">
-          <Check size={14} />
-        </div>
-        <span className="text-sm font-semibold">{t('updateBanner.available', { version: updateInfo.version })}</span>
-      </div>
-      
-      <div className="flex items-center gap-2">
-        <button 
-          onClick={handleUpdate}
+    <div className="fixed left-1/2 bottom-10 z-[100] -translate-x-1/2 min-w-[390px] max-w-[calc(100vw-24px)] border border-app-primary/60 bg-app-bg shadow-xl">
+      <div className="h-9 px-2.5 flex items-center gap-2 bg-app-primary/10">
+        <Download size={13} className="text-app-primary shrink-0" />
+        <span className="min-w-0 flex-1 truncate text-[11px] font-semibold text-app-text">
+          {t('updateBanner.available', { version: updateInfo.version })}
+        </span>
+        <button
+          type="button"
+          onClick={() => void handleUpdate()}
           disabled={isUpdating}
-          className="bg-white text-app-primary hover:bg-white/90 px-3 py-1 rounded-full text-xs font-bold transition-colors disabled:opacity-50"
+          className="h-7 px-2.5 border border-app-primary bg-app-primary text-[10px] font-semibold text-white hover:bg-app-primary-hover disabled:opacity-45"
         >
           {isUpdating ? t('updateBanner.installing') : t('updateBanner.install_restart')}
         </button>
-        <button 
+        <button
+          type="button"
           onClick={() => setIsDismissed(true)}
-          className="text-white/60 hover:text-white transition-colors"
+          disabled={isUpdating}
+          className="h-7 w-7 inline-flex items-center justify-center text-app-muted hover:bg-app-surface hover:text-app-text disabled:opacity-40"
+          title={t('common.close', { defaultValue: 'Закрыть' })}
         >
-          <X size={16} />
+          <X size={12} />
         </button>
       </div>
     </div>
