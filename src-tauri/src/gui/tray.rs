@@ -6,7 +6,7 @@
 /// - Выйти
 
 use tauri::{
-    App, Manager,
+    App, Emitter, Manager,
     menu::{MenuBuilder, MenuItemBuilder},
     tray::TrayIconBuilder,
 };
@@ -14,6 +14,14 @@ use tauri::{
 /// Идентификаторы пунктов меню
 pub const MENU_SHOW: &str = "show";
 pub const MENU_RESTART_ADMIN: &str = "restart_admin";
+pub const MENU_QUIT: &str = "quit";
+
+fn show_main_window(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
 
 /// Создать System Tray с контекстным меню
 pub fn setup_tray(app: &App) -> Result<(), Box<dyn std::error::Error>> {
@@ -66,7 +74,7 @@ pub fn setup_tray(app: &App) -> Result<(), Box<dyn std::error::Error>> {
 
     let menu = menu_builder
         .separator()
-        .quit()
+        .item(&MenuItemBuilder::with_id(MENU_QUIT, "Выйти").build(app)?)
         .build()?;
 
     let icon = match app.default_window_icon() {
@@ -83,28 +91,14 @@ pub fn setup_tray(app: &App) -> Result<(), Box<dyn std::error::Error>> {
         .menu(&menu)
         .on_menu_event(move |app, event| {
             match event.id().as_ref() {
-                MENU_SHOW => {
-                    if let Some(window) = app.get_webview_window("main") {
-                        let _ = window.show();
-                        let _ = window.set_focus();
-                    }
-                }
+                MENU_SHOW => show_main_window(app),
                 MENU_RESTART_ADMIN => {
-                    let exe_path = std::env::current_exe()
-                        .ok()
-                        .and_then(|p| p.to_str().map(|s| s.to_string()));
-                    if let Some(exe) = exe_path {
-                        #[cfg(target_os = "windows")]
-                        unsafe {
-                            use windows::Win32::UI::Shell::ShellExecuteW;
-                            use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
-                            use windows::core::HSTRING;
-                            let verb = HSTRING::from("runas");
-                            let file = HSTRING::from(exe);
-                            let _ = ShellExecuteW(None, &verb, &file, None, None, SW_SHOWNORMAL);
-                            std::process::exit(0);
-                        }
-                    }
+                    show_main_window(app);
+                    let _ = app.emit("app-restart-admin-requested", ());
+                }
+                MENU_QUIT => {
+                    show_main_window(app);
+                    let _ = app.emit("app-exit-requested", ());
                 }
                 _ => {}
             }
@@ -112,11 +106,7 @@ pub fn setup_tray(app: &App) -> Result<(), Box<dyn std::error::Error>> {
         .on_tray_icon_event(|tray, event| {
             if let tauri::tray::TrayIconEvent::Click { button, button_state, .. } = event {
                 if button == tauri::tray::MouseButton::Left && button_state == tauri::tray::MouseButtonState::Up {
-                    let app = tray.app_handle();
-                    if let Some(window) = app.get_webview_window("main") {
-                        let _ = window.show();
-                        let _ = window.set_focus();
-                    }
+                    show_main_window(tray.app_handle());
                 }
             }
         })
