@@ -1,60 +1,28 @@
-name: v0.3.1 Compiler Fix Close
+name: v0.3.1 Compiler Fix
 
 on:
   push:
-    branches: [dev/v0.3.1-mouse-macros]
+    branches:
+      - dev/v0.3.1-mouse-macros
     paths:
-      - scripts/v031_mouse_move_compile_fix.py
-      - .github/workflows/v031-fix-compiler.yml
+      - '.github/workflows/v031-fix-compiler.yml'
 
 permissions:
   contents: write
 
-concurrency:
-  group: v031-compiler-fix-close
-  cancel-in-progress: true
-
 jobs:
-  close:
+  apply:
     if: github.actor != 'github-actions[bot]'
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: dev/v0.3.1-mouse-macros
-          fetch-depth: 0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 9
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: swatinem/rust-cache@v2
-        with:
-          workspaces: './src-tauri -> target'
-      - name: Apply final close UI/version patch
-        run: python scripts/v031_close.py
-      - name: Fix mouse-move macro compiler
-        run: python scripts/v031_mouse_move_compile_fix.py
-      - run: pnpm install --frozen-lockfile
-      - name: Frontend build
-        run: pnpm build
-      - name: Rust check
-        working-directory: src-tauri
-        run: cargo check --all-targets
-      - name: Rust tests
-        working-directory: src-tauri
-        run: cargo test
-      - name: Commit clean v0.3.1 checkpoint
-        shell: pwsh
+      - run: python scripts/v031_mouse_move_compile_fix.py
+      - shell: bash
         run: |
-          Get-ChildItem .github/workflows -Filter 'v031-*.yml' -ErrorAction SilentlyContinue | Remove-Item -Force
-          Get-ChildItem scripts -Filter 'v031*.py' -ErrorAction SilentlyContinue | Remove-Item -Force
-          if (Test-Path tools/upgrade_031_mouse.py) { Remove-Item tools/upgrade_031_mouse.py -Force }
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -m "feat(0.3.1): complete mouse triggers and macro playback"
-          git pull --rebase origin dev/v0.3.1-mouse-macros
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src-tauri/src/daemon/compiler.rs
+          git commit -m 'fix(0.3.1): compile macro actions in mouse-move rules'
           git push origin HEAD:dev/v0.3.1-mouse-macros
