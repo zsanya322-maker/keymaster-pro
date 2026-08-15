@@ -174,6 +174,137 @@ export const MacroEditor: React.FC<MacroEditorProps> = ({ steps, onChange }) => 
     return { type, code: 0 };
   };
 
+  const renderActionFields = (action: MacroAction, index: number) => {
+    switch (action.type) {
+      case 'keyDown':
+        return (
+          <KeyPicker
+            value={action.code}
+            onChange={(code) => updateAction(index, { type: 'keyDown', code })}
+            className="w-full min-w-0 text-left"
+          />
+        );
+      case 'keyUp':
+        return (
+          <KeyPicker
+            value={action.code}
+            onChange={(code) => updateAction(index, { type: 'keyUp', code })}
+            className="w-full min-w-0 text-left"
+          />
+        );
+      case 'mouseDown':
+        return (
+          <select
+            value={action.code}
+            disabled={isRecording}
+            onChange={(event) => updateAction(index, {
+              type: 'mouseDown',
+              code: Number.parseInt(event.target.value, 10) || 1,
+            })}
+            className={`${inputClass} w-full cursor-pointer`}
+          >
+            <option value="1">{t('ruleBuilder.action_options.mouse_left')}</option>
+            <option value="2">{t('ruleBuilder.action_options.mouse_right')}</option>
+            <option value="3">{t('ruleBuilder.action_options.mouse_middle')}</option>
+            <option value="4">{t('ruleBuilder.action_options.mouse_x1')}</option>
+            <option value="5">{t('ruleBuilder.action_options.mouse_x2')}</option>
+          </select>
+        );
+      case 'mouseUp':
+        return (
+          <select
+            value={action.code}
+            disabled={isRecording}
+            onChange={(event) => updateAction(index, {
+              type: 'mouseUp',
+              code: Number.parseInt(event.target.value, 10) || 1,
+            })}
+            className={`${inputClass} w-full cursor-pointer`}
+          >
+            <option value="1">{t('ruleBuilder.action_options.mouse_left')}</option>
+            <option value="2">{t('ruleBuilder.action_options.mouse_right')}</option>
+            <option value="3">{t('ruleBuilder.action_options.mouse_middle')}</option>
+            <option value="4">{t('ruleBuilder.action_options.mouse_x1')}</option>
+            <option value="5">{t('ruleBuilder.action_options.mouse_x2')}</option>
+          </select>
+        );
+      case 'mouseMove':
+        return (
+          <>
+            <span className="text-[10px] text-app-muted">dX</span>
+            <input
+              type="number"
+              value={action.dx}
+              disabled={isRecording}
+              onChange={(event) => updateAction(index, {
+                type: 'mouseMove',
+                dx: Number.parseInt(event.target.value, 10) || 0,
+                dy: action.dy,
+              })}
+              className={`${inputClass} flex-1 min-w-0 text-right font-mono`}
+            />
+            <span className="text-[10px] text-app-muted">dY</span>
+            <input
+              type="number"
+              value={action.dy}
+              disabled={isRecording}
+              onChange={(event) => updateAction(index, {
+                type: 'mouseMove',
+                dx: action.dx,
+                dy: Number.parseInt(event.target.value, 10) || 0,
+              })}
+              className={`${inputClass} flex-1 min-w-0 text-right font-mono`}
+            />
+          </>
+        );
+      case 'mouseScroll':
+        return (
+          <>
+            <span className="text-[10px] text-app-muted">Delta</span>
+            <input
+              type="number"
+              value={action.delta}
+              disabled={isRecording}
+              onChange={(event) => updateAction(index, {
+                type: 'mouseScroll',
+                delta: Number.parseInt(event.target.value, 10) || 0,
+              })}
+              className={`${inputClass} w-full text-right font-mono`}
+            />
+          </>
+        );
+      case 'mouseToAbsolute':
+        return (
+          <>
+            <span className="text-[10px] text-app-muted">X</span>
+            <input
+              type="number"
+              value={action.x}
+              disabled={isRecording}
+              onChange={(event) => updateAction(index, {
+                type: 'mouseToAbsolute',
+                x: Number.parseInt(event.target.value, 10) || 0,
+                y: action.y,
+              })}
+              className={`${inputClass} flex-1 min-w-0 text-right font-mono`}
+            />
+            <span className="text-[10px] text-app-muted">Y</span>
+            <input
+              type="number"
+              value={action.y}
+              disabled={isRecording}
+              onChange={(event) => updateAction(index, {
+                type: 'mouseToAbsolute',
+                x: action.x,
+                y: Number.parseInt(event.target.value, 10) || 0,
+              })}
+              className={`${inputClass} flex-1 min-w-0 text-right font-mono`}
+            />
+          </>
+        );
+    }
+  };
+
   return (
     <div className="border border-app-border bg-app-bg">
       <div className="min-h-9 px-2 flex items-center gap-2 border-b border-app-border bg-app-surface/35">
@@ -287,105 +418,7 @@ export const MacroEditor: React.FC<MacroEditorProps> = ({ steps, onChange }) => 
               </select>
 
               <div className="flex-1 min-w-0 flex items-center gap-1.5">
-                {(step.action.type === 'keyDown' || step.action.type === 'keyUp') && (
-                  <KeyPicker
-                    value={step.action.code}
-                    onChange={(code) => updateAction(index, { type: step.action.type, code })}
-                    className="w-full min-w-0 text-left"
-                  />
-                )}
-
-                {(step.action.type === 'mouseDown' || step.action.type === 'mouseUp') && (
-                  <select
-                    value={step.action.code}
-                    disabled={isRecording}
-                    onChange={(event) => updateAction(index, {
-                      type: step.action.type,
-                      code: Number.parseInt(event.target.value, 10) || 1,
-                    })}
-                    className={`${inputClass} w-full cursor-pointer`}
-                  >
-                    <option value="1">{t('ruleBuilder.action_options.mouse_left')}</option>
-                    <option value="2">{t('ruleBuilder.action_options.mouse_right')}</option>
-                    <option value="3">{t('ruleBuilder.action_options.mouse_middle')}</option>
-                    <option value="4">{t('ruleBuilder.action_options.mouse_x1')}</option>
-                    <option value="5">{t('ruleBuilder.action_options.mouse_x2')}</option>
-                  </select>
-                )}
-
-                {step.action.type === 'mouseMove' && (
-                  <>
-                    <span className="text-[10px] text-app-muted">dX</span>
-                    <input
-                      type="number"
-                      value={step.action.dx}
-                      disabled={isRecording}
-                      onChange={(event) => updateAction(index, {
-                        type: 'mouseMove',
-                        dx: Number.parseInt(event.target.value, 10) || 0,
-                        dy: step.action.dy,
-                      })}
-                      className={`${inputClass} flex-1 min-w-0 text-right font-mono`}
-                    />
-                    <span className="text-[10px] text-app-muted">dY</span>
-                    <input
-                      type="number"
-                      value={step.action.dy}
-                      disabled={isRecording}
-                      onChange={(event) => updateAction(index, {
-                        type: 'mouseMove',
-                        dx: step.action.dx,
-                        dy: Number.parseInt(event.target.value, 10) || 0,
-                      })}
-                      className={`${inputClass} flex-1 min-w-0 text-right font-mono`}
-                    />
-                  </>
-                )}
-
-                {step.action.type === 'mouseScroll' && (
-                  <>
-                    <span className="text-[10px] text-app-muted">Delta</span>
-                    <input
-                      type="number"
-                      value={step.action.delta}
-                      disabled={isRecording}
-                      onChange={(event) => updateAction(index, {
-                        type: 'mouseScroll',
-                        delta: Number.parseInt(event.target.value, 10) || 0,
-                      })}
-                      className={`${inputClass} w-full text-right font-mono`}
-                    />
-                  </>
-                )}
-
-                {step.action.type === 'mouseToAbsolute' && (
-                  <>
-                    <span className="text-[10px] text-app-muted">X</span>
-                    <input
-                      type="number"
-                      value={step.action.x}
-                      disabled={isRecording}
-                      onChange={(event) => updateAction(index, {
-                        type: 'mouseToAbsolute',
-                        x: Number.parseInt(event.target.value, 10) || 0,
-                        y: step.action.y,
-                      })}
-                      className={`${inputClass} flex-1 min-w-0 text-right font-mono`}
-                    />
-                    <span className="text-[10px] text-app-muted">Y</span>
-                    <input
-                      type="number"
-                      value={step.action.y}
-                      disabled={isRecording}
-                      onChange={(event) => updateAction(index, {
-                        type: 'mouseToAbsolute',
-                        x: step.action.x,
-                        y: Number.parseInt(event.target.value, 10) || 0,
-                      })}
-                      className={`${inputClass} flex-1 min-w-0 text-right font-mono`}
-                    />
-                  </>
-                )}
+                {renderActionFields(step.action, index)}
               </div>
 
               <div className="w-20 shrink-0 flex items-center gap-1">
