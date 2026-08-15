@@ -14,6 +14,7 @@ import {
 import { useAppStore } from '../store/appStore';
 import { invoke } from '../lib/ipc';
 import { triggerToast } from '../lib/toast';
+import { KeyPicker } from '../components/ruleBuilder/KeyPicker';
 
 type SettingsTab = 'general' | 'daemon' | 'logs';
 type UpdateInfo = Awaited<ReturnType<typeof check>>;
@@ -272,6 +273,26 @@ export function SettingsPage() {
                   <div className="flex justify-end"><Toggle checked={config.minimizeToTray} onChange={() => void handleToggle('minimizeToTray')} /></div>
                 </SettingRow>
               </Section>
+
+              <details className="border border-app-border bg-app-bg">
+                <summary className="h-8 px-3 flex items-center cursor-pointer select-none bg-app-surface/35 text-[11px] font-semibold text-app-text">
+                  {t('settings.advanced', { defaultValue: 'Расширенные настройки' })}
+                  <span className="ml-auto text-[9px] font-normal text-app-muted">{t('common.advanced', { defaultValue: 'Доп.' })}</span>
+                </summary>
+                <div className="border-t border-app-border">
+                  <SettingRow
+                    title={t('settings.macro_emergency_stop', { defaultValue: 'Аварийный стоп макросов' })}
+                    description={t('settings.macro_emergency_stop_desc', { defaultValue: 'Останавливает текущий и все ожидающие макросы. По умолчанию Pause.' })}
+                  >
+                    <KeyPicker
+                      value={{ code: config.macroEmergencyStopVk ?? 0x13, modifiers: 0 }}
+                      allowModifiers={false}
+                      onChange={(chord) => setConfig({ macroEmergencyStopVk: chord.code })}
+                      className="w-full text-left"
+                    />
+                  </SettingRow>
+                </div>
+              </details>
 
               <Section title={t('settings.language')}>
                 <SettingRow title={t('settings.language')} description={t('settings.language_desc')}>

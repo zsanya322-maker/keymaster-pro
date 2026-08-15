@@ -1,7 +1,7 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
-import { Crosshair, FolderOpen, Trash2 } from 'lucide-react';
+import { Crosshair, FolderOpen, Play, Square, Trash2 } from 'lucide-react';
 import type { FrontendAction } from '../../lib/types';
 import { KeyPicker } from './KeyPicker';
 import { MacroEditor } from './MacroEditor';
@@ -260,6 +260,89 @@ export const ActionEditor: React.FC<ActionEditorProps> = ({ action, onChange, on
 
       {action.type === 'runMacro' && (
         <div className="border-t border-app-border/70 p-1.5">
+          <div className="mb-1.5 flex items-center justify-end gap-1">
+            <button
+              type="button"
+              disabled={action.steps.length === 0}
+              onClick={() => {
+                void invoke('ipc_call', {
+                  method: 'macro.preview',
+                  params: { steps: action.steps, playback: action.playback },
+                }).catch((error) => console.error('Macro preview failed', error));
+              }}
+              className="h-6 px-2 inline-flex items-center gap-1 border border-app-border bg-app-bg text-[9px] text-app-text hover:bg-app-surface disabled:opacity-35"
+            >
+              <Play size={10} />
+              {t('macro.preview', { defaultValue: 'Тест' })}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                void invoke('ipc_call', { method: 'macro.stop_playback' })
+                  .catch((error) => console.error('Macro stop failed', error));
+              }}
+              className="h-6 px-2 inline-flex items-center gap-1 border border-app-border bg-app-bg text-[9px] text-app-text hover:bg-app-surface"
+            >
+              <Square size={9} />
+              {t('macro.stop_playback', { defaultValue: 'Стоп' })}
+            </button>
+            <details className="relative">
+              <summary className="list-none h-6 px-2 inline-flex items-center border border-app-border bg-app-bg text-[9px] text-app-muted hover:bg-app-surface cursor-pointer">
+                {t('common.advanced', { defaultValue: 'Доп.' })}
+              </summary>
+              <div className="absolute z-40 right-0 top-7 w-60 border border-app-border bg-app-bg shadow-lg p-2 space-y-2">
+                <label className="block">
+                  <span className="block mb-1 text-[9px] text-app-muted">{t('macro.playback_speed', { defaultValue: 'Скорость' })}</span>
+                  <select
+                    value={action.playback.speed}
+                    onChange={(event) => onChange({
+                      ...action,
+                      playback: { ...action.playback, speed: Number.parseFloat(event.target.value) || 1 },
+                    })}
+                    className={`${selectClass} w-full`}
+                  >
+                    <option value="0.5">0.5×</option>
+                    <option value="0.75">0.75×</option>
+                    <option value="1">1×</option>
+                    <option value="1.25">1.25×</option>
+                    <option value="1.5">1.5×</option>
+                    <option value="2">2×</option>
+                    <option value="3">3×</option>
+                    <option value="5">5×</option>
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="block mb-1 text-[9px] text-app-muted">{t('macro.repeat_count', { defaultValue: 'Повторов' })}</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={10000}
+                    value={action.playback.repeatCount}
+                    disabled={action.playback.repeatWhileHeld}
+                    onChange={(event) => onChange({
+                      ...action,
+                      playback: {
+                        ...action.playback,
+                        repeatCount: Math.max(1, Math.min(10000, Number.parseInt(event.target.value, 10) || 1)),
+                      },
+                    })}
+                    className={`${controlClass} w-full font-mono disabled:opacity-40`}
+                  />
+                </label>
+                <label className="flex items-center gap-2 text-[10px] text-app-text cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={action.playback.repeatWhileHeld}
+                    onChange={(event) => onChange({
+                      ...action,
+                      playback: { ...action.playback, repeatWhileHeld: event.target.checked },
+                    })}
+                  />
+                  {t('macro.repeat_while_held', { defaultValue: 'Повторять, пока удерживается триггер' })}
+                </label>
+              </div>
+            </details>
+          </div>
           <MacroEditor
             steps={action.steps || []}
             onChange={(steps) => onChange({ ...action, steps })}

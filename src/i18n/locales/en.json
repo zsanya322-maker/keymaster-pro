@@ -271,8 +271,15 @@
       "mouseUp": "Mouse Up",
       "mouseMove_rel": "Mouse Move (Rel)",
       "mouseScroll": "Mouse Scroll",
-      "mouseMove_abs": "Mouse Move (Abs)"
-    }
+      "mouseMove_abs": "Mouse Move (Abs)",
+      "mouseHScroll": "Horizontal wheel"
+    },
+    "preview": "Test",
+    "stop_playback": "Stop",
+    "playback_speed": "Speed",
+    "repeat_count": "Repeats",
+    "repeat_while_held": "Repeat while trigger is held",
+    "drag_reorder": "Drag to reorder"
   },
   "keyPicker": {
     "listening_tooltip": "Listening...",
@@ -374,7 +381,10 @@
     "logs_desc": "Real-time trace of Windows hook system events.",
     "logs_clear": "Clear buffer",
     "logs_cleared": "Console log buffer cleared.",
-    "logs_open_folder": "Open Folder"
+    "logs_open_folder": "Open Folder",
+    "advanced": "Advanced settings",
+    "macro_emergency_stop": "Macro emergency stop",
+    "macro_emergency_stop_desc": "Stops the running macro and queued macros. Pause by default."
   },
   "confirmDialog": {
     "confirm": "Confirm",

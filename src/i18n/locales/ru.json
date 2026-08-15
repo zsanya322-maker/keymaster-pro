@@ -271,8 +271,15 @@
       "mouseUp": "Отпускание мыши",
       "mouseMove_rel": "Движение мыши (относит.)",
       "mouseScroll": "Прокрутка мыши",
-      "mouseMove_abs": "Движение мыши (абсолют.)"
-    }
+      "mouseMove_abs": "Движение мыши (абсолют.)",
+      "mouseHScroll": "Гориз. колесо"
+    },
+    "preview": "Тест",
+    "stop_playback": "Стоп",
+    "playback_speed": "Скорость",
+    "repeat_count": "Повторов",
+    "repeat_while_held": "Повторять, пока удерживается триггер",
+    "drag_reorder": "Перетащите для изменения порядка"
   },
   "keyPicker": {
     "listening_tooltip": "Ожидание нажатия...",
@@ -374,7 +381,10 @@
     "logs_desc": "Трассировка системных событий Windows-хуков в реальном времени.",
     "logs_clear": "Очистить буфер",
     "logs_cleared": "Буфер логов очищен.",
-    "logs_open_folder": "Открыть папку"
+    "logs_open_folder": "Открыть папку",
+    "advanced": "Расширенные настройки",
+    "macro_emergency_stop": "Аварийный стоп макросов",
+    "macro_emergency_stop_desc": "Останавливает текущий и все ожидающие макросы. По умолчанию Pause."
   },
   "confirmDialog": {
     "confirm": "Подтвердить",
