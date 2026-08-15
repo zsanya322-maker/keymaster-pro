@@ -10,6 +10,29 @@ fn current_tap_hold_timeout() -> u64 {
         .unwrap_or(200)
 }
 
+fn profile_exists(id: &str) -> Result<bool, String> {
+    Ok(crate::shared::persistence::list_profiles()?
+        .iter()
+        .any(|existing| existing == id))
+}
+
+fn update_active_profile_runtime(
+    profile: crate::shared::types::Profile,
+    state: &DaemonStateRef,
+) -> Result<(), String> {
+    let mut s = state.write().map_err(|_| "Failed to lock state")?;
+    if s.active_profile_id == profile.id {
+        let frontend_config = crate::schemas::frontend::FrontendConfig {
+            rules: profile.rules.clone(),
+            layers: profile.layers.clone(),
+            tap_hold_timeout_ms: current_tap_hold_timeout(),
+        };
+        s.engine_schema = crate::daemon::compiler::compile_schema(&frontend_config);
+        s.active_profile = Some(profile);
+    }
+    Ok(())
+}
+
 /// Helper function to load, modify, save, and update the active profile in DaemonState
 fn modify_profile<F>(profile_id: &str, state: &DaemonStateRef, f: F) -> Result<(), String>
 where
@@ -18,19 +41,7 @@ where
     let mut profile = crate::shared::persistence::load_profile(profile_id)?;
     f(&mut profile);
     crate::shared::persistence::save_profile(&profile)?;
-    if let Ok(mut s) = state.write() {
-        if s.active_profile_id == profile_id {
-            // Compile new engine schema
-            let frontend_config = crate::schemas::frontend::FrontendConfig {
-                rules: profile.rules.clone(),
-                layers: profile.layers.clone(),
-                tap_hold_timeout_ms: current_tap_hold_timeout(),
-            };
-            s.engine_schema = crate::daemon::compiler::compile_schema(&frontend_config);
-            s.active_profile = Some(profile);
-        }
-    }
-    Ok(())
+    update_active_profile_runtime(profile, state)
 }
 
 /// Central router to dispatch all IPC JSON-RPC commands from Frontend
@@ -96,38 +107,25 @@ pub async fn dispatch(method: &str, params: Option<Value>, state: &DaemonStateRe
                     linked_apps: Option<Vec<String>>,
                 }
                 let input: ProfileInput = serde_json::from_value(p).map_err(|e| e.to_string())?;
-                
-                let mut prof = crate::shared::persistence::load_profile(&input.id).unwrap_or_else(|_| {
-                    crate::shared::types::Profile {
-                        id: input.id.clone(),
-                        name: input.name.clone(),
-                        is_default: input.is_default,
-                        linked_apps: input.linked_apps.clone().unwrap_or_default(),
-                        rules: vec![],
-                        layers: vec![],
-                    }
-                });
-                
-                prof.name = input.name;
-                prof.is_default = input.is_default;
-                if let Some(apps) = input.linked_apps {
-                    prof.linked_apps = apps;
+
+                if profile_exists(&input.id)? {
+                    return Err(format!(
+                        "Профиль с ID '{}' уже существует; создание не может перезаписывать существующий профиль",
+                        input.id
+                    ));
                 }
 
+                let prof = crate::shared::types::Profile {
+                    id: input.id,
+                    name: input.name,
+                    is_default: input.is_default,
+                    linked_apps: input.linked_apps.unwrap_or_default(),
+                    rules: vec![],
+                    layers: vec![],
+                };
+
                 crate::shared::persistence::save_profile(&prof)?;
-                
-                {
-                    let mut s = state.write().map_err(|_| "Failed to lock state")?;
-                    if s.active_profile_id == prof.id {
-                        let frontend_config = crate::schemas::frontend::FrontendConfig {
-                            rules: prof.rules.clone(),
-                            layers: prof.layers.clone(),
-                            tap_hold_timeout_ms: current_tap_hold_timeout(),
-                        };
-                        s.engine_schema = crate::daemon::compiler::compile_schema(&frontend_config);
-                        s.active_profile = Some(prof);
-                    }
-                }
+                update_active_profile_runtime(prof, state)?;
                 Ok(json!({ "success": true }))
             } else {
                 Err("Missing parameters".into())
@@ -136,18 +134,14 @@ pub async fn dispatch(method: &str, params: Option<Value>, state: &DaemonStateRe
         "profile.save" => {
             if let Some(p) = params {
                 let prof: crate::shared::types::Profile = serde_json::from_value(p).map_err(|e| e.to_string())?;
-                crate::shared::persistence::save_profile(&prof)?;
-                
-                let mut s = state.write().map_err(|_| "Failed to lock state")?;
-                if s.active_profile_id == prof.id {
-                    let frontend_config = crate::schemas::frontend::FrontendConfig {
-                        rules: prof.rules.clone(),
-                        layers: prof.layers.clone(),
-                        tap_hold_timeout_ms: current_tap_hold_timeout(),
-                    };
-                    s.engine_schema = crate::daemon::compiler::compile_schema(&frontend_config);
-                    s.active_profile = Some(prof);
+                if !profile_exists(&prof.id)? {
+                    return Err(format!(
+                        "Профиль '{}' не существует; используйте profile.create или profile.import",
+                        prof.id
+                    ));
                 }
+                crate::shared::persistence::save_profile(&prof)?;
+                update_active_profile_runtime(prof, state)?;
                 Ok(json!({ "success": true }))
             } else {
                 Err("Missing parameters".into())
@@ -155,19 +149,28 @@ pub async fn dispatch(method: &str, params: Option<Value>, state: &DaemonStateRe
         }
         "profile.import" => {
             if let Some(p) = params {
-                let prof: crate::shared::types::Profile = serde_json::from_value(p).map_err(|e| e.to_string())?;
-                crate::shared::persistence::save_profile(&prof)?;
-                
-                let mut s = state.write().map_err(|_| "Failed to lock state")?;
-                if s.active_profile_id == prof.id {
-                    let frontend_config = crate::schemas::frontend::FrontendConfig {
-                        rules: prof.rules.clone(),
-                        layers: prof.layers.clone(),
-                        tap_hold_timeout_ms: current_tap_hold_timeout(),
-                    };
-                    s.engine_schema = crate::daemon::compiler::compile_schema(&frontend_config);
-                    s.active_profile = Some(prof);
+                let mut prof: crate::shared::types::Profile = serde_json::from_value(p).map_err(|e| e.to_string())?;
+                if profile_exists(&prof.id)? {
+                    return Err(format!(
+                        "Профиль с ID '{}' уже существует; импорт не может перезаписывать существующий профиль",
+                        prof.id
+                    ));
                 }
+
+                // Импортированный профиль не должен создавать второго protected
+                // default-профиля в уже существующей конфигурации.
+                if prof.is_default {
+                    let has_default = crate::shared::persistence::list_profiles()?
+                        .into_iter()
+                        .filter_map(|id| crate::shared::persistence::load_profile(&id).ok())
+                        .any(|profile| profile.is_default);
+                    if has_default {
+                        prof.is_default = false;
+                    }
+                }
+
+                crate::shared::persistence::save_profile(&prof)?;
+                update_active_profile_runtime(prof, state)?;
                 Ok(json!({ "success": true }))
             } else {
                 Err("Missing parameters".into())
@@ -175,6 +178,17 @@ pub async fn dispatch(method: &str, params: Option<Value>, state: &DaemonStateRe
         }
         "profile.delete" => {
             let id = params.as_ref().and_then(|v| v.get("id")).and_then(|i| i.as_str()).unwrap_or("");
+            let profile = crate::shared::persistence::load_profile(id)?;
+            if profile.is_default {
+                return Err("Профиль по умолчанию нельзя удалить".to_string());
+            }
+            let active_id = {
+                let s = state.read().map_err(|_| "Failed to lock state")?;
+                s.active_profile_id.clone()
+            };
+            if active_id == id {
+                return Err("Активный профиль нельзя удалить; сначала переключитесь на другой".to_string());
+            }
             crate::shared::persistence::delete_profile(id)?;
             Ok(json!({ "success": true }))
         }
@@ -185,9 +199,9 @@ pub async fn dispatch(method: &str, params: Option<Value>, state: &DaemonStateRe
                     let s = state.read().map_err(|_| "Failed to lock state")?;
                     s.active_profile_id.clone()
                 };
-                
+
                 modify_profile(&active_id, state, |prof| {
-                    use crate::schemas::frontend::{FrontendRule, FrontendTrigger, FrontendAction, MacroAction, MacroStep};
+                    use crate::schemas::frontend::{FrontendAction, FrontendRule, FrontendTrigger, MacroAction, MacroStep};
                     let new_rule = match example_type {
                         "remap" => FrontendRule {
                             id: uuid::Uuid::new_v4().to_string(),
@@ -294,7 +308,7 @@ pub async fn dispatch(method: &str, params: Option<Value>, state: &DaemonStateRe
                 let record_mouse_drag_drop_only = p.get("recordMouseDragDropOnly").and_then(|v| v.as_bool()).unwrap_or(true);
                 let existing_steps_opt = p.get("existingSteps")
                     .and_then(|v| serde_json::from_value::<Vec<crate::schemas::frontend::MacroStep>>(v.clone()).ok());
-                
+
                 let s = state.read().map_err(|_| "Failed to lock state")?;
                 s.record_ready.store(ready, std::sync::atomic::Ordering::Relaxed);
                 s.record_mouse_moves.store(record_mouse_moves, std::sync::atomic::Ordering::Relaxed);
