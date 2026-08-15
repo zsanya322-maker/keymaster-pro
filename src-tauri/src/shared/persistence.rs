@@ -5,7 +5,9 @@
 /// Конфиг в %APPDATA%\KeyMaster Pro\config.json
 
 use std::fs;
-use std::path::PathBuf;
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
 use tracing::{error, info, warn};
@@ -95,11 +97,58 @@ fn migrate_profile_value(mut value: Value) -> Result<(Value, bool), String> {
     Ok((value, original_version != version))
 }
 
+fn replace_file_atomically(temp_path: &Path, destination: &Path) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        use windows::core::HSTRING;
+        use windows::Win32::Storage::FileSystem::{
+            MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+        };
+
+        let source = HSTRING::from(temp_path.to_string_lossy().as_ref());
+        let target = HSTRING::from(destination.to_string_lossy().as_ref());
+        unsafe {
+            MoveFileExW(
+                &source,
+                &target,
+                MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+            )
+            .map_err(|e| format!("Атомарная замена профиля не удалась: {}", e))?;
+        }
+        Ok(())
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        fs::rename(temp_path, destination)
+            .map_err(|e| format!("Атомарная замена профиля не удалась: {}", e))
+    }
+}
+
 fn write_profile_value(path: &PathBuf, value: &Value) -> Result<(), String> {
     let data = serde_json::to_string_pretty(value)
         .map_err(|e| format!("Ошибка сериализации профиля: {}", e))?;
-    fs::write(path, data)
-        .map_err(|e| format!("Ошибка записи {}: {}", path.display(), e))
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| format!("SystemTime error: {}", e))?
+        .as_nanos();
+    let temp_path = path.with_extension(format!("json.tmp.{}.{}", std::process::id(), nonce));
+
+    let write_result = (|| -> Result<(), String> {
+        let mut file = fs::File::create(&temp_path)
+            .map_err(|e| format!("Ошибка открытия временного профиля: {}", e))?;
+        file.write_all(data.as_bytes())
+            .map_err(|e| format!("Ошибка записи временного профиля: {}", e))?;
+        file.sync_all()
+            .map_err(|e| format!("Ошибка синхронизации временного профиля: {}", e))?;
+        drop(file);
+        replace_file_atomically(&temp_path, path)
+    })();
+
+    if write_result.is_err() {
+        let _ = fs::remove_file(&temp_path);
+    }
+    write_result
 }
 
 fn recovery_profile(id: &str) -> Profile {
@@ -339,7 +388,6 @@ fn rotate_backups(profile_id: &str) -> Result<(), String> {
 }
 
 fn timestamp_for_filename() -> Result<String, String> {
-    use std::time::{SystemTime, UNIX_EPOCH};
     let ts = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|e| format!("SystemTime error: {}", e))?;
