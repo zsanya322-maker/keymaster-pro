@@ -2,9 +2,11 @@ import { useEffect, useState } from 'react'
 import { Download, X } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { triggerToast } from '../lib/toast'
+import { useKeyMasterStore } from '../store/keyMasterStore'
 
 export function UpdateBanner() {
   const { t } = useTranslation()
+  const rulesDirty = useKeyMasterStore(state => state.rulesDirty)
   const [updateInfo, setUpdateInfo] = useState<any>(null)
   const [isDismissed, setIsDismissed] = useState(false)
   const [isUpdating, setIsUpdating] = useState(false)
@@ -34,6 +36,16 @@ export function UpdateBanner() {
 
   const handleUpdate = async () => {
     if (isUpdating) return
+    if (rulesDirty) {
+      triggerToast(
+        t('ruleBuilder.unsaved_message', {
+          defaultValue: 'Сначала сохраните или отмените изменения правила, затем устанавливайте обновление.',
+        }),
+        'warning',
+      )
+      return
+    }
+
     setIsUpdating(true)
     try {
       await updateInfo.downloadAndInstall()
