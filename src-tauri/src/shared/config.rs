@@ -62,20 +62,61 @@ fn backup_corrupt_config(path: &Path) -> Result<PathBuf, String> {
     Ok(backup_path)
 }
 
+fn replace_file_atomically(temp_path: &Path, destination: &Path) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        use windows::core::HSTRING;
+        use windows::Win32::Storage::FileSystem::{
+            MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+        };
+
+        let source = HSTRING::from(temp_path.to_string_lossy().as_ref());
+        let target = HSTRING::from(destination.to_string_lossy().as_ref());
+        unsafe {
+            MoveFileExW(
+                &source,
+                &target,
+                MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+            )
+            .map_err(|e| format!("Атомарная замена config.json не удалась: {}", e))?;
+        }
+        Ok(())
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        fs::rename(temp_path, destination)
+            .map_err(|e| format!("Атомарная замена config.json не удалась: {}", e))
+    }
+}
+
 fn write_config_file(path: &Path, config: &AppConfig) -> Result<(), String> {
     validate_config(config)?;
     let data = serde_json::to_string_pretty(config)
         .map_err(|e| format!("Ошибка сериализации config: {}", e))?;
 
-    // Явный flush/sync уменьшает шанс получить обрезанный JSON при аварийном
-    // завершении процесса во время сохранения.
-    let mut file = fs::File::create(path)
-        .map_err(|e| format!("Ошибка открытия config.json для записи: {}", e))?;
-    file.write_all(data.as_bytes())
-        .map_err(|e| format!("Ошибка записи config.json: {}", e))?;
-    file.sync_all()
-        .map_err(|e| format!("Ошибка синхронизации config.json: {}", e))?;
-    Ok(())
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| format!("SystemTime error: {}", e))?
+        .as_nanos();
+    let temp_path = path.with_extension(format!("json.tmp.{}.{}", std::process::id(), nonce));
+
+    let write_result = (|| -> Result<(), String> {
+        let mut file = fs::File::create(&temp_path)
+            .map_err(|e| format!("Ошибка открытия временного config для записи: {}", e))?;
+        file.write_all(data.as_bytes())
+            .map_err(|e| format!("Ошибка записи временного config: {}", e))?;
+        file.sync_all()
+            .map_err(|e| format!("Ошибка синхронизации временного config: {}", e))?;
+        drop(file);
+
+        replace_file_atomically(&temp_path, path)
+    })();
+
+    if write_result.is_err() {
+        let _ = fs::remove_file(&temp_path);
+    }
+    write_result
 }
 
 /// Загрузить конфигурацию. Отсутствующие поля старых версий автоматически
