@@ -18,17 +18,29 @@ pub fn compile_schema(frontend: &FrontendConfig) -> EngineSchema {
 
     for rule in frontend.rules.iter().filter(|rule| rule.enabled) {
         match &rule.trigger {
-            FrontendTrigger::KeyDown { chord } | FrontendTrigger::KeyUp { chord } => {
+            FrontendTrigger::KeyDown { chord } => {
                 keyboard_map
                     .entry(chord.code)
                     .or_default()
-                    .push(compile_rule(rule, chord.modifiers));
+                    .push(compile_rule(rule, chord.modifiers, true));
             }
-            FrontendTrigger::MouseDown { code } | FrontendTrigger::MouseUp { code } => {
+            FrontendTrigger::KeyUp { chord } => {
+                keyboard_map
+                    .entry(chord.code)
+                    .or_default()
+                    .push(compile_rule(rule, chord.modifiers, false));
+            }
+            FrontendTrigger::MouseDown { code } => {
                 mouse_map
                     .entry(*code)
                     .or_default()
-                    .push(compile_rule(rule, 0));
+                    .push(compile_rule(rule, 0, true));
+            }
+            FrontendTrigger::MouseUp { code } => {
+                mouse_map
+                    .entry(*code)
+                    .or_default()
+                    .push(compile_rule(rule, 0, false));
             }
             FrontendTrigger::TapHoldKeyDown { code, timeout_ms } => {
                 tap_hold_map
@@ -40,7 +52,7 @@ pub fn compile_schema(frontend: &FrontendConfig) -> EngineSchema {
                 text_expansion_map
                     .entry(sequence.clone())
                     .or_default()
-                    .push(compile_rule(rule, 0));
+                    .push(compile_rule(rule, 0, true));
             }
         }
     }
@@ -92,13 +104,18 @@ fn compile_condition(condition: &FrontendCondition) -> EngineCondition {
     }
 }
 
-fn compile_rule(rule: &FrontendRule, required_modifiers: u16) -> CompiledRule {
+fn compile_rule(
+    rule: &FrontendRule,
+    required_modifiers: u16,
+    trigger_on_down: bool,
+) -> CompiledRule {
     let conditions = rule.conditions.iter().map(compile_condition).collect();
     let actions = rule.actions.iter().map(compile_action).collect();
 
     CompiledRule {
         priority: rule.priority,
         required_modifiers,
+        trigger_on_down,
         conditions,
         actions,
     }
@@ -211,7 +228,7 @@ mod tests {
     }
 
     #[test]
-    fn test_compile_schema_distribution_and_modifiers() {
+    fn test_compile_schema_distribution_modifiers_and_edges() {
         let rules = vec![
             rule(
                 "1",
@@ -229,7 +246,7 @@ mod tests {
             rule(
                 "2",
                 20,
-                FrontendTrigger::KeyDown {
+                FrontendTrigger::KeyUp {
                     chord: KeyChord::single(0x41),
                 },
                 FrontendAction::RemapKey {
@@ -288,7 +305,9 @@ mod tests {
         let kb_rules = schema.keyboard_map.get(&0x41).unwrap();
         assert_eq!(kb_rules.len(), 2);
         assert_eq!(kb_rules[0].priority, 20);
+        assert!(!kb_rules[0].trigger_on_down);
         assert_eq!(kb_rules[1].priority, 10);
+        assert!(kb_rules[1].trigger_on_down);
         assert_eq!(
             kb_rules[1].required_modifiers,
             key_modifiers::CTRL | key_modifiers::SHIFT
