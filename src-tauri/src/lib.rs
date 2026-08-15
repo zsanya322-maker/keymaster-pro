@@ -44,6 +44,7 @@ pub fn run() {
             gui::commands::restart_as_admin,
             gui::commands::is_elevated,
             gui::commands::get_gui_config,
+            gui::commands::update_gui_config,
         ])
         .setup(|app| {
             // Spawn background task to listen for daemon events
