@@ -27,7 +27,6 @@ pub fn compile_schema(frontend: &FrontendConfig) -> EngineSchema {
         }
     }
 
-    // Sort descending by priority
     for rules in keyboard_map.values_mut() {
         rules.sort_by(|a, b| b.priority.cmp(&a.priority));
     }
@@ -49,13 +48,21 @@ pub fn compile_schema(frontend: &FrontendConfig) -> EngineSchema {
     }
 }
 
-fn compile_rule(rule: &FrontendRule) -> CompiledRule {
-    let conditions = rule.conditions.iter().map(|c| match c {
+fn compile_condition(condition: &FrontendCondition) -> EngineCondition {
+    match condition {
         FrontendCondition::LayerActive { layer_id } => {
             EngineCondition::LayerActive { layer_id_hash: calculate_hash(layer_id) }
         }
-        FrontendCondition::VirtualDesktop { id } => {
-            EngineCondition::VirtualDesktop { id: *id }
+        FrontendCondition::VirtualDesktop { .. } => {
+            // Этот тип остался в старой frontend-схеме для совместимости, но
+            // runtime-проверка VirtualDesktop ещё не реализована. Раньше engine
+            // просто игнорировал такое условие и правило могло сработать в любом
+            // рабочем столе (fail-open). До реальной реализации компилируем его
+            // в заведомо не совпадающее WindowMatch: Win32 title не содержит NUL.
+            EngineCondition::WindowMatch {
+                process_hash: None,
+                title_contains: Some("\0".to_string()),
+            }
         }
         FrontendCondition::WindowMatch { process, title } => {
             EngineCondition::WindowMatch {
@@ -64,8 +71,11 @@ fn compile_rule(rule: &FrontendRule) -> CompiledRule {
                 title_contains: title.as_ref().filter(|s| !s.is_empty()).map(|t| t.to_lowercase()),
             }
         }
-    }).collect();
+    }
+}
 
+fn compile_rule(rule: &FrontendRule) -> CompiledRule {
+    let conditions = rule.conditions.iter().map(compile_condition).collect();
     let actions = rule.actions.iter().map(compile_action).collect();
 
     CompiledRule {
@@ -76,22 +86,7 @@ fn compile_rule(rule: &FrontendRule) -> CompiledRule {
 }
 
 fn compile_tap_hold_rule(rule: &FrontendRule, timeout_ms: u32) -> CompiledTapHoldRule {
-    let conditions = rule.conditions.iter().map(|c| match c {
-        FrontendCondition::LayerActive { layer_id } => {
-            EngineCondition::LayerActive { layer_id_hash: calculate_hash(layer_id) }
-        }
-        FrontendCondition::VirtualDesktop { id } => {
-            EngineCondition::VirtualDesktop { id: *id }
-        }
-        FrontendCondition::WindowMatch { process, title } => {
-            EngineCondition::WindowMatch {
-                process_hash: process.as_ref().filter(|s| !s.is_empty())
-                    .map(|p| calculate_hash(&crate::shared::clean_process_name(p))),
-                title_contains: title.as_ref().filter(|s| !s.is_empty()).map(|t| t.to_lowercase()),
-            }
-        }
-    }).collect();
-
+    let conditions = rule.conditions.iter().map(compile_condition).collect();
     let tap_actions = rule.actions.iter().map(compile_action).collect();
     let hold_actions = rule.hold_actions.as_ref()
         .map(|actions| actions.iter().map(compile_action).collect())
@@ -236,5 +231,17 @@ mod tests {
 
         assert_eq!(hash1, hash2);
         assert_ne!(hash1, hash3);
+    }
+
+    #[test]
+    fn test_unimplemented_virtual_desktop_condition_fails_closed() {
+        let compiled = compile_condition(&FrontendCondition::VirtualDesktop { id: 7 });
+        match compiled {
+            EngineCondition::WindowMatch { process_hash, title_contains } => {
+                assert!(process_hash.is_none());
+                assert_eq!(title_contains.as_deref(), Some("\0"));
+            }
+            other => panic!("Unexpected compiled condition: {:?}", other),
+        }
     }
 }
