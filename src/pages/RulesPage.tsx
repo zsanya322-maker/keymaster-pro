@@ -182,7 +182,7 @@ function makeNewRule(mode: RulesViewMode, order = 0): FrontendRule {
     return {
       ...baseRule(order),
       trigger: { type: 'keyDown', code: 0, modifiers: 0 },
-      actions: [{ type: 'runMacro', steps: [] }],
+      actions: [{ type: 'runMacro', steps: [], playback: { speed: 1, repeatCount: 1, repeatWhileHeld: false } }],
     };
   }
 

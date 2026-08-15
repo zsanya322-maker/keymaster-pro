@@ -2,11 +2,11 @@ use std::collections::HashMap;
 
 use crate::schemas::engine::{
     CompiledMouseMoveRule, CompiledRule, CompiledTapHoldRule, EngineAction, EngineCondition,
-    EngineSchema, SimulatorCommand,
+    EngineSchema, MacroPlaybackConfig, SimulatorCommand,
 };
 use crate::schemas::frontend::{
     FrontendAction, FrontendCondition, FrontendConfig, FrontendRule, FrontendTrigger,
-    MacroAction, MouseWheelDirection,
+    MacroAction, MacroPlayback, MacroStep, MouseWheelDirection,
 };
 use crate::shared::calculate_hash;
 
@@ -154,7 +154,12 @@ fn compile_rule(
     trigger_on_down: bool,
 ) -> CompiledRule {
     let conditions = rule.conditions.iter().map(compile_condition).collect();
-    let actions = rule.actions.iter().map(compile_action).collect();
+    let actions = rule
+        .actions
+        .iter()
+        .enumerate()
+        .map(|(index, action)| compile_action(action, macro_action_key(&rule.id, false, index)))
+        .collect();
 
     CompiledRule {
         priority: rule.priority,
@@ -182,11 +187,22 @@ fn compile_mouse_move_rule(
 
 fn compile_tap_hold_rule(rule: &FrontendRule, timeout_ms: u32) -> CompiledTapHoldRule {
     let conditions = rule.conditions.iter().map(compile_condition).collect();
-    let tap_actions = rule.actions.iter().map(compile_action).collect();
+    let tap_actions = rule
+        .actions
+        .iter()
+        .enumerate()
+        .map(|(index, action)| compile_action(action, macro_action_key(&rule.id, false, index)))
+        .collect();
     let hold_actions = rule
         .hold_actions
         .as_ref()
-        .map(|actions| actions.iter().map(compile_action).collect())
+        .map(|actions| {
+            actions
+                .iter()
+                .enumerate()
+                .map(|(index, action)| compile_action(action, macro_action_key(&rule.id, true, index)))
+                .collect()
+        })
         .unwrap_or_default();
 
     CompiledTapHoldRule {
@@ -198,7 +214,40 @@ fn compile_tap_hold_rule(rule: &FrontendRule, timeout_ms: u32) -> CompiledTapHol
     }
 }
 
-fn compile_action(action: &FrontendAction) -> EngineAction {
+fn macro_action_key(rule_id: &str, hold: bool, index: usize) -> u64 {
+    calculate_hash(&format!("{}:{}:{}", rule_id, if hold { "hold" } else { "tap" }, index))
+}
+
+pub fn compile_macro_playback(playback: &MacroPlayback) -> MacroPlaybackConfig {
+    MacroPlaybackConfig {
+        speed: playback.speed,
+        repeat_count: playback.repeat_count,
+        repeat_while_held: playback.repeat_while_held,
+    }
+    .normalized()
+}
+
+pub fn compile_macro_commands(steps: &[MacroStep]) -> Vec<SimulatorCommand> {
+    let mut commands = Vec::new();
+    for step in steps {
+        match step.action {
+            MacroAction::KeyDown { code } => commands.push(SimulatorCommand::PressKey(code)),
+            MacroAction::KeyUp { code } => commands.push(SimulatorCommand::ReleaseKey(code)),
+            MacroAction::MouseDown { code } => commands.push(SimulatorCommand::MousePress(code)),
+            MacroAction::MouseUp { code } => commands.push(SimulatorCommand::MouseRelease(code)),
+            MacroAction::MouseMove { dx, dy } => commands.push(SimulatorCommand::MouseMove { dx, dy }),
+            MacroAction::MouseScroll { delta } => commands.push(SimulatorCommand::MouseScroll { delta }),
+            MacroAction::MouseHScroll { delta } => commands.push(SimulatorCommand::MouseHScroll { delta }),
+            MacroAction::MouseToAbsolute { x, y } => commands.push(SimulatorCommand::MouseAbsolute { x, y }),
+        }
+        if step.delay_ms > 0 {
+            commands.push(SimulatorCommand::Delay(step.delay_ms));
+        }
+    }
+    commands
+}
+
+fn compile_action(action: &FrontendAction, macro_key: u64) -> EngineAction {
     match action {
         FrontendAction::RemapKey { chord } => EngineAction::RemapKey {
             code: chord.code,
@@ -206,33 +255,11 @@ fn compile_action(action: &FrontendAction) -> EngineAction {
         },
         FrontendAction::RemapMouse { code } => EngineAction::RemapMouse { code: *code },
         FrontendAction::TypeText { text } => EngineAction::TypeText { text: text.clone() },
-        FrontendAction::RunMacro { steps } => {
-            let mut commands = Vec::new();
-            for step in steps {
-                match step.action {
-                    MacroAction::KeyDown { code } => commands.push(SimulatorCommand::PressKey(code)),
-                    MacroAction::KeyUp { code } => commands.push(SimulatorCommand::ReleaseKey(code)),
-                    MacroAction::MouseDown { code } => commands.push(SimulatorCommand::MousePress(code)),
-                    MacroAction::MouseUp { code } => commands.push(SimulatorCommand::MouseRelease(code)),
-                    MacroAction::MouseMove { dx, dy } => {
-                        commands.push(SimulatorCommand::MouseMove { dx, dy })
-                    }
-                    MacroAction::MouseScroll { delta } => {
-                        commands.push(SimulatorCommand::MouseScroll { delta })
-                    }
-                    MacroAction::MouseHScroll { delta } => {
-                        commands.push(SimulatorCommand::MouseHScroll { delta })
-                    }
-                    MacroAction::MouseToAbsolute { x, y } => {
-                        commands.push(SimulatorCommand::MouseAbsolute { x, y })
-                    }
-                }
-                if step.delay_ms > 0 {
-                    commands.push(SimulatorCommand::Delay(step.delay_ms));
-                }
-            }
-            EngineAction::MacroCommands { commands }
-        }
+        FrontendAction::RunMacro { steps, playback } => EngineAction::MacroCommands {
+            commands: compile_macro_commands(steps),
+            playback: compile_macro_playback(playback),
+            macro_key,
+        },
         FrontendAction::ToggleLayer { layer_id } => EngineAction::ToggleLayer {
             layer_id_hash: calculate_hash(layer_id),
         },

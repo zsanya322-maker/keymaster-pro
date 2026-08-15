@@ -259,7 +259,7 @@ pub async fn dispatch(
                 modify_profile(&active_id, state, |prof| {
                     use crate::schemas::frontend::{
                         FrontendAction, FrontendRule, FrontendTrigger, KeyChord, MacroAction,
-                        MacroStep,
+                        MacroPlayback, MacroStep,
                     };
                     let new_rule = match example_type {
                         "remap" => FrontendRule {
@@ -313,6 +313,7 @@ pub async fn dispatch(
                                         delay_ms: 50,
                                     },
                                 ],
+                                playback: MacroPlayback::default(),
                             }],
                             hold_actions: None,
                             conditions: vec![],

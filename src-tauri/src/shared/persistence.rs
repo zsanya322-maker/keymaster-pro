@@ -20,7 +20,7 @@ use crate::shared::types::Profile;
 /// `schemaVersion` хранится в JSON на границе persistence и не входит в
 /// runtime-структуру `Profile`, поэтому существующий IPC/frontend контракт
 /// остаётся совместимым.
-pub const PROFILE_SCHEMA_VERSION: u32 = 2;
+pub const PROFILE_SCHEMA_VERSION: u32 = 3;
 
 #[derive(Debug, Clone)]
 struct LoadedProfile {
@@ -133,6 +133,32 @@ fn migrate_profile_value(mut value: Value) -> Result<(Value, bool), String> {
 
                 object.insert("schemaVersion".to_string(), json!(2));
                 version = 2;
+            }
+            2 => {
+                // v2 -> v3: macro playback controls. Defaults reproduce the old
+                // one-shot 1.0x playback exactly.
+                if let Some(rules) = object.get_mut("rules").and_then(Value::as_array_mut) {
+                    for rule in rules {
+                        let Some(rule_obj) = rule.as_object_mut() else { continue; };
+                        for action_field in ["actions", "holdActions"] {
+                            let Some(actions) = rule_obj.get_mut(action_field).and_then(Value::as_array_mut) else {
+                                continue;
+                            };
+                            for action in actions {
+                                let Some(action_obj) = action.as_object_mut() else { continue; };
+                                if action_obj.get("type").and_then(Value::as_str) == Some("runMacro") {
+                                    action_obj.entry("playback".to_string()).or_insert_with(|| json!({
+                                        "speed": 1.0,
+                                        "repeatCount": 1,
+                                        "repeatWhileHeld": false
+                                    }));
+                                }
+                            }
+                        }
+                    }
+                }
+                object.insert("schemaVersion".to_string(), json!(3));
+                version = 3;
             }
             other => return Err(format!("Нет миграции для версии профиля {}", other)),
         }

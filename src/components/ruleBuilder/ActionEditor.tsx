@@ -33,7 +33,7 @@ export const ActionEditor: React.FC<ActionEditorProps> = ({ action, onChange, on
     } else if (type === 'typeText') {
       onChange({ type, text: '' });
     } else if (type === 'runMacro') {
-      onChange({ type, steps: [] });
+      onChange({ type, steps: [], playback: { speed: 1, repeatCount: 1, repeatWhileHeld: false } });
     } else if (type === 'toggleLayer' || type === 'holdLayer') {
       onChange({ type, layerId: '' });
     } else if (type === 'systemVolume') {

@@ -70,6 +70,33 @@ pub enum EngineCondition {
     },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MacroPlaybackConfig {
+    pub speed: f32,
+    pub repeat_count: u32,
+    pub repeat_while_held: bool,
+}
+
+impl Default for MacroPlaybackConfig {
+    fn default() -> Self {
+        Self {
+            speed: 1.0,
+            repeat_count: 1,
+            repeat_while_held: false,
+        }
+    }
+}
+
+impl MacroPlaybackConfig {
+    pub fn normalized(self) -> Self {
+        Self {
+            speed: if self.speed.is_finite() { self.speed.clamp(0.1, 10.0) } else { 1.0 },
+            repeat_count: self.repeat_count.clamp(1, 10_000),
+            repeat_while_held: self.repeat_while_held,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum SimulatorCommand {
     PressKey(u8),
@@ -92,7 +119,11 @@ pub enum EngineAction {
     RemapKey { code: u8, modifiers: u16 },
     RemapMouse { code: u8 },
     TypeText { text: String },
-    MacroCommands { commands: Vec<SimulatorCommand> },
+    MacroCommands {
+        commands: Vec<SimulatorCommand>,
+        playback: MacroPlaybackConfig,
+        macro_key: u64,
+    },
     ToggleLayer { layer_id_hash: u64 },
     HoldLayerPush { layer_id_hash: u64 },
     HoldLayerPop { layer_id_hash: u64 },

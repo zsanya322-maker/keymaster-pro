@@ -124,6 +124,24 @@ fn default_mouse_move_cooldown() -> u32 {
     120
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct MacroPlayback {
+    pub speed: f32,
+    pub repeat_count: u32,
+    pub repeat_while_held: bool,
+}
+
+impl Default for MacroPlayback {
+    fn default() -> Self {
+        Self {
+            speed: 1.0,
+            repeat_count: 1,
+            repeat_while_held: false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum FrontendAction {
@@ -133,7 +151,7 @@ pub enum FrontendAction {
     },
     RemapMouse { code: u8 },
     TypeText { text: String },
-    RunMacro { steps: Vec<MacroStep> },
+    RunMacro { steps: Vec<MacroStep>, #[serde(default)] playback: MacroPlayback },
     ToggleLayer { layer_id: String },
     HoldLayer { layer_id: String },
     SystemVolume { action: String },

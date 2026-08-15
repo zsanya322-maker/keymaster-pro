@@ -57,11 +57,17 @@ export type FrontendTrigger =
   | { type: 'tapHoldKeyDown'; code: number; timeoutMs: number }
   | { type: 'typedText'; sequence: string }
 
+export interface MacroPlayback {
+  speed: number
+  repeatCount: number
+  repeatWhileHeld: boolean
+}
+
 export type FrontendAction =
   | { type: 'remapKey'; code: number; modifiers: number }
   | { type: 'remapMouse'; code: number }
   | { type: 'typeText'; text: string }
-  | { type: 'runMacro'; steps: MacroStep[] }
+  | { type: 'runMacro'; steps: MacroStep[]; playback: MacroPlayback }
   | { type: 'toggleLayer'; layerId: string }
   | { type: 'holdLayer'; layerId: string }
   | { type: 'systemVolume'; action: 'mute' | 'up' | 'down' }
