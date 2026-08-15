@@ -2,13 +2,53 @@ use serde::{Deserialize, Serialize};
 
 use crate::schemas::frontend::{FrontendRule, LayerMeta, RuleFolder};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum MatchMode {
+    #[default]
+    Any,
+    All,
+}
+
+/// Structured application binding used by profile auto-switch.
+///
+/// `linked_apps` remains on Profile for backward compatibility and migrates
+/// semantically as an exact process-name binding. New UI writes this structure.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileBinding {
+    #[serde(default)]
+    pub process: Option<String>,
+    #[serde(default)]
+    pub path: Option<String>,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub class_name: Option<String>,
+    #[serde(default)]
+    pub virtual_desktop_id: Option<String>,
+    #[serde(default)]
+    pub monitor_id: Option<String>,
+    #[serde(default)]
+    pub fullscreen: Option<bool>,
+    #[serde(default)]
+    pub mode: MatchMode,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Profile {
     pub id: String,
     pub name: String,
     pub is_default: bool,
+    /// Legacy exact process-name bindings. Kept readable/writable through the
+    /// 0.3.x migration window so old exports remain valid.
+    #[serde(default)]
     pub linked_apps: Vec<String>,
+    #[serde(default)]
+    pub bindings: Vec<ProfileBinding>,
+    #[serde(default)]
+    pub order: i32,
     pub rules: Vec<FrontendRule>,
     pub layers: Vec<LayerMeta>,
     #[serde(default)]
@@ -28,7 +68,11 @@ pub struct AppConfig {
     pub kb_hook_enabled: bool,
     pub mouse_hook_enabled: bool,
     pub debug_mode: bool,
+    /// Persisted manual/preferred profile. Runtime auto-switch must NEVER rewrite
+    /// this field just because the foreground window changed.
     pub active_profile_id: String,
+    pub auto_switch_profiles: bool,
+    pub manual_profile_lock: bool,
     pub scale: f64,
     pub restore_mouse_after_macro: bool,
     /// Single VK used to cancel every queued/running macro. 0 disables it.
@@ -53,6 +97,8 @@ impl Default for AppConfig {
             mouse_hook_enabled: true,
             debug_mode: false,
             active_profile_id: "1".to_string(),
+            auto_switch_profiles: false,
+            manual_profile_lock: false,
             scale: 0.85,
             restore_mouse_after_macro: true,
             macro_emergency_stop_vk: 0x13, // Pause
