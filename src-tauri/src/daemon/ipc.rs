@@ -14,60 +14,75 @@ use crate::shared::constants;
 
 use super::ipc_types::*;
 
-/// Start the IPC server.
+fn pipe_options(first_instance: bool) -> ServerOptions {
+    let mut options = ServerOptions::new();
+    options
+        .first_pipe_instance(first_instance)
+        .max_instances(16)
+        .out_buffer_size(65536)
+        .in_buffer_size(65536);
+    options
+}
+
+/// Захватить первый Named Pipe instance эксклюзивно.
 ///
-/// Первый pipe instance создаётся с FILE_FLAG_FIRST_PIPE_INSTANCE. Это делает
-/// имя pipe межпроцессным single-owner lock: второй daemon не может тихо
-/// установить второй комплект глобальных hooks и обслуживать тот же IPC name.
-pub async fn start_ipc_server(state: DaemonStateRef) -> Result<(), String> {
+/// Вызывается runner'ом синхронно внутри Tokio runtime ДО запуска simulator,
+/// context tracker и global hooks. Поэтому второй daemon не успевает даже
+/// временно установить второй hook engine.
+pub fn reserve_first_pipe_instance() -> Result<NamedPipeServer, String> {
+    let pipe_path = constants::IPC_PIPE_NAME;
+    let server = pipe_options(true).create(pipe_path).map_err(|e| {
+        format!(
+            "Не удалось получить first Named Pipe instance '{}': {}. Вероятно, другой daemon уже запущен.",
+            pipe_path, e
+        )
+    })?;
+    info!("IPC: first pipe instance acquired exclusively");
+    Ok(server)
+}
+
+/// Start the IPC server using an already-reserved first pipe instance.
+pub async fn start_ipc_server(
+    state: DaemonStateRef,
+    mut server: NamedPipeServer,
+) -> Result<(), String> {
     let pipe_path = constants::IPC_PIPE_NAME;
     info!("IPC сервер запускается на {}", pipe_path);
 
-    let mut first_instance = true;
-
     loop {
-        let mut options = ServerOptions::new();
-        options
-            .first_pipe_instance(first_instance)
-            .max_instances(16)
-            .out_buffer_size(65536)
-            .in_buffer_size(65536);
-
-        let server = match options.create(pipe_path) {
-            Ok(server) => {
-                if first_instance {
-                    info!("IPC: first pipe instance acquired exclusively");
-                    first_instance = false;
-                }
-                server
-            }
-            Err(e) if first_instance => {
-                return Err(format!(
-                    "Не удалось получить first Named Pipe instance '{}': {}. Вероятно, другой daemon уже запущен.",
-                    pipe_path, e
-                ));
-            }
-            Err(e) => {
-                warn!("Failed to create next Named Pipe instance: {}. Retrying in 100ms...", e);
-                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                continue;
-            }
-        };
-
         info!("IPC: waiting for client connection...");
         if let Err(e) = server.connect().await {
-            warn!("Connection error: {}. Retrying in 50ms...", e);
+            warn!("Connection error: {}. Recreating listener in 50ms...", e);
             tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            server = loop {
+                match pipe_options(false).create(pipe_path) {
+                    Ok(next) => break next,
+                    Err(create_error) => {
+                        warn!("Failed to recreate Named Pipe listener: {}. Retrying in 100ms...", create_error);
+                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                    }
+                }
+            };
             continue;
         }
         info!("IPC: client connected");
 
-        let state = state.clone();
+        let state_for_client = state.clone();
         tokio::spawn(async move {
-            if let Err(e) = handle_client(server, state).await {
+            if let Err(e) = handle_client(server, state_for_client).await {
                 warn!("IPC: client handling error: {}", e);
             }
         });
+
+        server = loop {
+            match pipe_options(false).create(pipe_path) {
+                Ok(next) => break next,
+                Err(e) => {
+                    warn!("Failed to create next Named Pipe instance: {}. Retrying in 100ms...", e);
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                }
+            }
+        };
     }
 }
 
