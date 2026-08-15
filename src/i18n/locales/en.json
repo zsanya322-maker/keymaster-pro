@@ -26,7 +26,12 @@
     "enabled": "Enabled",
     "disabled": "Disabled",
     "browse": "Browse...",
-    "copy": "Copy"
+    "copy": "Copy",
+    "name": "Name",
+    "create": "Create",
+    "reset": "Reset",
+    "advanced": "Advanced",
+    "saving": "Saving…"
   },
   "menu": {
     "file": "File",
@@ -103,7 +108,24 @@
     "toast_about": "KeyMaster Pro: high-density keyboard & mouse utility.",
     "toast_daemon_stop_failed": "Failed to stop daemon: {{error}}",
     "toast_daemon_start_failed": "Failed to start daemon: {{error}}",
-    "invalid_mouse_code": "Invalid mouse code — re-record the button"
+    "invalid_mouse_code": "Invalid mouse code — re-record the button",
+    "tree": {
+      "more": "Actions",
+      "add": "Add",
+      "new_folder": "New folder",
+      "folders": "Folders",
+      "disable": "Disable",
+      "enable": "Enable",
+      "duplicate": "Duplicate",
+      "new_rule_here": "New rule here",
+      "new_subfolder": "New subfolder",
+      "rename": "Rename",
+      "rename_folder": "Rename folder",
+      "delete_folder": "Delete folder",
+      "delete_folder_hint": "Rules and subfolders will not be deleted; they will be moved one level up.",
+      "folder_name": "Folder name",
+      "copy_suffix": "— copy"
+    }
   },
   "layers": {
     "title": "Layers Management",
@@ -244,7 +266,9 @@
     "listening_tooltip": "Listening...",
     "capture_tooltip": "Click to capture key",
     "press_key": "Press key...",
-    "none": "None"
+    "none": "None",
+    "modifiers": "Modifiers",
+    "exact_sides": "Distinguish left/right modifier"
   },
   "onboarding": {
     "welcome_title": "Welcome to KeyMaster Pro",

@@ -26,7 +26,12 @@
     "enabled": "Включено",
     "disabled": "Выключено",
     "browse": "Обзор...",
-    "copy": "Копировать"
+    "copy": "Копировать",
+    "name": "Название",
+    "create": "Создать",
+    "reset": "Сброс",
+    "advanced": "Дополнительно",
+    "saving": "Сохранение…"
   },
   "menu": {
     "file": "Файл",
@@ -103,7 +108,24 @@
     "toast_about": "KeyMaster Pro: продвинутая утилита для клавиатуры и мыши.",
     "toast_daemon_stop_failed": "Не удалось остановить daemon: {{error}}",
     "toast_daemon_start_failed": "Не удалось запустить daemon: {{error}}",
-    "invalid_mouse_code": "Невалидный код мыши — перезапишите кнопку"
+    "invalid_mouse_code": "Невалидный код мыши — перезапишите кнопку",
+    "tree": {
+      "more": "Действия",
+      "add": "Добавить",
+      "new_folder": "Новая папка",
+      "folders": "Папки",
+      "disable": "Отключить",
+      "enable": "Включить",
+      "duplicate": "Дублировать",
+      "new_rule_here": "Новое правило здесь",
+      "new_subfolder": "Новая подпапка",
+      "rename": "Переименовать",
+      "rename_folder": "Переименовать папку",
+      "delete_folder": "Удалить папку",
+      "delete_folder_hint": "Правила и подпапки не удалятся — они будут перемещены на уровень выше.",
+      "folder_name": "Название папки",
+      "copy_suffix": "— копия"
+    }
   },
   "layers": {
     "title": "Управление слоями",
@@ -244,7 +266,9 @@
     "listening_tooltip": "Ожидание нажатия...",
     "capture_tooltip": "Нажмите, чтобы захватить клавишу",
     "press_key": "Нажмите клавишу...",
-    "none": "Сброшено"
+    "none": "Сброшено",
+    "modifiers": "Модификаторы",
+    "exact_sides": "Различать левый/правый модификатор"
   },
   "onboarding": {
     "welcome_title": "Добро пожаловать в KeyMaster Pro",
