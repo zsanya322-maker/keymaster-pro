@@ -130,6 +130,14 @@ pub fn greet(name: &str) -> String {
     format!("Привет, {}! KeyMaster Pro работает 🎉", name)
 }
 
+/// Полностью завершить GUI. В отличие от закрытия окна, эта команда всегда
+/// означает явный пункт меню «Выход» и не должна превращаться в hide-to-tray.
+#[tauri::command]
+pub fn quit_app(app_handle: tauri::AppHandle) {
+    info!("quit_app: explicit application exit");
+    app_handle.exit(0);
+}
+
 /// Перезапустить приложение (используется после обновления).
 #[tauri::command]
 pub fn restart_app(app_handle: tauri::AppHandle) {
