@@ -209,13 +209,16 @@ pub async fn restart_as_admin(state: State<'_, GuiState>) -> Result<(), String> 
 
         let verb = HSTRING::from("runas");
         let file = HSTRING::from(exe_path);
+        // Elevated-процесс создаётся пока старый GUI ещё жив. Он подождёт ДО
+        // запуска Tauri/single-instance, чтобы старый instance lock успел уйти.
+        let parameters = HSTRING::from("--gui-delay-ms 650");
 
         unsafe {
             let _ = ShellExecuteW(
                 None,
                 &verb,
                 &file,
-                None,
+                &parameters,
                 None,
                 SW_SHOWNORMAL,
             );
