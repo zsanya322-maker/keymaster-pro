@@ -67,6 +67,14 @@ function triggerText(trigger: FrontendTrigger): string {
     case 'mouseDown':
     case 'mouseUp':
       return vkToName(trigger.code);
+    case 'mouseWheel': {
+      const arrow = { up: '↑', down: '↓', left: '←', right: '→' }[trigger.direction];
+      return `Wheel ${arrow}`;
+    }
+    case 'mouseDoubleClick':
+      return `2× ${vkToName(trigger.code)}`;
+    case 'mouseMove':
+      return 'Mouse move';
     case 'typedText':
       return `“${trigger.sequence}”`;
   }
@@ -74,7 +82,11 @@ function triggerText(trigger: FrontendTrigger): string {
 
 function triggerIcon(trigger: FrontendTrigger) {
   if (trigger.type === 'typedText') return FileText;
-  if (trigger.type === 'mouseDown' || trigger.type === 'mouseUp') return Mouse;
+  if (trigger.type === 'mouseDown'
+    || trigger.type === 'mouseUp'
+    || trigger.type === 'mouseWheel'
+    || trigger.type === 'mouseDoubleClick'
+    || trigger.type === 'mouseMove') return Mouse;
   return Keyboard;
 }
 
