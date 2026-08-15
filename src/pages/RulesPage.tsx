@@ -112,7 +112,8 @@ function isMouseTrigger(trigger: FrontendTrigger): boolean {
 }
 
 function isInvalidMouseTrigger(trigger: FrontendTrigger): boolean {
-  return isMouseTrigger(trigger) && (trigger.code < 1 || trigger.code > 5);
+  return (trigger.type === 'mouseDown' || trigger.type === 'mouseUp')
+    && (trigger.code < 1 || trigger.code > 5);
 }
 
 function formatConditionLabel(condition: FrontendCondition, t: TFunction): string {
@@ -585,7 +586,11 @@ export const RulesPage: React.FC<RulesPageProps> = ({ mode = 'all' }) => {
                         value={{ code: draftRule.trigger.code, modifiers: draftRule.trigger.modifiers }}
                         onChange={(chord) => setDraftRule({
                           ...draftRule,
-                          trigger: { ...draftRule.trigger, ...chord },
+                          trigger: {
+                            type: draftRule.trigger.type === 'keyUp' ? 'keyUp' : 'keyDown',
+                            code: chord.code,
+                            modifiers: chord.modifiers,
+                          },
                         })}
                         className="flex-1 min-w-0 max-w-[520px] text-left"
                       />
@@ -598,7 +603,13 @@ export const RulesPage: React.FC<RulesPageProps> = ({ mode = 'all' }) => {
                           allowModifiers={false}
                           onChange={(chord) => setDraftRule({
                             ...draftRule,
-                            trigger: { ...draftRule.trigger, code: chord.code },
+                            trigger: {
+                              type: 'tapHoldKeyDown',
+                              code: chord.code,
+                              timeoutMs: draftRule.trigger.type === 'tapHoldKeyDown'
+                                ? draftRule.trigger.timeoutMs
+                                : 200,
+                            },
                           })}
                           className="flex-1 min-w-0 max-w-[420px] text-left"
                         />
@@ -633,7 +644,10 @@ export const RulesPage: React.FC<RulesPageProps> = ({ mode = 'all' }) => {
                         disabled={saving}
                         onChange={(event) => setDraftRule({
                           ...draftRule,
-                          trigger: { ...draftRule.trigger, code: Number.parseInt(event.target.value, 10) || 1 },
+                          trigger: {
+                            type: draftRule.trigger.type === 'mouseUp' ? 'mouseUp' : 'mouseDown',
+                            code: Number.parseInt(event.target.value, 10) || 1,
+                          },
                         })}
                         className={`${selectClass} flex-1 min-w-0 max-w-[520px] disabled:opacity-50`}
                       >

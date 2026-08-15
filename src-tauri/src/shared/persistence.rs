@@ -550,7 +550,7 @@ mod tests {
         assert_eq!(profile.name, "Legacy");
 
         let migrated: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
-        assert_eq!(migrated.get("schemaVersion").and_then(Value::as_u64), Some(1));
+        assert_eq!(migrated.get("schemaVersion").and_then(Value::as_u64), Some(PROFILE_SCHEMA_VERSION as u64));
         assert_eq!(migrated.get("name").and_then(Value::as_str), Some("Legacy"));
 
         let _ = fs::remove_file(&path);
@@ -565,6 +565,7 @@ mod tests {
             linked_apps: vec![],
             rules: vec![],
             layers: vec![],
+            folders: vec![],
         };
 
         save_profile(&profile).unwrap();
@@ -574,7 +575,7 @@ mod tests {
 
         let path = profiles_dir().unwrap().join("test_rt.json");
         let saved: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
-        assert_eq!(saved.get("schemaVersion").and_then(Value::as_u64), Some(1));
+        assert_eq!(saved.get("schemaVersion").and_then(Value::as_u64), Some(PROFILE_SCHEMA_VERSION as u64));
 
         let _ = delete_profile("test_rt");
     }
@@ -655,6 +656,7 @@ mod tests {
             linked_apps: vec![],
             rules: vec![],
             layers: vec![],
+            folders: vec![],
         };
         let value = export_profile_value(&profile).unwrap();
         assert_eq!(

@@ -103,6 +103,7 @@ fn resolve_startup_profile(
             linked_apps: vec![],
             rules: vec![],
             layers: vec![],
+            folders: vec![],
         };
         crate::shared::persistence::save_profile(&default_profile)?;
         info!("Created startup default profile '{}'", id);
