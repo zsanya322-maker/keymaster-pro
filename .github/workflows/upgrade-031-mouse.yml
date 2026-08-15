@@ -1,0 +1,54 @@
+name: Upgrade 0.3.1 Mouse Runtime
+
+on:
+  push:
+    branches:
+      - dev/v0.3.1-mouse-macros
+    paths:
+      - tools/upgrade_031_mouse.py
+      - .github/workflows/upgrade-031-mouse.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dev/v0.3.1-mouse-macros
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Apply source transformation
+        run: python tools/upgrade_031_mouse.py
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Frontend build
+        run: pnpm build
+      - name: Rust check
+        working-directory: src-tauri
+        run: cargo check --all-targets
+      - name: Rust tests
+        working-directory: src-tauri
+        run: cargo test
+      - name: Remove one-shot upgrader
+        shell: pwsh
+        run: |
+          Remove-Item tools/upgrade_031_mouse.py -Force
+          Remove-Item .github/workflows/upgrade-031-mouse.yml -Force
+      - name: Commit validated upgrade
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "feat(0.3.1): complete typed mouse rule runtime"
+          git push origin HEAD:dev/v0.3.1-mouse-macros
