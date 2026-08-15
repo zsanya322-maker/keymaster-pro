@@ -113,8 +113,9 @@ impl MoveGate {
 #[cfg(target_os = "windows")]
 pub fn system_double_click_limits() -> (Duration, i32, i32) {
     use std::sync::LazyLock;
+    use windows::Win32::UI::Input::KeyboardAndMouse::GetDoubleClickTime;
     use windows::Win32::UI::WindowsAndMessaging::{
-        GetDoubleClickTime, GetSystemMetrics, SM_CXDOUBLECLK, SM_CYDOUBLECLK,
+        GetSystemMetrics, SM_CXDOUBLECLK, SM_CYDOUBLECLK,
     };
 
     static LIMITS: LazyLock<(Duration, i32, i32)> = LazyLock::new(|| unsafe {
