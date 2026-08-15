@@ -1,1 +1,1 @@
-checkpoint-7: shutdown ack ordering, default-profile invariants, safe startup profile recovery
+checkpoint-8: daemon spawn-stop race hardening, safe process transitions, native shell config flush
