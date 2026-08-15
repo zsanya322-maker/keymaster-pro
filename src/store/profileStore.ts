@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { invoke } from '../lib/ipc'
+import { triggerToast } from '../lib/toast'
 import type { Profile } from '../lib/types'
 
 interface ProfileState {
@@ -11,6 +12,12 @@ interface ProfileState {
   saveProfile: (profile: Profile) => Promise<boolean>
   createProfile: (profile: Partial<Profile>) => Promise<boolean>
   deleteProfile: (id: string) => Promise<boolean>
+}
+
+function mutationFailed(action: string, error: unknown) {
+  const message = error instanceof Error ? error.message : String(error)
+  console.error(`${action}:`, error)
+  triggerToast(`${action}: ${message}`, 'error')
 }
 
 export const useProfileStore = create<ProfileState>((set, get) => ({
@@ -26,7 +33,7 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
       })
       return true
     } catch (error) {
-      console.error('Failed to load profiles', error)
+      mutationFailed('Не удалось загрузить профили', error)
       return false
     }
   },
@@ -37,7 +44,7 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
       set({ activeProfileId: id })
       return true
     } catch (error) {
-      console.error('Failed to activate profile', error)
+      mutationFailed('Не удалось активировать профиль', error)
       return false
     }
   },
@@ -49,7 +56,7 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
       set({ profiles: profiles.map(item => item.id === profile.id ? profile : item) })
       return true
     } catch (error) {
-      console.error('Failed to save profile', error)
+      mutationFailed(`Не удалось сохранить профиль “${profile.name}”`, error)
       return false
     }
   },
@@ -68,7 +75,7 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
       await invoke('ipc_call', { method: 'profile.create', params: newProfile })
       return await get().loadProfiles()
     } catch (error) {
-      console.error('Failed to create profile', error)
+      mutationFailed('Не удалось создать профиль', error)
       return false
     }
   },
@@ -78,7 +85,7 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
       await invoke('ipc_call', { method: 'profile.delete', params: { id } })
       return await get().loadProfiles()
     } catch (error) {
-      console.error('Failed to delete profile', error)
+      mutationFailed('Не удалось удалить профиль', error)
       return false
     }
   },
