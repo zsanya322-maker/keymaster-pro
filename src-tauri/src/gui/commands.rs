@@ -213,16 +213,28 @@ pub async fn restart_as_admin(state: State<'_, GuiState>) -> Result<(), String> 
         // запуска Tauri/single-instance, чтобы старый instance lock успел уйти.
         let parameters = HSTRING::from("--gui-delay-ms 650");
 
-        unsafe {
-            let _ = ShellExecuteW(
+        let launch_result = unsafe {
+            ShellExecuteW(
                 None,
                 &verb,
                 &file,
                 &parameters,
                 None,
                 SW_SHOWNORMAL,
-            );
+            )
+        };
+        let launch_code = launch_result.0 as isize;
+
+        if launch_code <= 32 {
+            warn!("restart_as_admin: ShellExecuteW failed/cancelled, code={}", launch_code);
+            // Мы уже штатно остановили daemon. Если пользователь отменил UAC,
+            // оставляем старое GUI открытым и возвращаем ему engine обратно.
+            if let Err(error) = spawn_daemon(state) {
+                warn!("restart_as_admin: не удалось восстановить daemon: {}", error);
+            }
+            return Err(format!("Запуск от Администратора отменён или завершился ошибкой (код {})", launch_code));
         }
+
         std::process::exit(0);
     }
 
