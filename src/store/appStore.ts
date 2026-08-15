@@ -1,0 +1,172 @@
+/**
+ * App Store — глобальное GUI-состояние приложения.
+ *
+ * Профили принадлежат `profileStore`; здесь намеренно нет второй копии
+ * `profiles/activeProfileId`, чтобы два Zustand-store не могли расходиться.
+ */
+
+import { create } from 'zustand'
+import type { AppConfig } from '../lib/types'
+import { invoke } from '../lib/ipc'
+
+interface DiagnosticsState {
+  keystrokes: number
+  cpu: number
+  ram: number
+  latency: number
+}
+
+interface AppState {
+  config: AppConfig
+  setConfig: (config: Partial<AppConfig>) => void
+  loadConfig: () => Promise<void>
+  flushConfig: () => Promise<void>
+
+  daemonConnected: boolean
+  setDaemonConnected: (connected: boolean) => void
+
+  diagnostics: DiagnosticsState
+  setDiagnostics: (diagnostics: DiagnosticsState) => void
+
+  sidebarOpen: boolean
+  toggleSidebar: () => void
+}
+
+const defaultConfig: AppConfig = {
+  activeProfileId: null,
+  autostart: false,
+  minimizeToTray: true,
+  language: 'ru',
+  languageUserSelected: false,
+  kbHookEnabled: true,
+  mouseHookEnabled: true,
+  debugMode: false,
+  theme: 'light',
+  scale: 0.85,
+  fontSize: 12,
+  rowPadding: 8,
+  restoreMouseAfterMacro: true,
+  onboardingComplete: false,
+  tapHoldTimeoutMs: 200,
+}
+
+const DEBOUNCED_CONFIG_KEYS = new Set<keyof AppConfig>(['scale', 'fontSize', 'rowPadding'])
+
+let pendingConfigUpdate: Partial<AppConfig> = {}
+let configUpdateTimer: ReturnType<typeof setTimeout> | null = null
+let configUpdateInFlight: Promise<unknown> = Promise.resolve()
+
+function persistConfigPatch(payload: Partial<AppConfig>): Promise<unknown> {
+  if (Object.keys(payload).length === 0) return configUpdateInFlight
+
+  configUpdateInFlight = configUpdateInFlight
+    .catch(() => undefined)
+    .then(() => invoke<AppConfig>('update_gui_config', { patch: payload }))
+    .catch((error) => {
+      console.error('Failed to persist GUI config', error)
+      throw error
+    })
+
+  return configUpdateInFlight
+}
+
+function takePendingConfigUpdate(): Partial<AppConfig> {
+  const payload = pendingConfigUpdate
+  pendingConfigUpdate = {}
+  if (configUpdateTimer) {
+    clearTimeout(configUpdateTimer)
+    configUpdateTimer = null
+  }
+  return payload
+}
+
+function queueConfigUpdate(partial: Partial<AppConfig>) {
+  pendingConfigUpdate = { ...pendingConfigUpdate, ...partial }
+
+  if (configUpdateTimer) clearTimeout(configUpdateTimer)
+  configUpdateTimer = setTimeout(() => {
+    const payload = takePendingConfigUpdate()
+    void persistConfigPatch(payload).catch(() => {
+      // Ошибка уже залогирована; UI остаётся доступным.
+    })
+  }, 150)
+}
+
+function persistConfigUpdate(partial: Partial<AppConfig>) {
+  const keys = Object.keys(partial) as Array<keyof AppConfig>
+  const canDebounce = keys.length > 0 && keys.every((key) => DEBOUNCED_CONFIG_KEYS.has(key))
+
+  if (canDebounce) {
+    queueConfigUpdate(partial)
+    return
+  }
+
+  pendingConfigUpdate = { ...pendingConfigUpdate, ...partial }
+  const payload = takePendingConfigUpdate()
+  void persistConfigPatch(payload).catch(() => {
+    // Ошибка уже залогирована; UI остаётся доступным.
+  })
+}
+
+async function flushPendingConfig(): Promise<void> {
+  const payload = takePendingConfigUpdate()
+  if (Object.keys(payload).length > 0) {
+    await persistConfigPatch(payload)
+  } else {
+    await configUpdateInFlight
+  }
+}
+
+function systemUiLanguage(): 'ru' | 'en' {
+  if (typeof navigator === 'undefined') return 'ru'
+  return navigator.language.toLowerCase().startsWith('ru') ? 'ru' : 'en'
+}
+
+export const useAppStore = create<AppState>((set) => ({
+  config: defaultConfig,
+  setConfig: (partial) => {
+    set((state) => ({ config: { ...state.config, ...partial } }))
+    persistConfigUpdate(partial)
+  },
+  loadConfig: async () => {
+    try {
+      const serverConfig = await invoke<AppConfig>('get_gui_config')
+      if (!serverConfig) return
+
+      if (!serverConfig.languageUserSelected) {
+        // Старые версии записывали `en` как технический default, поэтому по
+        // одному полю language нельзя понять, выбирал ли его пользователь.
+        // Один раз берём язык Windows/WebView и фиксируем выбор маркером.
+        const language = systemUiLanguage()
+        const migratedConfig: AppConfig = {
+          ...serverConfig,
+          language,
+          languageUserSelected: true,
+        }
+        set({ config: migratedConfig })
+        await persistConfigPatch({ language, languageUserSelected: true })
+        return
+      }
+
+      set({ config: serverConfig })
+    } catch (error) {
+      console.error('Failed to load GUI config', error)
+      // Offline/browser fallback.
+    }
+  },
+  flushConfig: flushPendingConfig,
+
+  daemonConnected: false,
+  setDaemonConnected: (connected) => set({ daemonConnected: connected }),
+
+  diagnostics: {
+    keystrokes: 0,
+    cpu: 0,
+    ram: 0,
+    latency: 0,
+  },
+  setDiagnostics: (diagnostics) => set({ diagnostics }),
+
+  sidebarOpen: true,
+  toggleSidebar: () => set((state) => ({ sidebarOpen: !state.sidebarOpen })),
+}))

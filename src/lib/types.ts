@@ -75,6 +75,7 @@ export interface AppConfig {
   autostart: boolean
   minimizeToTray: boolean
   language: 'ru' | 'en'
+  languageUserSelected?: boolean
   kbHookEnabled: boolean
   mouseHookEnabled: boolean
   debugMode: boolean

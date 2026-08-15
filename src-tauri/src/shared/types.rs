@@ -14,9 +14,12 @@ pub struct Profile {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", default)]
 pub struct AppConfig {
     pub language: String,
+    /// False for legacy configs that predate explicit locale tracking. The GUI
+    /// then chooses ru/en from the Windows/WebView locale once and persists it.
+    pub language_user_selected: bool,
     pub theme: String,
     pub autostart: bool,
     pub minimize_to_tray: bool,
@@ -27,6 +30,8 @@ pub struct AppConfig {
     pub scale: f64,
     pub restore_mouse_after_macro: bool,
     pub onboarding_complete: bool,
+    /// Legacy compatibility field. Tap-Hold timeout is stored per rule and the
+    /// engine does not consume this global value.
     pub tap_hold_timeout_ms: u64,
     pub font_size: u32,
     pub row_padding: u32,
@@ -35,8 +40,9 @@ pub struct AppConfig {
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            language: "en".to_string(),
-            theme: "dark".to_string(),
+            language: "ru".to_string(),
+            language_user_selected: false,
+            theme: "light".to_string(),
             autostart: false,
             minimize_to_tray: true,
             kb_hook_enabled: true,

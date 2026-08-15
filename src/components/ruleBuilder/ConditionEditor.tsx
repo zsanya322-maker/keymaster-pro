@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
-import { FrontendCondition } from '../../lib/types';
+import { AlertTriangle, Crosshair, Trash2 } from 'lucide-react';
+import type { FrontendCondition } from '../../lib/types';
 import { useProfileStore } from '../../store/profileStore';
 
 interface ConditionEditorProps {
@@ -10,145 +11,148 @@ interface ConditionEditorProps {
   onRemove: () => void;
 }
 
+const controlClass = 'h-7 border border-app-border bg-app-bg px-2 text-[11px] text-app-text outline-none focus:border-app-primary';
+
 export const ConditionEditor: React.FC<ConditionEditorProps> = ({ condition, onChange, onRemove }) => {
   const { t } = useTranslation();
   const { activeProfileId, profiles } = useProfileStore();
-  const activeProfile = profiles.find((p) => p.id === activeProfileId);
+  const activeProfile = profiles.find((profile) => profile.id === activeProfileId);
   const layers = activeProfile?.layers || [];
 
   const [isCapturing, setIsCapturing] = useState(false);
   const [countdown, setCountdown] = useState(3);
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  useEffect(() => {
-    return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-      }
-    };
+  useEffect(() => () => {
+    if (intervalRef.current) clearInterval(intervalRef.current);
   }, []);
 
   const handleCapture = () => {
-    if (isCapturing) return;
+    if (isCapturing || condition.type !== 'windowMatch') return;
+
     setIsCapturing(true);
     setCountdown(3);
-
     let currentCount = 3;
-    const interval = setInterval(async () => {
+
+    intervalRef.current = setInterval(async () => {
       currentCount -= 1;
       setCountdown(currentCount);
+      if (currentCount > 0) return;
 
-      if (currentCount <= 0) {
-        if (intervalRef.current) {
-          clearInterval(intervalRef.current);
-          intervalRef.current = null;
-        }
-        try {
-          const res = await invoke<{ process: string; title: string }>('ipc_call', { method: 'get_active_window' });
-          if (condition.type === 'windowMatch') {
-            // Заполняем оба поля — юзер потом решит что оставить пустым.
-            onChange({
-              type: 'windowMatch',
-              process: res.process || '',
-              title: res.title || '',
-            });
-          }
-        } catch (e) {
-          console.error('Failed to capture active window', e);
-        } finally {
-          setIsCapturing(false);
-        }
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+
+      try {
+        const result = await invoke<{ process: string; title: string }>('ipc_call', { method: 'get_active_window' });
+        onChange({
+          type: 'windowMatch',
+          process: result.process || '',
+          title: result.title || '',
+        });
+      } catch (error) {
+        console.error('Failed to capture active window', error);
+      } finally {
+        setIsCapturing(false);
       }
     }, 1000);
-
-    intervalRef.current = interval;
   };
 
   return (
-    <div className="flex gap-2 items-center bg-app-surface-hover/50 p-2 rounded border border-app-border">
-      <select
-        value={condition.type}
-        onChange={(e) => {
-          const type = e.target.value as any;
-          if (type === 'layerActive') {
-            onChange({ type, layerId: '' } as FrontendCondition);
-          } else if (type === 'windowMatch') {
-            onChange({ type, process: '', title: '' } as FrontendCondition);
-          }
-        }}
-        className="bg-app-surface-hover border border-app-border text-xs text-app-text rounded p-1 w-32"
-      >
-        <option value="windowMatch">{t('ruleBuilder.condition_types.windowMatch')}</option>
-        <option value="layerActive">{t('ruleBuilder.condition_types.layerActive')}</option>
-      </select>
+    <div className="border border-app-border/70 bg-app-bg">
+      <div className="min-h-9 px-1.5 py-1 flex items-start gap-1.5">
+        <select
+          value={condition.type}
+          onChange={(event) => {
+            const type = event.target.value;
+            if (type === 'layerActive') onChange({ type: 'layerActive', layerId: '' });
+            else onChange({ type: 'windowMatch', process: '', title: '' });
+          }}
+          className={`${controlClass} w-[154px] shrink-0 cursor-pointer bg-app-surface/35`}
+        >
+          <option value="windowMatch">{t('ruleBuilder.condition_types.windowMatch')}</option>
+          <option value="layerActive">{t('ruleBuilder.condition_types.layerActive')}</option>
+          {condition.type === 'virtualDesktop' && (
+            <option value="virtualDesktop" disabled>
+              {t('ruleBuilder.condition_types.virtualDesktop', { defaultValue: 'Виртуальный рабочий стол' })}
+            </option>
+          )}
+        </select>
 
-      {condition.type === 'windowMatch' && (
-        <div className="flex gap-2 flex-grow flex-wrap">
-          <input
-            type="text"
-            value={condition.process || ''}
-            onChange={(e) => onChange({ ...condition, process: e.target.value })}
-            placeholder={t('ruleBuilder.placeholders.process')}
-            className="bg-app-bg border border-app-border text-xs text-app-text rounded p-1 flex-1 min-w-[100px]"
-          />
-          <input
-            type="text"
-            value={condition.title || ''}
-            onChange={(e) => onChange({ ...condition, title: e.target.value })}
-            placeholder={t('ruleBuilder.placeholders.title', 'Заголовок окна')}
-            className="bg-app-bg border border-app-border text-xs text-app-text rounded p-1 flex-1 min-w-[100px]"
-          />
-          <button
-            type="button"
-            disabled={isCapturing}
-            onClick={handleCapture}
-            className={`px-2.5 py-1 text-white rounded text-[10px] font-semibold transition-all flex items-center gap-1 shrink-0 ${
-              isCapturing
-                ? 'bg-amber-600 animate-pulse cursor-not-allowed shadow-inner'
-                : 'bg-app-primary hover:bg-app-primary/80 cursor-pointer shadow'
-            }`}
-            title={t('ruleBuilder.hints.capture_window', 'Захватить активное окно')}
-          >
-            {isCapturing ? (
-              <>⏱️ {t('ruleBuilder.buttons.capturing', 'Захват через {{seconds}}...', { seconds: countdown })}</>
+        <div className="flex-1 min-w-0">
+          {condition.type === 'windowMatch' && (
+            <div className="grid grid-cols-[minmax(105px,1fr)_minmax(105px,1fr)_auto] gap-1.5 items-start">
+              <input
+                type="text"
+                value={condition.process || ''}
+                onChange={(event) => onChange({ ...condition, process: event.target.value })}
+                placeholder={t('ruleBuilder.placeholders.process')}
+                className={`${controlClass} min-w-0`}
+              />
+              <input
+                type="text"
+                value={condition.title || ''}
+                onChange={(event) => onChange({ ...condition, title: event.target.value })}
+                placeholder={t('ruleBuilder.placeholders.title', { defaultValue: 'Заголовок окна' })}
+                className={`${controlClass} min-w-0`}
+              />
+              <button
+                type="button"
+                disabled={isCapturing}
+                onClick={handleCapture}
+                className={`h-7 px-2 inline-flex items-center gap-1 border text-[10px] font-medium ${
+                  isCapturing
+                    ? 'border-amber-500/60 bg-amber-500/10 text-amber-500 cursor-not-allowed'
+                    : 'border-app-border bg-app-bg text-app-text hover:bg-app-surface'
+                }`}
+                title={t('ruleBuilder.hints.capture_window', { defaultValue: 'Захватить активное окно' })}
+              >
+                <Crosshair size={11} />
+                {isCapturing
+                  ? t('ruleBuilder.buttons.capturing', { defaultValue: '{{seconds}}...', seconds: countdown })
+                  : t('ruleBuilder.buttons.capture', { defaultValue: 'Захват' })}
+              </button>
+              <div className="col-span-3 text-[9px] leading-4 text-app-muted">
+                {t('ruleBuilder.hints.windowMatch_or')}
+              </div>
+            </div>
+          )}
+
+          {condition.type === 'layerActive' && (
+            layers.length === 0 ? (
+              <div className="h-7 flex items-center text-[10px] text-app-danger">
+                {t('ruleBuilder.hints.create_layer_first')}
+              </div>
             ) : (
-              <>📸 {t('ruleBuilder.buttons.capture', 'Захват')}</>
-            )}
-          </button>
-          <span className="text-[10px] text-app-muted italic self-center w-full">
-            {t('ruleBuilder.hints.windowMatch_or')}
-          </span>
+              <select
+                value={condition.layerId}
+                onChange={(event) => onChange({ ...condition, layerId: event.target.value })}
+                className={`${controlClass} w-full cursor-pointer`}
+              >
+                {!condition.layerId && <option value="">{t('ruleBuilder.hints.select_layer')}</option>}
+                {layers.map((layer) => <option key={layer.id} value={layer.id}>{layer.name}</option>)}
+              </select>
+            )
+          )}
+
+          {condition.type === 'virtualDesktop' && (
+            <div className="min-h-7 flex items-center gap-2 border border-app-warning/40 bg-app-warning/5 px-2 text-[10px] text-app-warning">
+              <AlertTriangle size={12} className="shrink-0" />
+              <span>{t('ruleBuilder.hints.virtual_desktop_unsupported')}</span>
+            </div>
+          )}
         </div>
-      )}
 
-      {condition.type === 'layerActive' && (
-        layers.length === 0 ? (
-          <span className="text-xs text-app-danger italic flex-1">
-            {t('ruleBuilder.hints.create_layer_first')}
-          </span>
-        ) : (
-          <select
-            value={condition.layerId}
-            onChange={(e) => onChange({ ...condition, layerId: e.target.value })}
-            className="bg-app-bg border border-app-border text-xs text-app-text rounded p-1 flex-1 cursor-pointer"
-          >
-            {!condition.layerId && <option value="">{t('ruleBuilder.hints.select_layer')}</option>}
-            {layers.map((l) => (
-              <option key={l.id} value={l.id}>
-                {l.name}
-              </option>
-            ))}
-          </select>
-        )
-      )}
-
-      <button
-        onClick={onRemove}
-        className="text-app-danger hover:text-red-400 p-1"
-        title={t('ruleBuilder.remove_condition_tooltip')}
-      >
-        ✕
-      </button>
+        <button
+          type="button"
+          onClick={onRemove}
+          className="h-7 w-7 shrink-0 inline-flex items-center justify-center text-app-muted hover:bg-app-surface hover:text-app-danger"
+          title={t('ruleBuilder.remove_condition_tooltip')}
+        >
+          <Trash2 size={12} />
+        </button>
+      </div>
     </div>
   );
 };

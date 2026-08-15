@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - 'dev/**'
+  pull_request:
+    branches:
+      - main
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: TypeScript + Vite build
+        run: pnpm build
+
+      - name: Rust check
+        working-directory: src-tauri
+        run: cargo check --all-targets
+
+      - name: Rust tests
+        working-directory: src-tauri
+        run: cargo test
+
+      # v0.2.0 already contains legacy lint debt. Keep the report visible while
+      # the UI refactor removes it incrementally, but do not hide compile/test failures.
+      - name: ESLint (legacy debt report)
+        continue-on-error: true
+        run: pnpm lint

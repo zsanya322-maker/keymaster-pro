@@ -1,8 +1,8 @@
 import { useState } from 'react'
-import { invoke } from '../lib/ipc'
-import { Check, ChevronRight, Keyboard, Type, PlaySquare, Shield } from 'lucide-react'
+import { Check, ChevronRight, Keyboard, PlaySquare, Shield, Type } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
-import { useAppStore } from '../stores/app-store'
+import { invoke } from '../lib/ipc'
+import { useAppStore } from '../store/appStore'
 import { useProfileStore } from '../store/profileStore'
 
 export function OnboardingWizard() {
@@ -10,145 +10,141 @@ export function OnboardingWizard() {
   const { config, setConfig } = useAppStore()
   const [step, setStep] = useState(1)
   const [isProcessing, setIsProcessing] = useState(false)
-  
-  if (config.onboardingComplete) return null
 
-  const handleActivate = async (type: string) => {
-    setIsProcessing(true)
-    try {
-      await invoke('ipc_call', { method: 'apply_onboarding_example', params: { type } })
-      await useProfileStore.getState().loadProfiles()
-      // Trigger a toast so the user knows it worked
-      window.dispatchEvent(new CustomEvent('keymaster-toast', { detail: { message: t('onboarding.toast_applied'), type: 'success' } }))
-      
-      if (step < 3) {
-        setStep(step + 1)
-      } else {
-        handleComplete()
-      }
-    } catch (e) {
-      window.dispatchEvent(new CustomEvent('keymaster-toast', { detail: { message: t('onboarding.toast_failed'), type: 'error' } }))
-    } finally {
-      setIsProcessing(false)
-    }
-  }
+  if (config.onboardingComplete) return null
 
   const handleComplete = () => {
     setConfig({ onboardingComplete: true })
   }
 
+  const handleActivate = async (type: string) => {
+    if (isProcessing) return
+    setIsProcessing(true)
+    try {
+      await invoke('ipc_call', { method: 'apply_onboarding_example', params: { type } })
+      await useProfileStore.getState().loadProfiles()
+      window.dispatchEvent(new CustomEvent('keymaster-toast', {
+        detail: { message: t('onboarding.toast_applied'), type: 'success' },
+      }))
+
+      if (step < 3) setStep((current) => current + 1)
+      else handleComplete()
+    } catch {
+      window.dispatchEvent(new CustomEvent('keymaster-toast', {
+        detail: { message: t('onboarding.toast_failed'), type: 'error' },
+      }))
+    } finally {
+      setIsProcessing(false)
+    }
+  }
+
+  const stepData = step === 1
+    ? {
+        icon: Keyboard,
+        title: t('onboarding.remap_title'),
+        description: t('onboarding.remap_desc'),
+        button: t('onboarding.remap_btn'),
+        type: 'remap',
+      }
+    : step === 2
+      ? {
+          icon: Type,
+          title: t('onboarding.expansion_title'),
+          description: t('onboarding.expansion_desc'),
+          button: t('onboarding.expansion_btn'),
+          type: 'expansion',
+        }
+      : {
+          icon: PlaySquare,
+          title: t('onboarding.macro_title'),
+          description: t('onboarding.macro_desc'),
+          button: t('onboarding.macro_btn'),
+          type: 'macro',
+        }
+
+  const StepIcon = stepData.icon
+
   return (
-    <div className="fixed inset-0 z-[1000] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-app-surface border border-app-border rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-300">
-        
-        {/* Header */}
-        <div className="bg-app-bg/50 px-6 py-4 flex items-center justify-between border-b border-app-border">
-          <div className="flex items-center gap-3">
-            <div className="bg-app-primary/20 p-2 rounded-xl text-app-primary">
-              <Shield size={24} />
-            </div>
-            <div>
-              <h2 className="text-lg font-bold text-app-text leading-tight">{t('onboarding.welcome_title')}</h2>
-              <p className="text-xs text-app-muted">{t('onboarding.welcome_subtitle')}</p>
-            </div>
+    <div className="fixed inset-0 z-[1000] bg-black/35 flex items-center justify-center p-4">
+      <div className="w-[560px] max-w-full border border-app-border bg-app-bg shadow-2xl">
+        <div className="h-11 px-3 flex items-center border-b border-app-border bg-app-surface/60">
+          <Shield size={16} className="text-app-primary mr-2" />
+          <div className="min-w-0">
+            <h2 className="text-xs font-semibold text-app-text truncate">{t('onboarding.welcome_title')}</h2>
+            <p className="text-[10px] text-app-muted truncate">{t('onboarding.welcome_subtitle')}</p>
           </div>
-          <div className="text-app-muted text-xs font-mono font-bold bg-app-surface-hover px-2 py-1 rounded-lg">
+          <span className="ml-auto text-[10px] font-mono text-app-muted">
             {t('onboarding.step_of', { current: step, total: 3 })}
-          </div>
+          </span>
         </div>
 
-        {/* Content */}
-        <div className="p-8">
-          {step === 1 && (
-            <div className="flex flex-col items-center text-center gap-4 animate-fade-in">
-              <div className="w-16 h-16 rounded-full bg-app-surface-hover flex items-center justify-center text-app-primary">
-                <Keyboard size={32} />
-              </div>
-              <div>
-                <h3 className="text-xl font-bold text-app-text mb-2">{t('onboarding.remap_title')}</h3>
-                <p className="text-sm text-app-muted">
-                  {t('onboarding.remap_desc')}
-                </p>
-              </div>
-              <button 
-                onClick={() => handleActivate('remap')}
-                disabled={isProcessing}
-                className="mt-4 bg-app-primary hover:bg-app-primary/90 text-white font-bold py-2 px-8 rounded-xl transition-all active:scale-95 disabled:opacity-50 flex items-center gap-2 cursor-pointer"
+        <div className="grid grid-cols-[150px_minmax(0,1fr)] min-h-[250px]">
+          <aside className="border-r border-app-border bg-app-surface/20 py-2">
+            {[1, 2, 3].map((number) => (
+              <div
+                key={number}
+                className={`h-9 px-3 flex items-center gap-2 border-l-2 text-[11px] ${
+                  number === step
+                    ? 'border-app-primary bg-app-primary/8 text-app-text font-semibold'
+                    : number < step
+                      ? 'border-transparent text-app-success'
+                      : 'border-transparent text-app-muted'
+                }`}
               >
-                <span>{t('onboarding.remap_btn')}</span>
-                <Check size={18} />
-              </button>
-            </div>
-          )}
+                <span className="w-4 text-center font-mono">{number < step ? '✓' : number}</span>
+                <span>{number === 1 ? t('nav.rules', { defaultValue: 'Правила' }) : number === 2 ? t('nav.text', { defaultValue: 'Текст' }) : t('nav.macros', { defaultValue: 'Макросы' })}</span>
+              </div>
+            ))}
+          </aside>
 
-          {step === 2 && (
-            <div className="flex flex-col items-center text-center gap-4 animate-fade-in">
-              <div className="w-16 h-16 rounded-full bg-app-surface-hover flex items-center justify-center text-app-primary">
-                <Type size={32} />
+          <main className="p-5 flex flex-col">
+            <div className="flex items-start gap-3">
+              <div className="h-9 w-9 shrink-0 flex items-center justify-center border border-app-border bg-app-surface/45 text-app-primary">
+                <StepIcon size={18} />
               </div>
-              <div>
-                <h3 className="text-xl font-bold text-app-text mb-2">{t('onboarding.expansion_title')}</h3>
-                <p className="text-sm text-app-muted">
-                  {t('onboarding.expansion_desc')}
-                </p>
+              <div className="min-w-0">
+                <h3 className="text-sm font-semibold text-app-text">{stepData.title}</h3>
+                <p className="mt-1.5 text-[11px] leading-5 text-app-muted">{stepData.description}</p>
               </div>
-              <button 
-                onClick={() => handleActivate('expansion')}
-                disabled={isProcessing}
-                className="mt-4 bg-app-primary hover:bg-app-primary/90 text-white font-bold py-2 px-8 rounded-xl transition-all active:scale-95 disabled:opacity-50 flex items-center gap-2 cursor-pointer"
-              >
-                <span>{t('onboarding.expansion_btn')}</span>
-                <Check size={18} />
-              </button>
             </div>
-          )}
 
-          {step === 3 && (
-            <div className="flex flex-col items-center text-center gap-4 animate-fade-in">
-              <div className="w-16 h-16 rounded-full bg-app-surface-hover flex items-center justify-center text-app-primary">
-                <PlaySquare size={32} />
-              </div>
-              <div>
-                <h3 className="text-xl font-bold text-app-text mb-2">{t('onboarding.macro_title')}</h3>
-                <p className="text-sm text-app-muted">
-                  {t('onboarding.macro_desc')}
-                </p>
-              </div>
-              <button 
-                onClick={() => handleActivate('macro')}
+            <div className="mt-auto pt-5">
+              <button
+                type="button"
+                onClick={() => void handleActivate(stepData.type)}
                 disabled={isProcessing}
-                className="mt-4 bg-app-primary hover:bg-app-primary/90 text-white font-bold py-2 px-8 rounded-xl transition-all active:scale-95 disabled:opacity-50 flex items-center gap-2 cursor-pointer"
+                className="h-8 px-3 inline-flex items-center gap-2 border border-app-primary bg-app-primary text-[11px] font-semibold text-white hover:bg-app-primary-hover disabled:opacity-45"
               >
-                <span>{t('onboarding.macro_btn')}</span>
-                <Check size={18} />
+                <Check size={12} />
+                {isProcessing ? t('common.saving', { defaultValue: 'Применение…' }) : stepData.button}
               </button>
             </div>
-          )}
+          </main>
         </div>
 
-        {/* Footer */}
-        <div className="px-6 py-4 border-t border-app-border flex items-center justify-between bg-app-bg/50">
-          <button 
+        <div className="h-11 px-3 flex items-center border-t border-app-border bg-app-surface/35">
+          <button
+            type="button"
             onClick={handleComplete}
-            className="text-app-muted hover:text-app-text text-sm transition-colors cursor-pointer"
+            disabled={isProcessing}
+            className="h-7 px-2 text-[11px] text-app-muted hover:text-app-text disabled:opacity-40"
           >
             {t('onboarding.skip_all')}
           </button>
-          
-          <div className="flex gap-2">
-            <button 
-              onClick={() => {
-                if (step < 3) setStep(step + 1)
-                else handleComplete()
-              }}
-              className="text-app-text hover:bg-app-surface-hover px-4 py-1.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-1 cursor-pointer"
-            >
-              <span>{step === 3 ? t('onboarding.finish') : t('onboarding.next')}</span>
-              <ChevronRight size={16} />
-            </button>
-          </div>
-        </div>
 
+          <button
+            type="button"
+            disabled={isProcessing}
+            onClick={() => {
+              if (step < 3) setStep((current) => current + 1)
+              else handleComplete()
+            }}
+            className="ml-auto h-7 px-3 inline-flex items-center gap-1.5 border border-app-border bg-app-bg text-[11px] text-app-text hover:bg-app-surface-hover disabled:opacity-40"
+          >
+            {step === 3 ? t('onboarding.finish') : t('onboarding.next')}
+            <ChevronRight size={12} />
+          </button>
+        </div>
       </div>
     </div>
   )

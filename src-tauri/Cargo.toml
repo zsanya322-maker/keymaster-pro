@@ -1,6 +1,6 @@
 [package]
 name = "keymaster-pro"
-version = "0.2.0"
+version = "0.2.4"
 description = "KeyMaster Pro — Desktop Keyboard Automation Utility"
 authors = ["KeyMaster Pro Team"]
 edition = "2024"

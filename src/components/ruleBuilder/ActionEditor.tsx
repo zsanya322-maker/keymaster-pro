@@ -1,7 +1,8 @@
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { invoke } from '@tauri-apps/api/core';
-import { FrontendAction } from '../../lib/types';
+import { Crosshair, FolderOpen, Trash2 } from 'lucide-react';
+import type { FrontendAction } from '../../lib/types';
 import { KeyPicker } from './KeyPicker';
 import { MacroEditor } from './MacroEditor';
 import { useProfileStore } from '../../store/profileStore';
@@ -12,45 +13,47 @@ interface ActionEditorProps {
   onRemove: () => void;
 }
 
+const controlClass = 'h-7 border border-app-border bg-app-bg px-2 text-[11px] text-app-text outline-none focus:border-app-primary';
+const selectClass = `${controlClass} cursor-pointer`;
+
 export const ActionEditor: React.FC<ActionEditorProps> = ({ action, onChange, onRemove }) => {
   const { t } = useTranslation();
-  const showContentBelow = action.type === 'runMacro';
-  // Хук на верхнем уровне (раньше вызывался в IIFE по условию — нарушение
-  // Rules of Hooks, причина чёрного/белого экрана на toggleLayer/holdLayer).
   const { activeProfileId, profiles } = useProfileStore();
-  const activeProfile = profiles.find((p) => p.id === activeProfileId);
+  const activeProfile = profiles.find((profile) => profile.id === activeProfileId);
   const layers = activeProfile?.layers || [];
+  const showContentBelow = action.type === 'runMacro';
+
+  const changeType = (type: FrontendAction['type']) => {
+    if (type === 'remapKey' || type === 'remapMouse') {
+      onChange({ type, code: type === 'remapMouse' ? 1 : 0 } as FrontendAction);
+    } else if (type === 'typeText') {
+      onChange({ type, text: '' });
+    } else if (type === 'runMacro') {
+      onChange({ type, steps: [] });
+    } else if (type === 'toggleLayer' || type === 'holdLayer') {
+      onChange({ type, layerId: '' });
+    } else if (type === 'systemVolume') {
+      onChange({ type, action: 'up' });
+    } else if (type === 'mediaKey') {
+      onChange({ type, key: 'play_pause' });
+    } else if (type === 'windowAction') {
+      onChange({ type, action: 'snap_left' });
+    } else if (type === 'launchApp') {
+      onChange({ type, path: '' });
+    } else if (type === 'focusProcess') {
+      onChange({ type, process: '', title: '' });
+    } else {
+      onChange({ type } as FrontendAction);
+    }
+  };
 
   return (
-    <div className="flex flex-col gap-2 bg-app-surface-hover/50 p-2.5 rounded border border-app-border">
-      <div className="flex gap-2 items-center w-full">
+    <div className="border border-app-border/70 bg-app-bg">
+      <div className="min-h-9 px-1.5 py-1 flex items-center gap-1.5">
         <select
           value={action.type}
-          onChange={(e) => {
-            const type = e.target.value as any;
-            if (type === 'remapKey' || type === 'remapMouse') {
-              onChange({ type, code: 0 } as FrontendAction);
-            } else if (type === 'typeText') {
-              onChange({ type, text: '' } as FrontendAction);
-            } else if (type === 'runMacro') {
-              onChange({ type, steps: [] } as FrontendAction);
-            } else if (type === 'toggleLayer' || type === 'holdLayer') {
-              onChange({ type, layerId: '' } as FrontendAction);
-            } else if (type === 'systemVolume') {
-              onChange({ type, action: 'up' } as FrontendAction);
-            } else if (type === 'mediaKey') {
-              onChange({ type, key: 'play_pause' } as FrontendAction);
-            } else if (type === 'windowAction') {
-              onChange({ type, action: 'snap_left' } as FrontendAction);
-            } else if (type === 'launchApp') {
-              onChange({ type, path: '' } as FrontendAction);
-            } else if (type === 'focusProcess') {
-              onChange({ type, process: '' } as FrontendAction);
-            } else if (type === 'sleep' || type === 'monitorOff') {
-              onChange({ type } as FrontendAction);
-            }
-          }}
-          className="bg-app-surface-hover border border-app-border text-xs text-app-text rounded p-1 w-32 cursor-pointer"
+          onChange={(event) => changeType(event.target.value as FrontendAction['type'])}
+          className={`${selectClass} w-[154px] shrink-0 bg-app-surface/35`}
         >
           <option value="remapKey">{t('ruleBuilder.action_types.remapKey')}</option>
           <option value="remapMouse">{t('ruleBuilder.action_types.remapMouse')}</option>
@@ -66,32 +69,32 @@ export const ActionEditor: React.FC<ActionEditorProps> = ({ action, onChange, on
           <option value="sleep">{t('ruleBuilder.action_types.sleep')}</option>
           <option value="monitorOff">{t('ruleBuilder.action_types.monitorOff')}</option>
         </select>
-        
+
         {!showContentBelow && (
-          <div className="flex-1 flex items-center gap-2">
+          <div className="flex-1 min-w-0 flex items-center gap-1.5">
             {action.type === 'typeText' && (
-              <input 
-                type="text" 
-                value={action.text} 
-                onChange={(e) => onChange({ ...action, text: e.target.value })}
+              <input
+                type="text"
+                value={action.text}
+                onChange={(event) => onChange({ ...action, text: event.target.value })}
                 placeholder={t('ruleBuilder.placeholders.text_to_type')}
-                className="bg-app-bg border border-app-border text-xs text-app-text rounded p-1 flex-1"
+                className={`${controlClass} flex-1 min-w-0`}
               />
             )}
 
             {action.type === 'remapKey' && (
               <KeyPicker
                 value={action.code || 0}
-                onChange={(vk) => onChange({ ...action, code: vk })}
-                className="flex-grow text-left"
+                onChange={(code) => onChange({ ...action, code })}
+                className="flex-1 min-w-0 text-left"
               />
             )}
 
             {action.type === 'remapMouse' && (
               <select
                 value={action.code || 1}
-                onChange={(e) => onChange({ ...action, code: parseInt(e.target.value) || 1 })}
-                className="bg-app-bg border border-app-border text-xs text-app-text rounded p-1 flex-1 cursor-pointer"
+                onChange={(event) => onChange({ ...action, code: Number.parseInt(event.target.value, 10) || 1 })}
+                className={`${selectClass} flex-1 min-w-0`}
               >
                 <option value="1">{t('ruleBuilder.action_options.mouse_left')}</option>
                 <option value="2">{t('ruleBuilder.action_options.mouse_right')}</option>
@@ -103,21 +106,17 @@ export const ActionEditor: React.FC<ActionEditorProps> = ({ action, onChange, on
 
             {(action.type === 'toggleLayer' || action.type === 'holdLayer') && (
               layers.length === 0 ? (
-                <span className="text-xs text-app-danger italic flex-1">
+                <div className="h-7 flex-1 flex items-center text-[10px] text-app-danger">
                   {t('ruleBuilder.hints.create_layer_first')}
-                </span>
+                </div>
               ) : (
                 <select
                   value={action.layerId}
-                  onChange={(e) => onChange({ ...action, layerId: e.target.value } as any)}
-                  className="bg-app-bg border border-app-border text-xs text-app-text rounded p-1 flex-1 cursor-pointer"
+                  onChange={(event) => onChange({ ...action, layerId: event.target.value } as FrontendAction)}
+                  className={`${selectClass} flex-1 min-w-0`}
                 >
                   {!action.layerId && <option value="">{t('ruleBuilder.hints.select_layer')}</option>}
-                  {layers.map((l) => (
-                    <option key={l.id} value={l.id}>
-                      {l.name}
-                    </option>
-                  ))}
+                  {layers.map((layer) => <option key={layer.id} value={layer.id}>{layer.name}</option>)}
                 </select>
               )
             )}
@@ -125,8 +124,8 @@ export const ActionEditor: React.FC<ActionEditorProps> = ({ action, onChange, on
             {action.type === 'systemVolume' && (
               <select
                 value={action.action}
-                onChange={(e) => onChange({ ...action, action: e.target.value as any })}
-                className="bg-app-bg border border-app-border text-xs text-app-text rounded p-1 flex-1 cursor-pointer"
+                onChange={(event) => onChange({ ...action, action: event.target.value as 'up' | 'down' | 'mute' })}
+                className={`${selectClass} flex-1 min-w-0`}
               >
                 <option value="up">{t('ruleBuilder.action_options.volume_up')}</option>
                 <option value="down">{t('ruleBuilder.action_options.volume_down')}</option>
@@ -137,8 +136,8 @@ export const ActionEditor: React.FC<ActionEditorProps> = ({ action, onChange, on
             {action.type === 'mediaKey' && (
               <select
                 value={action.key}
-                onChange={(e) => onChange({ ...action, key: e.target.value as any })}
-                className="bg-app-bg border border-app-border text-xs text-app-text rounded p-1 flex-1 cursor-pointer"
+                onChange={(event) => onChange({ ...action, key: event.target.value as 'play_pause' | 'next' | 'prev' | 'stop' })}
+                className={`${selectClass} flex-1 min-w-0`}
               >
                 <option value="play_pause">{t('ruleBuilder.action_options.media_play_pause')}</option>
                 <option value="next">{t('ruleBuilder.action_options.media_next')}</option>
@@ -150,8 +149,8 @@ export const ActionEditor: React.FC<ActionEditorProps> = ({ action, onChange, on
             {action.type === 'windowAction' && (
               <select
                 value={action.action}
-                onChange={(e) => onChange({ ...action, action: e.target.value as any })}
-                className="bg-app-bg border border-app-border text-xs text-app-text rounded p-1 flex-1 cursor-pointer"
+                onChange={(event) => onChange({ ...action, action: event.target.value as any })}
+                className={`${selectClass} flex-1 min-w-0`}
               >
                 <option value="snap_left">{t('ruleBuilder.action_options.window_snap_left')}</option>
                 <option value="snap_right">{t('ruleBuilder.action_options.window_snap_right')}</option>
@@ -163,13 +162,13 @@ export const ActionEditor: React.FC<ActionEditorProps> = ({ action, onChange, on
             )}
 
             {action.type === 'launchApp' && (
-              <div className="flex gap-2 flex-1 items-center">
+              <>
                 <input
                   type="text"
                   value={action.path}
-                  onChange={(e) => onChange({ ...action, path: e.target.value })}
+                  onChange={(event) => onChange({ ...action, path: event.target.value })}
                   placeholder={t('ruleBuilder.placeholders.app_path')}
-                  className="bg-app-bg border border-app-border text-xs text-app-text rounded p-1 flex-1"
+                  className={`${controlClass} flex-1 min-w-0`}
                 />
                 <button
                   type="button"
@@ -178,79 +177,89 @@ export const ActionEditor: React.FC<ActionEditorProps> = ({ action, onChange, on
                     const selected = await open({
                       multiple: false,
                       directory: false,
-                      filters: [{ name: 'Applications', extensions: ['exe', 'lnk', 'bat', 'cmd'] }]
+                      filters: [{ name: 'Applications', extensions: ['exe', 'lnk', 'bat', 'cmd'] }],
                     });
-                    if (selected) {
-                      onChange({ ...action, path: typeof selected === 'string' ? selected : selected[0] });
-                    }
+                    if (selected) onChange({ ...action, path: typeof selected === 'string' ? selected : selected[0] });
                   }}
-                  className="px-3 h-[26px] flex items-center justify-center text-xs font-semibold bg-app-surface border border-app-border text-app-text rounded hover:bg-app-surface-hover transition-colors cursor-pointer shrink-0"
+                  className="h-7 px-2 shrink-0 inline-flex items-center gap-1 border border-app-border bg-app-bg text-[10px] text-app-text hover:bg-app-surface"
+                  title={t('common.browse')}
                 >
+                  <FolderOpen size={11} />
                   {t('common.browse')}
                 </button>
-              </div>
+              </>
             )}
 
             {action.type === 'focusProcess' && (
-              <div className="flex gap-2 flex-1 items-center">
+              <>
                 <input
                   type="text"
                   value={action.process ?? ''}
-                  onChange={(e) => onChange({ ...action, process: e.target.value || undefined })}
+                  onChange={(event) => onChange({ ...action, process: event.target.value || undefined })}
                   placeholder={t('ruleBuilder.placeholders.process')}
-                  className="bg-app-bg border border-app-border text-xs text-app-text rounded p-1 flex-1 min-w-0"
+                  className={`${controlClass} flex-1 min-w-0`}
                 />
                 <input
                   type="text"
                   value={action.title ?? ''}
-                  onChange={(e) => onChange({ ...action, title: e.target.value || undefined })}
-                  placeholder={t('ruleBuilder.placeholders.title', 'Заголовок (содержит)')}
-                  className="bg-app-bg border border-app-border text-xs text-app-text rounded p-1 flex-1 min-w-0"
+                  onChange={(event) => onChange({ ...action, title: event.target.value || undefined })}
+                  placeholder={t('ruleBuilder.placeholders.title', { defaultValue: 'Заголовок содержит' })}
+                  className={`${controlClass} flex-1 min-w-0`}
                 />
                 <button
                   type="button"
                   onClick={async () => {
                     try {
-                      // Даём 3 секунды юзеру переключиться на нужное окно.
-                      await new Promise((r) => setTimeout(r, 3000));
-                      const res = await invoke<{ process: string; title: string }>('ipc_call', { method: 'get_active_window' });
-                      // Заполняем оба поля — юзер потом решит что оставить пустым.
+                      await new Promise((resolve) => setTimeout(resolve, 3000));
+                      const result = await invoke<{ process: string; title: string }>('ipc_call', { method: 'get_active_window' });
                       onChange({
                         ...action,
-                        process: res.process || action.process,
-                        title: res.title || action.title,
+                        process: result.process || action.process,
+                        title: result.title || action.title,
                       });
-                    } catch (e) {
-                      console.error('Failed to capture active window', e);
+                    } catch (error) {
+                      console.error('Failed to capture active window', error);
                     }
                   }}
-                  className="px-3 h-[26px] flex items-center justify-center text-xs font-semibold bg-app-primary text-white rounded hover:bg-app-primary/80 transition-colors cursor-pointer shrink-0"
-                  title={t('ruleBuilder.hints.capture_window_3s', 'Захват через 3 сек — переключитесь на нужное окно')}
+                  className="h-7 px-2 shrink-0 inline-flex items-center gap-1 border border-app-border bg-app-bg text-[10px] text-app-text hover:bg-app-surface"
+                  title={t('ruleBuilder.hints.capture_window_3s', { defaultValue: 'Захват через 3 сек — переключитесь на нужное окно' })}
                 >
-                  📸 {t('ruleBuilder.buttons.capture', 'Захват')}
+                  <Crosshair size={11} />
+                  {t('ruleBuilder.buttons.capture')}
                 </button>
+              </>
+            )}
+
+            {(action.type === 'sleep' || action.type === 'monitorOff') && (
+              <div className="h-7 flex-1 flex items-center text-[10px] text-app-muted">
+                {t('ruleBuilder.hints.no_parameters', { defaultValue: 'Без параметров' })}
               </div>
             )}
           </div>
         )}
 
-        <button 
+        {showContentBelow && (
+          <div className="h-7 flex-1 flex items-center text-[10px] text-app-muted">
+            {t('macro.title')}
+          </div>
+        )}
+
+        <button
+          type="button"
           onClick={onRemove}
-          className="text-app-danger hover:text-red-400 p-1 cursor-pointer shrink-0 ml-auto"
+          className="h-7 w-7 shrink-0 inline-flex items-center justify-center text-app-muted hover:bg-app-surface hover:text-app-danger"
           title={t('ruleBuilder.remove_action_tooltip')}
         >
-          ✕
+          <Trash2 size={12} />
         </button>
       </div>
 
-      {showContentBelow && (
-        <div className="w-full">
-          {action.type === 'runMacro' && (
-            <MacroEditor
-              steps={action.steps || []}
-              onChange={(steps) => onChange({ ...action, steps })}
-            />
-          )}
+      {action.type === 'runMacro' && (
+        <div className="border-t border-app-border/70 p-1.5">
+          <MacroEditor
+            steps={action.steps || []}
+            onChange={(steps) => onChange({ ...action, steps })}
+          />
         </div>
       )}
     </div>

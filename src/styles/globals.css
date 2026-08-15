@@ -74,45 +74,51 @@ html {
   -webkit-font-smoothing: antialiased;
 }
 
-/* CSS variables для светлой темы */
+/*
+ * Soft Light — светлая тема без «офисно-белого» свечения.
+ *
+ * Большие рабочие поверхности намеренно чуть темнее чистого белого, рамки и
+ * акцент приглушены. Почти белый остаётся локально в контролах/поверхностях,
+ * поэтому структура интерфейса сохраняется, но контраст не режет глаза.
+ */
 :root.light {
-  --bg-canvas: #ffffff;
-  --bg-subtle: #f6f8fa;
-  --bg-inset: #eaeef2;
-  --fg-default: #1f2328;
-  --fg-muted: #656d76;
-  --border-default: #d0d7de;
-  --border-muted: #d8dee4;
-  --border-subtle: #eaeef2;
+  --bg-canvas: #f2f4f7;
+  --bg-subtle: #f8f9fb;
+  --bg-inset: #eceff3;
+  --fg-default: #2c333a;
+  --fg-muted: #737d88;
+  --border-default: #d9dee5;
+  --border-muted: #e1e5ea;
+  --border-subtle: #e9ecf0;
   
-  --accent-color: #0969da;
-  --accent-hover: #0550ae;
-  --accent-subtle: #ddf4ff;
+  --accent-color: #4f7fb3;
+  --accent-hover: #3f6f9f;
+  --accent-subtle: #e7eff7;
   
-  --success-color: #1a7f37;
-  --success-subtle: #dafbe1;
+  --success-color: #3f7f58;
+  --success-subtle: #e4f0e8;
   
-  --kbd-bg: #f6f8fa;
-  --kbd-border: #d0d7de;
-  --kbd-shadow-color: #cbd5e1;
+  --kbd-bg: #f8f9fb;
+  --kbd-border: #d9dee5;
+  --kbd-shadow-color: #cfd5dc;
   
-  --active-row-bg: #f2f9ff;
-  --title-bar-bg: #1f2328;
+  --active-row-bg: #e9f0f7;
+  --title-bar-bg: #eceff3;
 
   /* Mapped standard colors */
   --color-background: var(--bg-canvas);
   --color-surface: var(--bg-subtle);
-  --color-surface-hover: #f1f5f9;
+  --color-surface-hover: #eef1f5;
   --color-border: var(--border-default);
   --color-text: var(--fg-default);
   --color-text-muted: var(--fg-muted);
   --color-primary: var(--accent-color);
   --color-primary-hover: var(--accent-hover);
-  --color-accent: #0969da;
-  --color-danger: #cf222e;
-  --color-danger-hover: #a01823;
+  --color-accent: #5a86b4;
+  --color-danger: #c44d57;
+  --color-danger-hover: #a83f48;
   --color-success: var(--success-color);
-  --color-warning: #9a6700;
+  --color-warning: #98732e;
 }
 
 /* Базовые стили */
@@ -153,7 +159,7 @@ body {
   box-shadow: 0 0 15px rgba(31, 111, 235, 0.15);
 }
 :root.light .glow-primary {
-  box-shadow: 0 4px 12px rgba(9, 105, 218, 0.1);
+  box-shadow: 0 3px 10px rgba(79, 127, 179, 0.08);
 }
 
 .glow-success {
@@ -181,7 +187,7 @@ body {
   border: 1px solid var(--kbd-border);
   border-bottom: 1.5px solid var(--kbd-shadow-color);
   color: var(--fg-default);
-  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.1);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.06);
 }
 
 /* Динамическое наследование шрифтов и отступов в таблицах */

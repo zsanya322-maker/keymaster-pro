@@ -1,42 +1,123 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useAppStore } from '../stores/app-store';
-import { invoke } from '../lib/ipc';
-import { Terminal, Shield, Settings, RefreshCw, Download, FolderOpen } from 'lucide-react';
 import { check } from '@tauri-apps/plugin-updater';
+import { disable, enable } from '@tauri-apps/plugin-autostart';
+import {
+  Activity,
+  Download,
+  FolderOpen,
+  RefreshCw,
+  Settings,
+  Shield,
+  Terminal,
+} from 'lucide-react';
+import { useAppStore } from '../store/appStore';
+import { invoke } from '../lib/ipc';
 import { triggerToast } from '../lib/toast';
-import { enable, disable } from '@tauri-apps/plugin-autostart';
+
+type SettingsTab = 'general' | 'daemon' | 'logs';
+type UpdateInfo = Awaited<ReturnType<typeof check>>;
+
+interface SettingRowProps {
+  title: ReactNode;
+  description?: ReactNode;
+  children: ReactNode;
+  stacked?: boolean;
+}
+
+function SettingRow({ title, description, children, stacked = false }: SettingRowProps) {
+  return (
+    <div className={`border-b border-app-border/60 last:border-b-0 ${stacked ? 'py-3' : 'min-h-14 py-2.5'} px-3`}>
+      <div className={stacked ? 'space-y-2.5' : 'grid grid-cols-[minmax(220px,1fr)_minmax(220px,320px)] gap-6 items-center'}>
+        <div className="min-w-0">
+          <div className="text-xs font-medium text-app-text">{title}</div>
+          {description && <div className="mt-0.5 text-[11px] leading-4 text-app-muted">{description}</div>}
+        </div>
+        <div className={stacked ? '' : 'justify-self-stretch'}>{children}</div>
+      </div>
+    </div>
+  );
+}
+
+function Toggle({ checked, onChange, disabled = false }: { checked: boolean; onChange: () => void; disabled?: boolean }) {
+  return (
+    <label className={`relative inline-flex items-center ${disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer'}`}>
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        onChange={onChange}
+        className="sr-only peer"
+      />
+      <span className="relative h-[18px] w-8 rounded-full border border-app-border bg-app-surface-hover transition-colors peer-checked:border-app-primary peer-checked:bg-app-primary/80">
+        <span className="absolute left-[2px] top-[2px] h-3 w-3 rounded-full bg-app-muted transition-transform peer-checked:translate-x-[14px] peer-checked:bg-white" />
+      </span>
+    </label>
+  );
+}
+
+function Section({ title, children }: { title: ReactNode; children: ReactNode }) {
+  return (
+    <section className="border border-app-border bg-app-bg">
+      <div className="h-8 px-3 flex items-center border-b border-app-border bg-app-surface/55 text-[11px] font-semibold text-app-text">
+        {title}
+      </div>
+      {children}
+    </section>
+  );
+}
 
 export function SettingsPage() {
   const { t, i18n } = useTranslation();
-  const { config, setConfig, daemonConnected } = useAppStore();
-  const [activeTab, setActiveTab] = useState<'general' | 'profiles' | 'daemon' | 'logs'>('general');
+  const { config, setConfig, daemonConnected, diagnostics } = useAppStore();
+  const [activeTab, setActiveTab] = useState<SettingsTab>('general');
   const [isElevated, setIsElevated] = useState(false);
+  const [daemonBusy, setDaemonBusy] = useState(false);
 
-  useEffect(() => {
-    const checkElevation = async () => {
-      try {
-        const res = await invoke<boolean>('is_elevated');
-        setIsElevated(res);
-      } catch (e) {
-        console.error('Failed to check elevation', e);
-      }
-    };
-    checkElevation();
-  }, []);
-
-  // States for Auto-updater
-  const [updateStatus, setUpdateStatus] = useState<string>('');
+  const [updateStatus, setUpdateStatus] = useState('');
   const [updateError, setUpdateError] = useState(false);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
-  const [updateAvailable, setUpdateAvailable] = useState<any>(null);
+  const [updateAvailable, setUpdateAvailable] = useState<UpdateInfo>(null);
   const [downloading, setDownloading] = useState(false);
   const [progress, setProgress] = useState(0);
+
+  useEffect(() => {
+    invoke<boolean>('is_elevated')
+      .then(setIsElevated)
+      .catch((error) => console.error('Failed to check elevation', error));
+  }, []);
+
+  const handleToggle = async (key: keyof typeof config) => {
+    const previousValue = config[key];
+    const newValue = !previousValue;
+    setConfig({ [key]: newValue });
+
+    if (key !== 'autostart') return;
+
+    try {
+      if (newValue) {
+        await enable();
+        triggerToast(t('settings.autostart_enabled'), 'success');
+      } else {
+        await disable();
+        triggerToast(t('settings.autostart_disabled'), 'success');
+      }
+    } catch (error: unknown) {
+      setConfig({ autostart: Boolean(previousValue) });
+      triggerToast(t('settings.toast_autostart_failed', { error: String(error) }), 'error');
+    }
+  };
+
+  const changeLanguage = (language: 'ru' | 'en') => {
+    void i18n.changeLanguage(language);
+    setConfig({ language });
+  };
 
   const handleCheckForUpdates = async () => {
     setCheckingUpdate(true);
     setUpdateStatus(t('settings.updater_checking'));
     setUpdateError(false);
+
     try {
       const update = await check();
       if (update) {
@@ -46,9 +127,9 @@ export function SettingsPage() {
         setUpdateAvailable(null);
         setUpdateStatus(t('settings.updater_latest'));
       }
-    } catch (err: any) {
+    } catch (error: unknown) {
       triggerToast(t('settings.toast_update_check_failed'), 'error');
-      setUpdateStatus(t('settings.updater_failed_check', { error: err.message || err }));
+      setUpdateStatus(t('settings.updater_failed_check', { error: String(error) }));
       setUpdateError(true);
     } finally {
       setCheckingUpdate(false);
@@ -57,596 +138,398 @@ export function SettingsPage() {
 
   const handleInstallUpdate = async () => {
     if (!updateAvailable) return;
+
     setDownloading(true);
     setProgress(0);
-      setUpdateStatus(t('settings.updater_downloading'));
-      setUpdateError(false);
-      try {
+    setUpdateStatus(t('settings.updater_downloading'));
+    setUpdateError(false);
+
+    try {
       let downloaded = 0;
       let contentLength = 0;
-      await updateAvailable.downloadAndInstall((event: any) => {
-        switch (event.event) {
-          case 'Started':
-            contentLength = event.data.contentLength || 0;
-            break;
-          case 'Progress':
-            downloaded += event.data.chunkLength;
-            if (contentLength > 0) {
-              setProgress(Math.round((downloaded / contentLength) * 100));
-            }
-            break;
-          case 'Finished':
-            break;
+      await updateAvailable.downloadAndInstall((event) => {
+        if (event.event === 'Started') {
+          contentLength = event.data.contentLength || 0;
+        } else if (event.event === 'Progress') {
+          downloaded += event.data.chunkLength;
+          if (contentLength > 0) setProgress(Math.round((downloaded / contentLength) * 100));
         }
       });
+
       setUpdateStatus(t('settings.updater_installed'));
-      setTimeout(async () => {
-        try {
-          await invoke('restart_app');
-        } catch (e) {
-          triggerToast(t('settings.toast_restart_failed'), 'error');
-        }
+      window.setTimeout(() => {
+        void (async () => {
+          try {
+            await useAppStore.getState().flushConfig();
+            await invoke('restart_app');
+          } catch {
+            triggerToast(t('settings.toast_restart_failed'), 'error');
+          }
+        })();
       }, 1500);
-    } catch (err: any) {
+    } catch (error: unknown) {
       triggerToast(t('settings.toast_install_failed'), 'error');
-      setUpdateStatus(t('settings.updater_failed_install', { error: err.message || err }));
+      setUpdateStatus(t('settings.updater_failed_install', { error: String(error) }));
       setUpdateError(true);
       setDownloading(false);
     }
   };
 
-  const [logs, setLogs] = useState<string[]>([
-    '[12:01:05] [INFO] KeyMaster Pro Daemon v0.1.0 starting...',
-    '[12:01:05] [INFO] Loading configuration from C:\\Users\\user\\AppData\\Roaming\\KeyMaster Pro\\config.json...',
-    '[12:01:05] [INFO] Active profile loaded: Default (1)',
-    '[12:01:06] [INFO] IPC server listening on local pipe: \\\\.\\pipe\\keymaster-pro-ipc',
-    '[12:01:06] [INFO] Initializing Windows input hook filters...',
-    '[12:01:06] [INFO] WH_KEYBOARD_LL hook hook set up successfully.',
-    '[12:01:06] [INFO] WH_MOUSE_LL hook hook set up successfully.',
-    '[12:01:06] [INFO] KeyMaster Pro Daemon ready and intercepting.',
-    '[12:02:14] [DEBUG] IPC Client connected. Method called: profile.list',
-    '[12:02:40] [DEBUG] Keypressed: VK_LSHIFT (0x10) DOWN [Global Rule Pass]',
-    '[12:02:41] [DEBUG] Keypressed: VK_LSHIFT (0x10) UP [Global Rule Pass]'
-  ]);
-
-  const handleToggle = async (key: keyof typeof config) => {
-    const newValue = !config[key];
-    setConfig({ [key]: newValue });
-
-    if (key === 'autostart') {
-      try {
-        if (newValue) {
-          await enable();
-          triggerToast(t('settings.autostart_enabled'), 'success');
-        } else {
-          await disable();
-          triggerToast(t('settings.autostart_disabled'), 'success');
+  const handleRestartDaemon = async () => {
+    if (daemonBusy) return;
+    setDaemonBusy(true);
+    try {
+      if (daemonConnected) {
+        const stopped = await invoke<{ success?: boolean; message?: string }>('stop_daemon');
+        if (stopped?.success === false) {
+          triggerToast(stopped.message || t('rules.toast_daemon_stop_failed'), 'error');
+          return;
         }
-      } catch (e: any) {
-        triggerToast(t('settings.toast_autostart_failed', { error: e }), 'error');
       }
+      await invoke('spawn_daemon');
+      triggerToast(t('settings.toast_daemon_start_requested'), 'success');
+    } catch (error: unknown) {
+      triggerToast(t('settings.toast_daemon_start_failed', { error: String(error) }), 'error');
+    } finally {
+      setDaemonBusy(false);
     }
   };
 
-  const handleClearLogs = () => {
-    setLogs([`[${new Date().toLocaleTimeString()}] [INFO] ${t('settings.logs_cleared')}`]);
+  const handleRestartAsAdmin = async () => {
+    try {
+      await useAppStore.getState().flushConfig();
+      await invoke('restart_as_admin');
+    } catch (error: unknown) {
+      triggerToast(t('settings.toast_admin_restart_failed', { error: String(error) }), 'error');
+    }
   };
 
   const handleOpenLogsFolder = async () => {
+    if (!daemonConnected) {
+      triggerToast(t('status.daemon_disconnected', { defaultValue: 'Демон отключён' }), 'warning');
+      return;
+    }
     try {
       await invoke('ipc_call', { method: 'open_log_folder' });
-    } catch (e: any) {
-      triggerToast(t('settings.toast_open_logs_failed', { error: e }), 'error');
+    } catch (error: unknown) {
+      triggerToast(t('settings.toast_open_logs_failed', { error: String(error) }), 'error');
     }
   };
 
-  const changeLanguage = (lang: 'ru' | 'en') => {
-    i18n.changeLanguage(lang);
-    setConfig({ language: lang });
-  };
+  const navItems: Array<{ id: SettingsTab; label: string; icon: typeof Settings }> = [
+    { id: 'general', label: t('settings.nav_general'), icon: Settings },
+    { id: 'daemon', label: t('settings.nav_daemon'), icon: Shield },
+    { id: 'logs', label: t('settings.nav_logs'), icon: Terminal },
+  ];
 
   return (
-    <div className="flex gap-6 max-w-6xl h-[calc(100vh-180px)] animate-fade-in">
-      {/* Settings Navigation Menu */}
-      <div className="w-56 flex flex-col gap-1.5 shrink-0 bg-app-surface/40 p-2 border border-app-border rounded-2xl h-fit">
-        <button
-          onClick={() => setActiveTab('general')}
-          className={`flex items-center gap-3 px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all ${
-            activeTab === 'general'
-              ? 'bg-app-primary/10 text-app-primary border-l-2 border-app-primary'
-              : 'text-app-muted hover:text-app-text hover:bg-app-surface-hover/40'
-          }`}
-        >
-          <Settings size={14} /> {t('settings.nav_general')}
-        </button>
+    <div className="h-full min-h-0 flex bg-app-bg overflow-hidden">
+      <aside className="w-48 shrink-0 border-r border-app-border bg-app-surface/25 flex flex-col">
+        <div className="h-11 px-3 flex items-center border-b border-app-border bg-app-surface/45">
+          <span className="text-sm font-semibold text-app-text">{t('nav.settings', { defaultValue: 'Настройки' })}</span>
+        </div>
+        <nav className="py-1.5">
+          {navItems.map(({ id, label, icon: Icon }) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setActiveTab(id)}
+              className={`w-full h-9 px-3 flex items-center gap-2.5 text-xs text-left border-l-2 transition-colors ${
+                activeTab === id
+                  ? 'border-app-primary bg-app-primary/8 text-app-text'
+                  : 'border-transparent text-app-muted hover:text-app-text hover:bg-app-surface-hover/45'
+              }`}
+            >
+              <Icon size={14} className={activeTab === id ? 'text-app-primary' : ''} />
+              {label}
+            </button>
+          ))}
+        </nav>
+      </aside>
 
-        <button
-          onClick={() => setActiveTab('daemon')}
-          className={`flex items-center gap-3 px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all ${
-            activeTab === 'daemon'
-              ? 'bg-app-primary/10 text-app-primary border-l-2 border-app-primary'
-              : 'text-app-muted hover:text-app-text hover:bg-app-surface-hover/40'
-          }`}
-        >
-          <Shield size={14} /> {t('settings.nav_daemon')}
-        </button>
-        <button
-          onClick={() => setActiveTab('logs')}
-          className={`flex items-center gap-3 px-4 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-all ${
-            activeTab === 'logs'
-              ? 'bg-app-primary/10 text-app-primary border-l-2 border-app-primary'
-              : 'text-app-muted hover:text-app-text hover:bg-app-surface-hover/40'
-          }`}
-        >
-          <Terminal size={14} /> {t('settings.nav_logs')}
-        </button>
-      </div>
+      <main className="flex-1 min-w-0 min-h-0 flex flex-col">
+        <div className="h-11 px-4 flex items-center border-b border-app-border bg-app-surface/45 shrink-0">
+          <h2 className="text-sm font-semibold text-app-text">
+            {activeTab === 'general'
+              ? t('settings.general_title')
+              : activeTab === 'daemon'
+                ? t('settings.daemon_title')
+                : t('settings.logs_title')}
+          </h2>
+        </div>
 
-      {/* Settings Container Body */}
-      <div className="flex-1 bg-app-surface/60 backdrop-blur-md rounded-2xl border border-app-border p-6 overflow-y-auto">
-        
-        {/* TAB 1: GENERAL SETTINGS */}
-        {activeTab === 'general' && (
-          <div className="space-y-6">
-            <h3 className="text-lg font-bold text-app-text mb-4">{t('settings.general_title')}</h3>
-            
-            <div className="space-y-4">
-              <div className="flex items-center justify-between p-4 bg-app-surface-hover/30 border border-app-border/60 rounded-xl">
-                <div>
-                  <h4 className="text-sm font-bold text-app-text">{t('settings.auto_start')}</h4>
-                  <p className="text-xs text-app-muted mt-0.5">{t('settings.auto_start_desc')}</p>
-                </div>
-                <label className="relative inline-flex items-center cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={config.autostart}
-                    onChange={() => handleToggle('autostart')}
-                    className="sr-only peer"
-                  />
-                  <div className="w-9 h-5 bg-app-border rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-app-muted after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-app-primary peer-checked:after:bg-white" />
-                </label>
-              </div>
+        <div className="flex-1 min-h-0 overflow-y-auto p-4">
+          {activeTab === 'general' && (
+            <div className="max-w-4xl space-y-4">
+              <Section title={t('settings.general_title')}>
+                <SettingRow title={t('settings.auto_start')} description={t('settings.auto_start_desc')}>
+                  <div className="flex justify-end"><Toggle checked={config.autostart} onChange={() => void handleToggle('autostart')} /></div>
+                </SettingRow>
+                <SettingRow title={t('settings.restore_mouse')} description={t('settings.restore_mouse_desc')}>
+                  <div className="flex justify-end"><Toggle checked={Boolean(config.restoreMouseAfterMacro)} onChange={() => void handleToggle('restoreMouseAfterMacro')} /></div>
+                </SettingRow>
+                <SettingRow title={t('settings.close_to_tray')} description={t('settings.close_to_tray_desc')}>
+                  <div className="flex justify-end"><Toggle checked={config.minimizeToTray} onChange={() => void handleToggle('minimizeToTray')} /></div>
+                </SettingRow>
+              </Section>
 
-              <div className="flex items-center justify-between p-4 bg-app-surface-hover/30 border border-app-border/60 rounded-xl">
-                <div>
-                  <h4 className="text-sm font-bold text-app-text">{t('settings.restore_mouse')}</h4>
-                  <p className="text-xs text-app-muted mt-0.5">{t('settings.restore_mouse_desc')}</p>
-                </div>
-                <label className="relative inline-flex items-center cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={!!config.restoreMouseAfterMacro}
-                    onChange={() => handleToggle('restoreMouseAfterMacro')}
-                    className="sr-only peer"
-                  />
-                  <div className="w-9 h-5 bg-app-border rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-app-muted after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-app-primary peer-checked:after:bg-white" />
-                </label>
-              </div>
-
-              <div className="p-4 bg-app-surface-hover/30 border border-app-border/60 rounded-xl space-y-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h4 className="text-sm font-bold text-app-text">{t('settings.tap_hold_timeout')}</h4>
-                    <p className="text-xs text-app-muted mt-0.5">{t('settings.tap_hold_timeout_desc')}</p>
-                  </div>
-                  <span className="text-sm font-mono text-app-primary bg-app-primary/10 px-2 py-1 rounded">
-                    {config.tapHoldTimeoutMs || 200} ms
-                  </span>
-                </div>
-                <input
-                  type="range"
-                  min="50"
-                  max="1000"
-                  step="50"
-                  value={config.tapHoldTimeoutMs || 200}
-                  onChange={(e) => setConfig({ tapHoldTimeoutMs: parseInt(e.target.value) })}
-                  className="w-full accent-app-primary cursor-pointer"
-                />
-              </div>
-
-              <div className="flex items-center justify-between p-4 bg-app-surface-hover/30 border border-app-border/60 rounded-xl">
-                <div>
-                  <h4 className="text-sm font-bold text-app-text">{t('settings.close_to_tray')}</h4>
-                  <p className="text-xs text-app-muted mt-0.5">{t('settings.close_to_tray_desc')}</p>
-                </div>
-                <label className="relative inline-flex items-center cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={config.minimizeToTray}
-                    onChange={() => handleToggle('minimizeToTray')}
-                    className="sr-only peer"
-                  />
-                  <div className="w-9 h-5 bg-app-border rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-app-muted after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-app-primary peer-checked:after:bg-white" />
-                </label>
-              </div>
-
-              <div className="flex items-center justify-between p-4 bg-app-surface-hover/30 border border-app-border/60 rounded-xl">
-                <div>
-                  <h4 className="text-sm font-bold text-app-text">{t('settings.language')}</h4>
-                  <p className="text-xs text-app-muted mt-0.5">{t('settings.language_desc')}</p>
-                </div>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => changeLanguage('ru')}
-                    className={`px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all cursor-pointer ${
-                      config.language === 'ru'
-                        ? 'bg-app-primary/20 border-app-primary text-app-text'
-                        : 'bg-app-surface-hover/30 border-app-border text-app-muted hover:text-app-text'
-                    }`}
+              <Section title={t('settings.language')}>
+                <SettingRow title={t('settings.language')} description={t('settings.language_desc')}>
+                  <select
+                    value={config.language}
+                    onChange={(event) => changeLanguage(event.target.value as 'ru' | 'en')}
+                    className="h-8 w-full border border-app-border bg-app-bg px-2 text-xs text-app-text outline-none focus:border-app-primary"
                   >
-                    🇷🇺 Русский
-                  </button>
-                  <button
-                    onClick={() => changeLanguage('en')}
-                    className={`px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all cursor-pointer ${
-                      config.language === 'en'
-                        ? 'bg-app-primary/20 border-app-primary text-app-text'
-                        : 'bg-app-surface-hover/30 border-app-border text-app-muted hover:text-app-text'
-                    }`}
+                    <option value="ru">Русский</option>
+                    <option value="en">English</option>
+                  </select>
+                </SettingRow>
+                <SettingRow title={t('settings.theme')} description={t('settings.theme_desc')}>
+                  <select
+                    value={config.theme}
+                    onChange={(event) => setConfig({ theme: event.target.value as 'dark' | 'light' })}
+                    className="h-8 w-full border border-app-border bg-app-bg px-2 text-xs text-app-text outline-none focus:border-app-primary"
                   >
-                    🇺🇸 English
-                  </button>
-                </div>
-              </div>
+                    <option value="dark">{t('settings.theme_dark')}</option>
+                    <option value="light">{t('settings.theme_light')}</option>
+                  </select>
+                </SettingRow>
+              </Section>
 
-              <div className="flex items-center justify-between p-4 bg-app-surface-hover/30 border border-app-border/60 rounded-xl">
-                <div>
-                  <h4 className="text-sm font-bold text-app-text">{t('settings.theme')}</h4>
-                  <p className="text-xs text-app-muted mt-0.5">{t('settings.theme_desc')}</p>
-                </div>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => setConfig({ theme: 'dark' })}
-                    className={`px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all cursor-pointer ${
-                      config.theme === 'dark'
-                        ? 'bg-app-primary/20 border-app-primary text-app-text'
-                        : 'bg-app-surface-hover/30 border-app-border text-app-muted hover:text-app-text'
-                    }`}
-                  >
-                    🌑 {t('settings.theme_dark')}
-                  </button>
-                  <button
-                    onClick={() => setConfig({ theme: 'light' })}
-                    className={`px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all cursor-pointer ${
-                      config.theme === 'light'
-                        ? 'bg-app-primary/20 border-app-primary text-app-text'
-                        : 'bg-app-surface-hover/30 border-app-border text-app-muted hover:text-app-text'
-                    }`}
-                  >
-                    ☀️ {t('settings.theme_light')}
-                  </button>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between p-4 bg-app-surface-hover/30 border border-app-border/60 rounded-xl">
-                <div>
-                  <h4 className="text-sm font-bold text-app-text">{t('settings.scale')}</h4>
-                  <p className="text-xs text-app-muted mt-0.5">{t('settings.scale_desc')}</p>
-                </div>
-                <div className="flex items-center gap-4 min-w-[200px]">
-                  <input
-                    type="range"
-                    min="0.75"
-                    max="1.25"
-                    step="0.05"
-                    value={config.scale || 0.85}
-                    onChange={(e) => setConfig({ scale: parseFloat(e.target.value) })}
-                    className="w-full h-1 bg-app-border rounded-lg appearance-none cursor-pointer accent-app-primary"
-                  />
-                  <span className="text-xs font-bold text-app-text w-12 text-right">
-                    {Math.round((config.scale || 0.85) * 100)}%
-                  </span>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between p-4 bg-app-surface-hover/30 border border-app-border/60 rounded-xl">
-                <div>
-                  <h4 className="text-sm font-bold text-app-text">{t('settings.fontSize')}</h4>
-                  <p className="text-xs text-app-muted mt-0.5">{t('settings.fontSize_desc')}</p>
-                </div>
-                <div className="flex items-center gap-4 min-w-[200px]">
-                  <input
-                    type="range"
-                    min="10"
-                    max="14"
-                    step="1"
-                    value={config.fontSize || 12}
-                    onChange={(e) => setConfig({ fontSize: parseInt(e.target.value) })}
-                    className="w-full h-1 bg-app-border rounded-lg appearance-none cursor-pointer accent-app-primary"
-                  />
-                  <span className="text-xs font-bold text-app-text w-12 text-right">
-                    {config.fontSize || 12}px
-                  </span>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between p-4 bg-app-surface-hover/30 border border-app-border/60 rounded-xl">
-                <div>
-                  <h4 className="text-sm font-bold text-app-text">{t('settings.rowPadding')}</h4>
-                  <p className="text-xs text-app-muted mt-0.5">{t('settings.rowPadding_desc')}</p>
-                </div>
-                <div className="flex items-center gap-4 min-w-[200px]">
-                  <input
-                    type="range"
-                    min="7"
-                    max="10"
-                    step="1"
-                    value={config.rowPadding || 8}
-                    onChange={(e) => setConfig({ rowPadding: parseInt(e.target.value) })}
-                    className="w-full h-1 bg-app-border rounded-lg appearance-none cursor-pointer accent-app-primary"
-                  />
-                  <span className="text-xs font-bold text-app-text w-12 text-right">
-                    {config.rowPadding || 8}px
-                  </span>
-                </div>
-              </div>
-
-              {/* Live Preview Table */}
-              <div className="p-4 bg-app-surface-hover/20 border border-app-border/40 rounded-xl space-y-3">
-                <span className="text-[10px] font-bold text-app-muted uppercase tracking-wider block">
-                  {t('settings.preview_title')}
-                </span>
-                
-                <div className="overflow-x-auto border border-app-border rounded-lg bg-app-bg/40">
-                  <table className="w-full text-left border-collapse" style={{ fontSize: 'var(--table-font-size, 12px)' }}>
-                    <thead>
-                      <tr className="bg-app-surface/60 border-b border-app-border text-[10px] font-bold text-app-muted uppercase tracking-wider">
-                        <th className="px-3 py-2">{t('settings.preview_col_trigger')}</th>
-                        <th className="px-3 py-2">{t('settings.preview_col_action')}</th>
-                        <th className="px-3 py-2 text-right pr-4">{t('settings.preview_col_status')}</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-app-border/40">
-                      <tr>
-                        <td className="px-3 font-medium" style={{ paddingTop: 'var(--table-row-padding, 8px)', paddingBottom: 'var(--table-row-padding, 8px)' }}>
-                          <kbd className="keycap">Caps Lock</kbd>
-                        </td>
-                        <td className="px-3" style={{ paddingTop: 'var(--table-row-padding, 8px)', paddingBottom: 'var(--table-row-padding, 8px)' }}>
-                          <kbd className="keycap">Escape</kbd>
-                        </td>
-                        <td className="px-3 text-right pr-4 text-xs font-semibold text-app-success" style={{ paddingTop: 'var(--table-row-padding, 8px)', paddingBottom: 'var(--table-row-padding, 8px)' }}>
-                          {t('common.enabled')}
-                        </td>
-                      </tr>
-                      <tr>
-                        <td className="px-3 font-medium" style={{ paddingTop: 'var(--table-row-padding, 8px)', paddingBottom: 'var(--table-row-padding, 8px)' }}>
-                          <kbd className="keycap">Ctrl+C</kbd>
-                        </td>
-                        <td className="px-3" style={{ paddingTop: 'var(--table-row-padding, 8px)', paddingBottom: 'var(--table-row-padding, 8px)' }}>
-                          <span className="px-2 py-0.5 rounded bg-app-primary/10 border border-app-primary/20 text-app-primary text-xs font-semibold">
-                            {t('common.copy')}
-                          </span>
-                        </td>
-                        <td className="px-3 text-right pr-4 text-xs font-semibold text-app-success" style={{ paddingTop: 'var(--table-row-padding, 8px)', paddingBottom: 'var(--table-row-padding, 8px)' }}>
-                          {t('common.enabled')}
-                        </td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-
-              {/* F112: Auto-updater UI Section */}
-              <div className="p-4 bg-app-surface-hover/30 border border-app-border/60 rounded-xl space-y-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h4 className="text-sm font-bold text-app-text">
-                      {t('settings.updater_title')}
-                    </h4>
-                    <p className="text-xs text-app-muted mt-0.5">
-                      {t('settings.updater_desc')}
-                    </p>
-                  </div>
+              <Section title={t('settings.scale')}>
+                <SettingRow title={t('settings.scale')} description={t('settings.scale_desc')}>
                   <div className="flex items-center gap-3">
+                    <input
+                      type="range"
+                      min="0.75"
+                      max="1.25"
+                      step="0.05"
+                      value={config.scale || 0.85}
+                      onChange={(event) => setConfig({ scale: Number.parseFloat(event.target.value) })}
+                      className="flex-1 accent-app-primary"
+                    />
+                    <span className="w-12 text-right text-xs font-mono text-app-text">{Math.round((config.scale || 0.85) * 100)}%</span>
+                  </div>
+                </SettingRow>
+                <SettingRow title={t('settings.fontSize')} description={t('settings.fontSize_desc')}>
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="range"
+                      min="10"
+                      max="14"
+                      step="1"
+                      value={config.fontSize || 12}
+                      onChange={(event) => setConfig({ fontSize: Number.parseInt(event.target.value, 10) })}
+                      className="flex-1 accent-app-primary"
+                    />
+                    <span className="w-12 text-right text-xs font-mono text-app-text">{config.fontSize || 12}px</span>
+                  </div>
+                </SettingRow>
+                <SettingRow title={t('settings.rowPadding')} description={t('settings.rowPadding_desc')}>
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="range"
+                      min="7"
+                      max="10"
+                      step="1"
+                      value={config.rowPadding || 8}
+                      onChange={(event) => setConfig({ rowPadding: Number.parseInt(event.target.value, 10) })}
+                      className="flex-1 accent-app-primary"
+                    />
+                    <span className="w-12 text-right text-xs font-mono text-app-text">{config.rowPadding || 8}px</span>
+                  </div>
+                </SettingRow>
+                <SettingRow title={t('settings.preview_title')} stacked>
+                  <div className="border border-app-border bg-app-bg overflow-hidden">
+                    <table className="w-full text-left border-collapse" style={{ fontSize: 'var(--table-font-size, 12px)' }}>
+                      <thead>
+                        <tr className="h-8 border-b border-app-border bg-app-surface/55 text-[10px] text-app-muted">
+                          <th className="px-3 font-medium">{t('settings.preview_col_trigger')}</th>
+                          <th className="px-3 font-medium">{t('settings.preview_col_action')}</th>
+                          <th className="px-3 font-medium text-right">{t('settings.preview_col_status')}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr className="border-b border-app-border/50">
+                          <td className="px-3" style={{ paddingTop: 'var(--table-row-padding, 8px)', paddingBottom: 'var(--table-row-padding, 8px)' }}><kbd className="keycap">Caps Lock</kbd></td>
+                          <td className="px-3" style={{ paddingTop: 'var(--table-row-padding, 8px)', paddingBottom: 'var(--table-row-padding, 8px)' }}><kbd className="keycap">Escape</kbd></td>
+                          <td className="px-3 text-right text-app-success" style={{ paddingTop: 'var(--table-row-padding, 8px)', paddingBottom: 'var(--table-row-padding, 8px)' }}>{t('common.enabled')}</td>
+                        </tr>
+                        <tr>
+                          <td className="px-3" style={{ paddingTop: 'var(--table-row-padding, 8px)', paddingBottom: 'var(--table-row-padding, 8px)' }}><kbd className="keycap">Ctrl+C</kbd></td>
+                          <td className="px-3" style={{ paddingTop: 'var(--table-row-padding, 8px)', paddingBottom: 'var(--table-row-padding, 8px)' }}>{t('common.copy')}</td>
+                          <td className="px-3 text-right text-app-success" style={{ paddingTop: 'var(--table-row-padding, 8px)', paddingBottom: 'var(--table-row-padding, 8px)' }}>{t('common.enabled')}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </SettingRow>
+              </Section>
+
+              <Section title={t('settings.updater_title')}>
+                <SettingRow title={t('settings.updater_title')} description={t('settings.updater_desc')} stacked>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void handleCheckForUpdates()}
+                      disabled={checkingUpdate || downloading}
+                      className="h-8 px-3 inline-flex items-center gap-2 border border-app-border bg-app-surface text-xs text-app-text hover:bg-app-surface-hover disabled:opacity-50"
+                    >
+                      <RefreshCw size={13} className={checkingUpdate ? 'animate-spin' : ''} />
+                      {t('settings.updater_btn_check')}
+                    </button>
                     {updateAvailable && !downloading && (
                       <button
-                        onClick={handleInstallUpdate}
-                        className="px-3.5 py-1.5 rounded-lg bg-app-primary hover:bg-app-primary-hover text-xs font-bold text-white flex items-center gap-2 transition-all shadow-md shadow-app-primary/20 cursor-pointer"
+                        type="button"
+                        onClick={() => void handleInstallUpdate()}
+                        className="h-8 px-3 inline-flex items-center gap-2 border border-app-primary bg-app-primary text-xs font-medium text-white hover:bg-app-primary-hover"
                       >
-                        <Download size={12} />
+                        <Download size={13} />
                         {t('settings.updater_btn_install')}
                       </button>
                     )}
-                    <button
-                      onClick={handleCheckForUpdates}
-                      disabled={checkingUpdate || downloading}
-                      className="px-3 py-1.5 rounded-lg border border-app-border bg-app-surface-hover/30 text-app-muted hover:text-app-text hover:bg-app-border text-xs font-semibold flex items-center gap-2 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      <RefreshCw size={12} className={checkingUpdate ? 'animate-spin' : ''} />
-                      {t('settings.updater_btn_check')}
-                    </button>
                   </div>
-                </div>
 
-                {updateStatus && (
-                  <div className="pt-3 border-t border-app-border/40 flex items-center gap-2 text-xs">
-                    {downloading ? (
-                      <div className="w-full space-y-2">
-                        <div className="flex justify-between text-app-muted font-semibold">
-                          <span>{updateStatus}</span>
-                          <span>{progress}%</span>
+                  {updateStatus && (
+                    <div className={`mt-2 text-[11px] ${updateError ? 'text-app-danger' : 'text-app-muted'}`}>
+                      {downloading ? (
+                        <div className="space-y-1.5">
+                          <div className="flex justify-between"><span>{updateStatus}</span><span>{progress}%</span></div>
+                          <div className="h-1.5 border border-app-border bg-app-bg">
+                            <div className="h-full bg-app-primary transition-[width]" style={{ width: `${progress}%` }} />
+                          </div>
                         </div>
-                        <div className="w-full bg-app-surface-hover rounded-full h-1.5">
-                          <div 
-                            className="bg-app-primary h-1.5 rounded-full transition-all duration-300" 
-                            style={{ width: `${progress}%` }}
-                          />
-                        </div>
-                      </div>
-                    ) : (
-                      <>
-                        {updateAvailable ? (
-                          <span className="text-app-primary font-bold">●</span>
-                        ) : updateError ? (
-                          <span className="text-app-danger font-bold">●</span>
-                        ) : (
-                          <span className="text-app-success font-bold">●</span>
-                        )}
-                        <span className="text-app-muted">{updateStatus}</span>
-                      </>
+                      ) : updateStatus}
+                    </div>
+                  )}
+                </SettingRow>
+              </Section>
+            </div>
+          )}
+
+          {activeTab === 'daemon' && (
+            <div className="max-w-4xl space-y-4">
+              <Section title={t('settings.daemon_title')}>
+                <SettingRow title={t('settings.daemon_pipe')} description={t('settings.daemon_pipe_desc')}>
+                  <div className="flex justify-end">
+                    <span className={`inline-flex h-6 items-center border px-2 text-[10px] font-semibold uppercase tracking-wide ${
+                      daemonConnected
+                        ? 'border-app-success/40 bg-app-success/10 text-app-success'
+                        : 'border-app-danger/40 bg-app-danger/10 text-app-danger'
+                    }`}>
+                      {daemonConnected ? t('status.connected') : t('status.disconnected')}
+                    </span>
+                  </div>
+                </SettingRow>
+
+                <SettingRow
+                  title={t('settings.daemon_elevation')}
+                  description={isElevated ? t('settings.daemon_elevation_active_desc') : t('settings.daemon_elevation_inactive_desc')}
+                >
+                  <div className="flex justify-end items-center gap-2">
+                    {isElevated && (
+                      <span className="inline-flex h-6 items-center border border-app-success/40 bg-app-success/10 px-2 text-[10px] font-semibold text-app-success">
+                        {t('settings.daemon_elevation_admin')}
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      disabled={daemonBusy}
+                      onClick={() => void handleRestartDaemon()}
+                      className="h-8 px-3 inline-flex items-center gap-2 border border-app-border bg-app-surface text-xs text-app-text hover:bg-app-surface-hover disabled:opacity-45"
+                    >
+                      <RefreshCw size={13} className={daemonBusy ? 'animate-spin' : ''} />
+                      {t('settings.daemon_restart_label')}
+                    </button>
+                    {!isElevated && (
+                      <button
+                        type="button"
+                        onClick={() => void handleRestartAsAdmin()}
+                        className="h-8 px-3 inline-flex items-center gap-2 border border-app-primary bg-app-primary text-xs text-white hover:bg-app-primary-hover"
+                      >
+                        <Shield size={13} />
+                        {t('settings.daemon_elevation_restart')}
+                      </button>
                     )}
                   </div>
-                )}
-              </div>
+                </SettingRow>
+              </Section>
+
+              <Section title={t('settings.daemon_channels')}>
+                <SettingRow
+                  title={t('settings.daemon_kb_hook')}
+                  description={t('settings.daemon_channels_desc')}
+                >
+                  <div className="flex justify-end"><Toggle checked={config.kbHookEnabled} onChange={() => void handleToggle('kbHookEnabled')} /></div>
+                </SettingRow>
+                <SettingRow
+                  title={t('settings.daemon_mouse_hook')}
+                  description={t('settings.runtime_apply_hint', { defaultValue: 'Изменение применяется работающим daemon автоматически.' })}
+                >
+                  <div className="flex justify-end"><Toggle checked={config.mouseHookEnabled} onChange={() => void handleToggle('mouseHookEnabled')} /></div>
+                </SettingRow>
+              </Section>
             </div>
-          </div>
-        )}
+          )}
 
-
-
-        {/* TAB 3: DAEMON & IPC */}
-        {activeTab === 'daemon' && (
-          <div className="space-y-6">
-            <h3 className="text-lg font-bold text-app-text mb-4">{t('settings.daemon_title')}</h3>
-            
-            <div className="space-y-4">
-              <div className="p-4 bg-app-surface-hover/30 border border-app-border/60 rounded-xl flex items-center justify-between">
-                <div>
-                  <h4 className="text-sm font-bold text-app-text">{t('settings.daemon_pipe')}</h4>
-                  <p className="text-xs text-app-muted mt-0.5">
-                    {t('settings.daemon_pipe_desc')}
-                  </p>
-                </div>
-                <span className={`px-3 py-1 rounded-xl text-xs font-bold border uppercase tracking-wider ${
-                  daemonConnected ? 'bg-app-success/10 border-app-success/20 text-app-success' : 'bg-app-danger/10 border-app-danger/20 text-app-danger'
-                }`}>
-                  {daemonConnected ? t('status.connected') : t('status.disconnected')}
-                </span>
-              </div>
-
-              <div className="p-4 bg-app-surface-hover/30 border border-app-border/60 rounded-xl flex items-center justify-between">
-                <div>
-                  <h4 className="text-sm font-bold text-app-text">{t('settings.daemon_elevation')}</h4>
-                  <p className="text-xs text-app-muted mt-0.5">
-                    {isElevated
-                      ? t('settings.daemon_elevation_active_desc')
-                      : t('settings.daemon_elevation_inactive_desc')
-                    }
-                  </p>
-                </div>
-                {isElevated ? (
-                  <div className="flex items-center gap-2">
-                    <span className="px-3 py-1 rounded-xl text-xs font-bold border border-app-success/20 bg-app-success/10 text-app-success uppercase tracking-wider">
-                      {t('settings.daemon_elevation_admin')}
-                    </span>
+          {activeTab === 'logs' && (
+            <div className="max-w-4xl space-y-4">
+              <Section title={t('settings.logs_title')}>
+                <SettingRow title={t('settings.logs_open_folder')} description={t('settings.logs_desc')}>
+                  <div className="flex justify-end">
                     <button
-                      onClick={async () => {
-                        try {
-                          await invoke('spawn_daemon');
-                          triggerToast(t('settings.toast_daemon_start_requested'), 'success');
-                        } catch (e: any) {
-                          triggerToast(t('settings.toast_daemon_start_failed', { error: e }), 'error');
-                        }
-                      }}
-                      className="flex items-center gap-2 px-3 py-2 text-xs font-bold bg-app-primary text-white rounded-lg hover:bg-app-primary/80 transition-colors cursor-pointer"
+                      type="button"
+                      disabled={!daemonConnected}
+                      onClick={() => void handleOpenLogsFolder()}
+                      className="h-8 px-3 inline-flex items-center gap-2 border border-app-border bg-app-surface text-xs text-app-text hover:bg-app-surface-hover disabled:opacity-45"
                     >
-                      <RefreshCw size={12} />
-                      {t('settings.daemon_restart_label')}
+                      <FolderOpen size={13} />
+                      {t('settings.logs_open_folder')}
                     </button>
                   </div>
-                ) : (
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={async () => {
-                        try {
-                          await invoke('spawn_daemon');
-                          triggerToast(t('settings.toast_daemon_start_requested'), 'success');
-                        } catch (e: any) {
-                          triggerToast(t('settings.toast_daemon_start_failed', { error: e }), 'error');
-                        }
-                      }}
-                      className="flex items-center gap-2 px-3 py-2 text-xs font-bold bg-app-primary text-white rounded-lg hover:bg-app-primary/80 transition-colors cursor-pointer"
-                    >
-                      <RefreshCw size={12} />
-                      {t('settings.daemon_restart_label')}
-                    </button>
-                    <button
-                      onClick={async () => {
-                        try {
-                          await invoke('restart_as_admin');
-                        } catch (e: any) {
-                          triggerToast(t('settings.toast_admin_restart_failed', { error: e }), 'error');
-                        }
-                      }}
-                      className="flex items-center gap-2 px-3 py-2 text-xs font-bold bg-app-primary text-white rounded-lg hover:bg-app-primary/80 transition-colors cursor-pointer"
-                    >
-                      <Shield size={12} />
-                      {t('settings.daemon_elevation_restart')}
-                    </button>
+                </SettingRow>
+              </Section>
+
+              <Section title={t('settings.daemon_title')}>
+                <SettingRow title={t('settings.daemon_pipe')}>
+                  <div className="flex justify-end items-center gap-2 text-[11px]">
+                    <span className={`h-2 w-2 rounded-full ${daemonConnected ? 'bg-app-success' : 'bg-app-danger'}`} />
+                    <span className="text-app-text">{daemonConnected ? t('status.connected') : t('status.disconnected')}</span>
                   </div>
-                )}
-              </div>
-
-              <div className="p-4 bg-app-surface-hover/30 border border-app-border/60 rounded-xl space-y-4">
-                <div>
-                  <h4 className="text-sm font-bold text-app-text">{t('settings.daemon_channels')}</h4>
-                  <p className="text-xs text-app-muted mt-0.5">
-                    {t('settings.daemon_channels_desc')}
-                  </p>
-                </div>
-                <div className="flex gap-4">
-                  <label className="flex items-center gap-2.5 cursor-pointer text-xs font-semibold text-app-text">
-                    <input
-                      type="checkbox"
-                      checked={config.kbHookEnabled}
-                      onChange={() => handleToggle('kbHookEnabled')}
-                      className="rounded text-app-primary focus:ring-app-primary bg-app-surface-hover border-app-border"
-                    />
-                    {t('settings.daemon_kb_hook')}
-                  </label>
-                  <label className="flex items-center gap-2.5 cursor-pointer text-xs font-semibold text-app-text">
-                    <input
-                      type="checkbox"
-                      checked={config.mouseHookEnabled}
-                      onChange={() => handleToggle('mouseHookEnabled')}
-                      className="rounded text-app-primary focus:ring-app-primary bg-app-surface-hover border-app-border"
-                    />
-                    {t('settings.daemon_mouse_hook')}
-                  </label>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* TAB 4: CONSOLE LOGS */}
-        {activeTab === 'logs' && (
-          <div className="space-y-4 flex flex-col h-full">
-            <div className="flex justify-between items-center shrink-0">
-              <div>
-                <h3 className="text-lg font-bold text-app-text">{t('settings.logs_title')}</h3>
-                <p className="text-xs text-app-muted mt-0.5">
-                  {t('settings.logs_desc')}
-                </p>
-              </div>
-              <div className="flex gap-2">
-                <button
-                  onClick={handleOpenLogsFolder}
-                  className="flex items-center gap-2 text-xs bg-app-primary/10 hover:bg-app-primary/20 border border-app-primary/30 text-app-primary px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
+                </SettingRow>
+                <SettingRow title={t('settings.logs_runtime_metrics', { defaultValue: 'Текущая диагностика' })} stacked>
+                  <div className="grid grid-cols-2 lg:grid-cols-4 border border-app-border bg-app-bg">
+                    <div className="p-3 border-r border-b lg:border-b-0 border-app-border/60">
+                      <div className="text-[10px] text-app-muted">Keystrokes</div>
+                      <div className="mt-1 text-xs font-mono text-app-text">{diagnostics.keystrokes}</div>
+                    </div>
+                    <div className="p-3 border-b lg:border-b-0 lg:border-r border-app-border/60">
+                      <div className="text-[10px] text-app-muted">CPU</div>
+                      <div className="mt-1 text-xs font-mono text-app-text">{diagnostics.cpu.toFixed(1)}%</div>
+                    </div>
+                    <div className="p-3 border-r border-app-border/60">
+                      <div className="text-[10px] text-app-muted">RAM</div>
+                      <div className="mt-1 text-xs font-mono text-app-text">{diagnostics.ram.toFixed(1)} MB</div>
+                    </div>
+                    <div className="p-3">
+                      <div className="text-[10px] text-app-muted">Latency</div>
+                      <div className="mt-1 text-xs font-mono text-app-text">{diagnostics.latency.toFixed(2)} ms</div>
+                    </div>
+                  </div>
+                </SettingRow>
+                <SettingRow
+                  title={t('settings.logs_live_note', { defaultValue: 'Отображение логов' })}
+                  description={t('settings.logs_live_note_desc', {
+                    defaultValue: 'Здесь больше не показываются тестовые строки. Полный журнал открывается из реальной папки логов daemon.',
+                  })}
                 >
-                  <FolderOpen size={14} />
-                  {t('settings.logs_open_folder')}
-                </button>
-                <button
-                  onClick={handleClearLogs}
-                  className="text-xs bg-app-surface-hover hover:bg-app-border border border-app-border text-app-muted hover:text-app-text px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
-                >
-                  {t('settings.logs_clear')}
-                </button>
-              </div>
+                  <div className="flex justify-end text-app-muted"><Activity size={14} /></div>
+                </SettingRow>
+              </Section>
             </div>
-
-            <div className="flex-1 bg-app-bg border border-app-border rounded-xl p-4 font-mono text-[11px] leading-relaxed text-app-success overflow-y-auto max-h-[300px]">
-              {logs.map((log, idx) => (
-                <div key={idx} className="whitespace-pre-wrap">
-                  {log}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
+          )}
+        </div>
+      </main>
     </div>
   );
 }
