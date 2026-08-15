@@ -48,12 +48,12 @@ export const ActionEditor: React.FC<ActionEditorProps> = ({ action, onChange, on
   };
 
   return (
-    <div className="border border-app-border bg-app-bg">
-      <div className="min-h-10 px-2 py-1.5 flex items-start gap-2">
+    <div className="border border-app-border/70 bg-app-bg">
+      <div className="min-h-9 px-1.5 py-1 flex items-center gap-1.5">
         <select
           value={action.type}
           onChange={(event) => changeType(event.target.value as FrontendAction['type'])}
-          className={`${selectClass} w-40 shrink-0 bg-app-surface/55`}
+          className={`${selectClass} w-[154px] shrink-0 bg-app-surface/35`}
         >
           <option value="remapKey">{t('ruleBuilder.action_types.remapKey')}</option>
           <option value="remapMouse">{t('ruleBuilder.action_types.remapMouse')}</option>
@@ -71,7 +71,7 @@ export const ActionEditor: React.FC<ActionEditorProps> = ({ action, onChange, on
         </select>
 
         {!showContentBelow && (
-          <div className="flex-1 min-w-0 flex items-start gap-1.5">
+          <div className="flex-1 min-w-0 flex items-center gap-1.5">
             {action.type === 'typeText' && (
               <input
                 type="text"
@@ -106,7 +106,7 @@ export const ActionEditor: React.FC<ActionEditorProps> = ({ action, onChange, on
 
             {(action.type === 'toggleLayer' || action.type === 'holdLayer') && (
               layers.length === 0 ? (
-                <div className="h-7 flex-1 flex items-center text-[11px] text-app-danger">
+                <div className="h-7 flex-1 flex items-center text-[10px] text-app-danger">
                   {t('ruleBuilder.hints.create_layer_first')}
                 </div>
               ) : (
@@ -181,7 +181,7 @@ export const ActionEditor: React.FC<ActionEditorProps> = ({ action, onChange, on
                     });
                     if (selected) onChange({ ...action, path: typeof selected === 'string' ? selected : selected[0] });
                   }}
-                  className="h-7 px-2 shrink-0 inline-flex items-center gap-1.5 border border-app-border bg-app-surface text-[10px] text-app-text hover:bg-app-surface-hover"
+                  className="h-7 px-2 shrink-0 inline-flex items-center gap-1 border border-app-border bg-app-bg text-[10px] text-app-text hover:bg-app-surface"
                   title={t('common.browse')}
                 >
                   <FolderOpen size={11} />
@@ -203,7 +203,7 @@ export const ActionEditor: React.FC<ActionEditorProps> = ({ action, onChange, on
                   type="text"
                   value={action.title ?? ''}
                   onChange={(event) => onChange({ ...action, title: event.target.value || undefined })}
-                  placeholder={t('ruleBuilder.placeholders.title', 'Заголовок (содержит)')}
+                  placeholder={t('ruleBuilder.placeholders.title', { defaultValue: 'Заголовок содержит' })}
                   className={`${controlClass} flex-1 min-w-0`}
                 />
                 <button
@@ -221,25 +221,25 @@ export const ActionEditor: React.FC<ActionEditorProps> = ({ action, onChange, on
                       console.error('Failed to capture active window', error);
                     }
                   }}
-                  className="h-7 px-2 shrink-0 inline-flex items-center gap-1.5 border border-app-border bg-app-surface text-[10px] text-app-text hover:bg-app-surface-hover"
-                  title={t('ruleBuilder.hints.capture_window_3s', 'Захват через 3 сек — переключитесь на нужное окно')}
+                  className="h-7 px-2 shrink-0 inline-flex items-center gap-1 border border-app-border bg-app-bg text-[10px] text-app-text hover:bg-app-surface"
+                  title={t('ruleBuilder.hints.capture_window_3s', { defaultValue: 'Захват через 3 сек — переключитесь на нужное окно' })}
                 >
                   <Crosshair size={11} />
-                  {t('ruleBuilder.buttons.capture', 'Захват')}
+                  {t('ruleBuilder.buttons.capture')}
                 </button>
               </>
             )}
 
             {(action.type === 'sleep' || action.type === 'monitorOff') && (
-              <div className="h-7 flex-1 flex items-center text-[11px] text-app-muted">
-                {t('ruleBuilder.hints.no_parameters', 'Без параметров')}
+              <div className="h-7 flex-1 flex items-center text-[10px] text-app-muted">
+                {t('ruleBuilder.hints.no_parameters', { defaultValue: 'Без параметров' })}
               </div>
             )}
           </div>
         )}
 
         {showContentBelow && (
-          <div className="h-7 flex-1 flex items-center text-[11px] text-app-muted">
+          <div className="h-7 flex-1 flex items-center text-[10px] text-app-muted">
             {t('macro.title')}
           </div>
         )}
@@ -247,7 +247,7 @@ export const ActionEditor: React.FC<ActionEditorProps> = ({ action, onChange, on
         <button
           type="button"
           onClick={onRemove}
-          className="h-7 w-7 shrink-0 inline-flex items-center justify-center border border-transparent text-app-muted hover:border-app-border hover:bg-app-surface hover:text-app-danger"
+          className="h-7 w-7 shrink-0 inline-flex items-center justify-center text-app-muted hover:bg-app-surface hover:text-app-danger"
           title={t('ruleBuilder.remove_action_tooltip')}
         >
           <Trash2 size={12} />
@@ -255,7 +255,7 @@ export const ActionEditor: React.FC<ActionEditorProps> = ({ action, onChange, on
       </div>
 
       {action.type === 'runMacro' && (
-        <div className="border-t border-app-border p-2">
+        <div className="border-t border-app-border/70 p-1.5">
           <MacroEditor
             steps={action.steps || []}
             onChange={(steps) => onChange({ ...action, steps })}
