@@ -4,6 +4,10 @@ use std::collections::HashMap;
 pub struct EngineSchema {
     pub keyboard_map: HashMap<u8, Vec<CompiledRule>>,
     pub mouse_map: HashMap<u8, Vec<CompiledRule>>,
+    /// Wheel key: 1=up, -1=down, 2=right, -2=left.
+    pub mouse_wheel_map: HashMap<i8, Vec<CompiledRule>>,
+    pub mouse_double_click_map: HashMap<u8, Vec<CompiledRule>>,
+    pub mouse_move_rules: Vec<CompiledMouseMoveRule>,
     pub tap_hold_map: HashMap<u8, Vec<CompiledTapHoldRule>>,
     pub text_expansion_map: HashMap<String, Vec<CompiledRule>>,
 }
@@ -13,6 +17,9 @@ impl Default for EngineSchema {
         Self {
             keyboard_map: HashMap::new(),
             mouse_map: HashMap::new(),
+            mouse_wheel_map: HashMap::new(),
+            mouse_double_click_map: HashMap::new(),
+            mouse_move_rules: Vec::new(),
             tap_hold_map: HashMap::new(),
             text_expansion_map: HashMap::new(),
         }
@@ -28,6 +35,15 @@ pub struct CompiledRule {
     /// Text-expansion rules use `true` because they are explicitly activated by
     /// the text matcher rather than by an input edge.
     pub trigger_on_down: bool,
+    pub conditions: Vec<EngineCondition>,
+    pub actions: Vec<EngineAction>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CompiledMouseMoveRule {
+    pub priority: i32,
+    pub min_distance: u16,
+    pub cooldown_ms: u32,
     pub conditions: Vec<EngineCondition>,
     pub actions: Vec<EngineAction>,
 }
