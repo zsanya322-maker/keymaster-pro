@@ -48,6 +48,8 @@ const defaultConfig: AppConfig = {
   tapHoldTimeoutMs: 200,
 }
 
+const DEBOUNCED_CONFIG_KEYS = new Set<keyof AppConfig>(['scale', 'fontSize', 'rowPadding'])
+
 let pendingConfigUpdate: Partial<AppConfig> = {}
 let configUpdateTimer: ReturnType<typeof setTimeout> | null = null
 let configUpdateInFlight: Promise<unknown> = Promise.resolve()
@@ -88,6 +90,24 @@ function queueConfigUpdate(partial: Partial<AppConfig>) {
   }, 150)
 }
 
+function persistConfigUpdate(partial: Partial<AppConfig>) {
+  const keys = Object.keys(partial) as Array<keyof AppConfig>
+  const canDebounce = keys.length > 0 && keys.every((key) => DEBOUNCED_CONFIG_KEYS.has(key))
+
+  if (canDebounce) {
+    queueConfigUpdate(partial)
+    return
+  }
+
+  // Редкие переключатели/язык/тема должны попасть на диск сразу. Если перед
+  // ними уже накопился пакет от slider'ов, отправляем всё одним свежим patch.
+  pendingConfigUpdate = { ...pendingConfigUpdate, ...partial }
+  const payload = takePendingConfigUpdate()
+  void persistConfigPatch(payload).catch(() => {
+    // Ошибка уже залогирована; UI остаётся доступным.
+  })
+}
+
 async function flushPendingConfig(): Promise<void> {
   const payload = takePendingConfigUpdate()
   if (Object.keys(payload).length > 0) {
@@ -101,7 +121,7 @@ export const useAppStore = create<AppState>((set) => ({
   config: defaultConfig,
   setConfig: (partial) => {
     set((state) => ({ config: { ...state.config, ...partial } }))
-    queueConfigUpdate(partial)
+    persistConfigUpdate(partial)
   },
   loadConfig: async () => {
     try {
