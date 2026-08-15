@@ -108,6 +108,11 @@ fn execute_command(cmd: SimulatorCommand) {
         SimulatorCommand::MouseMove { dx, dy } => move_mouse(dx, dy),
         SimulatorCommand::MouseScroll { delta } => scroll_mouse(delta),
         SimulatorCommand::MouseAbsolute { x, y } => move_mouse_absolute(x, y),
+        SimulatorCommand::RestorePhysicalModifiers { mask } => {
+            for vk in crate::daemon::engine::currently_held_modifier_vks(mask) {
+                send_key(vk, false);
+            }
+        }
     }
 }
 

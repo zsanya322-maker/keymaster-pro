@@ -8,6 +8,10 @@ use crate::context::AppContext;
 use crate::daemon::state::DaemonStateRef;
 use crate::schemas::engine::{EngineAction, EngineCondition, SimulatorCommand};
 use crate::schemas::frontend::key_modifiers;
+use crate::daemon::chord_output::{
+    build_atomic_chord_commands, isolate_macro_commands, modifier_vks,
+    press_modifier_commands, release_modifier_commands, shell_mask_commands,
+};
 use crate::shared::calculate_hash;
 
 /// Тип результата обработки события
@@ -120,29 +124,33 @@ fn modifiers_match(required: u16, actual: u16) -> bool {
         && family_matches(required, actual, key_modifiers::WIN, key_modifiers::LWIN, key_modifiers::RWIN)
 }
 
-fn modifier_vks(mask: u16) -> Vec<u8> {
-    let mut result = Vec::with_capacity(4);
-    if mask & key_modifiers::CTRL != 0 { result.push(0xA2); }
-    else {
-        if mask & key_modifiers::LCTRL != 0 { result.push(0xA2); }
-        if mask & key_modifiers::RCTRL != 0 { result.push(0xA3); }
+pub(crate) fn currently_held_modifier_vks(mask: u16) -> Vec<u8> {
+    let current = PHYSICAL_MODIFIERS.load(Ordering::Relaxed) & mask & key_modifiers::ALL;
+    modifier_vks(current)
+}
+
+fn current_physical_modifiers() -> u16 {
+    PHYSICAL_MODIFIERS.load(Ordering::Relaxed) & key_modifiers::ALL
+}
+
+fn send_commands(
+    simulator: &crate::simulator::SimulatorSender,
+    commands: impl IntoIterator<Item = SimulatorCommand>,
+) {
+    for command in commands {
+        let _ = simulator.send(command);
     }
-    if mask & key_modifiers::ALT != 0 { result.push(0xA4); }
-    else {
-        if mask & key_modifiers::LALT != 0 { result.push(0xA4); }
-        if mask & key_modifiers::RALT != 0 { result.push(0xA5); }
-    }
-    if mask & key_modifiers::SHIFT != 0 { result.push(0xA0); }
-    else {
-        if mask & key_modifiers::LSHIFT != 0 { result.push(0xA0); }
-        if mask & key_modifiers::RSHIFT != 0 { result.push(0xA1); }
-    }
-    if mask & key_modifiers::WIN != 0 { result.push(0x5B); }
-    else {
-        if mask & key_modifiers::LWIN != 0 { result.push(0x5B); }
-        if mask & key_modifiers::RWIN != 0 { result.push(0x5C); }
-    }
-    result
+}
+
+fn send_isolated_immediate(
+    simulator: &crate::simulator::SimulatorSender,
+    commands: impl IntoIterator<Item = SimulatorCommand>,
+) {
+    let physical = current_physical_modifiers();
+    send_commands(simulator, shell_mask_commands(physical));
+    send_commands(simulator, release_modifier_commands(physical));
+    send_commands(simulator, commands);
+    send_commands(simulator, press_modifier_commands(physical));
 }
 
 fn send_atomic_chord(
@@ -150,30 +158,11 @@ fn send_atomic_chord(
     code: u8,
     modifiers: u16,
 ) {
-    let physical = PHYSICAL_MODIFIERS.load(Ordering::Relaxed) & key_modifiers::ALL;
-    let physical_vks = modifier_vks(physical);
-    let output_vks = modifier_vks(modifiers & key_modifiers::ALL);
-
-    // Neutralize the physical trigger modifiers so Ctrl+Shift+F2 -> Alt+Tab
-    // does not accidentally become Ctrl+Shift+Alt+Tab in the foreground app.
-    for vk in physical_vks.iter().rev() {
-        let _ = simulator.send(SimulatorCommand::ReleaseKey(*vk));
-    }
-    for vk in &output_vks {
-        let _ = simulator.send(SimulatorCommand::PressKey(*vk));
-    }
-    if code != 0 {
-        let _ = simulator.send(SimulatorCommand::PressKey(code));
-        let _ = simulator.send(SimulatorCommand::ReleaseKey(code));
-    }
-    for vk in output_vks.iter().rev() {
-        let _ = simulator.send(SimulatorCommand::ReleaseKey(*vk));
-    }
-    // Restore the OS-visible modifier state to the keys that are still
-    // physically held. Injected events are ignored by our LL hook.
-    for vk in &physical_vks {
-        let _ = simulator.send(SimulatorCommand::PressKey(*vk));
-    }
+    let physical = current_physical_modifiers();
+    send_commands(
+        simulator,
+        build_atomic_chord_commands(code, modifiers, physical),
+    );
 }
 
 fn check_conditions(conditions: &[EngineCondition], ctx: &crate::context::AppContext) -> bool {
@@ -243,6 +232,13 @@ fn execute_actions(
     state: Option<&DaemonStateRef>,
     trigger_modifiers: u16,
 ) -> EventAction {
+    // Even actions that do not synthesize keyboard input must mark an Alt/Win
+    // combination as consumed. Otherwise Windows may treat the eventual
+    // modifier release as an isolated Alt/Win press (menu/Start activation).
+    if is_down && trigger_modifiers != 0 {
+        send_commands(simulator, shell_mask_commands(current_physical_modifiers()));
+    }
+
     for action in actions {
         match action {
             EngineAction::RemapKey { code, modifiers } => {
@@ -259,7 +255,14 @@ fn execute_actions(
                 }
             }
             EngineAction::RemapMouse { code } => {
-                if is_down {
+                if trigger_modifiers != 0 {
+                    if is_down {
+                        send_isolated_immediate(
+                            simulator,
+                            [SimulatorCommand::MousePress(*code), SimulatorCommand::MouseRelease(*code)],
+                        );
+                    }
+                } else if is_down {
                     let _ = simulator.send(SimulatorCommand::MousePress(*code));
                 } else {
                     let _ = simulator.send(SimulatorCommand::MouseRelease(*code));
@@ -267,7 +270,14 @@ fn execute_actions(
             }
             EngineAction::TypeText { text } => {
                 if is_down {
-                    let _ = simulator.send(SimulatorCommand::TypeString(text.clone()));
+                    if trigger_modifiers != 0 {
+                        send_isolated_immediate(
+                            simulator,
+                            [SimulatorCommand::TypeString(text.clone())],
+                        );
+                    } else {
+                        let _ = simulator.send(SimulatorCommand::TypeString(text.clone()));
+                    }
                 }
             }
             EngineAction::MacroCommands { commands } => {
@@ -295,6 +305,12 @@ fn execute_actions(
                         }
                     }
 
+                    if trigger_modifiers != 0 {
+                        macro_commands = isolate_macro_commands(
+                            macro_commands,
+                            current_physical_modifiers(),
+                        );
+                    }
                     let _ = simulator.send_macro(macro_commands);
                 }
             }
@@ -363,8 +379,12 @@ fn execute_actions(
                         _ => 0,
                     };
                     if vk != 0 {
-                        let _ = simulator.send(SimulatorCommand::PressKey(vk));
-                        let _ = simulator.send(SimulatorCommand::ReleaseKey(vk));
+                        if trigger_modifiers != 0 {
+                            send_atomic_chord(simulator, vk, 0);
+                        } else {
+                            let _ = simulator.send(SimulatorCommand::PressKey(vk));
+                            let _ = simulator.send(SimulatorCommand::ReleaseKey(vk));
+                        }
                     }
                 }
             }
@@ -378,8 +398,12 @@ fn execute_actions(
                         _ => 0,
                     };
                     if vk != 0 {
-                        let _ = simulator.send(SimulatorCommand::PressKey(vk));
-                        let _ = simulator.send(SimulatorCommand::ReleaseKey(vk));
+                        if trigger_modifiers != 0 {
+                            send_atomic_chord(simulator, vk, 0);
+                        } else {
+                            let _ = simulator.send(SimulatorCommand::PressKey(vk));
+                            let _ = simulator.send(SimulatorCommand::ReleaseKey(vk));
+                        }
                     }
                 }
             }
