@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, type ReactNode } from 'react';
+import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
 import {
   ChevronRight,
@@ -35,6 +36,21 @@ type EditorIntent =
   | { type: 'select'; id: string }
   | { type: 'new' };
 
+const inputClass = 'h-7 border border-app-border bg-app-bg px-2 text-[11px] text-app-text outline-none focus:border-app-primary';
+const selectClass = `${inputClass} cursor-pointer`;
+
+function EditorSection({ title, action, children }: { title: ReactNode; action?: ReactNode; children: ReactNode }) {
+  return (
+    <section className="border border-app-border bg-app-bg">
+      <div className="h-8 px-2.5 flex items-center border-b border-app-border bg-app-surface/55">
+        <span className="text-[11px] font-semibold text-app-text">{title}</span>
+        {action && <div className="ml-auto">{action}</div>}
+      </div>
+      <div className="p-2.5">{children}</div>
+    </section>
+  );
+}
+
 function formatTriggerKey(trigger: FrontendTrigger): string {
   switch (trigger.type) {
     case 'keyDown':
@@ -48,7 +64,7 @@ function formatTriggerKey(trigger: FrontendTrigger): string {
   }
 }
 
-function formatTriggerType(trigger: FrontendTrigger, t: (key: string) => string): string {
+function formatTriggerType(trigger: FrontendTrigger, t: TFunction): string {
   switch (trigger.type) {
     case 'keyDown': return t('rules.trigger_key_down');
     case 'keyUp': return t('rules.trigger_key_up');
@@ -67,12 +83,12 @@ function isInvalidMouseTrigger(trigger: FrontendTrigger): boolean {
   return isMouseTrigger(trigger) && 'code' in trigger && (trigger.code < 1 || trigger.code > 5);
 }
 
-function formatConditionLabel(condition: FrontendCondition, t: (key: string) => string): string {
+function formatConditionLabel(condition: FrontendCondition, t: TFunction): string {
   switch (condition.type) {
     case 'layerActive':
       return `${t('ruleBuilder.condition_types.layerActive')}: ${condition.layerId || '—'}`;
     case 'virtualDesktop':
-      return `${t('ruleBuilder.condition_types.virtualDesktop', 'Виртуальный рабочий стол')}: ${condition.id}`;
+      return `${t('ruleBuilder.condition_types.virtualDesktop', { defaultValue: 'Виртуальный рабочий стол' })}: ${condition.id}`;
     case 'windowMatch': {
       const parts: string[] = [];
       if (condition.process) parts.push(condition.process);
@@ -82,7 +98,7 @@ function formatConditionLabel(condition: FrontendCondition, t: (key: string) => 
   }
 }
 
-function formatActionLabel(action: FrontendAction, t: (key: string) => string): string {
+function formatActionLabel(action: FrontendAction, t: TFunction): string {
   switch (action.type) {
     case 'remapKey': return `${t('ruleBuilder.action_types.remapKey')} → ${vkToName(action.code)}`;
     case 'remapMouse': return `${t('ruleBuilder.action_types.remapMouse')} → ${vkToName(action.code)}`;
@@ -103,7 +119,7 @@ function formatActionLabel(action: FrontendAction, t: (key: string) => string): 
   }
 }
 
-function formatRuleSummary(rule: FrontendRule, t: (key: string) => string): string {
+function formatRuleSummary(rule: FrontendRule, t: TFunction): string {
   const firstAction = rule.actions[0];
   if (!firstAction) return '—';
   const first = formatActionLabel(firstAction, t);
@@ -153,9 +169,12 @@ function makeNewRule(mode: RulesViewMode): FrontendRule {
 }
 
 function changeTriggerType(rule: FrontendRule, type: FrontendTrigger['type']): FrontendRule {
-  if (type === 'tapHoldKeyDown') return { ...rule, trigger: { type, code: 0, timeoutMs: 200 } };
-  if (type === 'typedText') return { ...rule, trigger: { type, sequence: '' } };
-  return { ...rule, trigger: { type, code: 0 } };
+  if (type === 'tapHoldKeyDown') return { ...rule, trigger: { type: 'tapHoldKeyDown', code: 0, timeoutMs: 200 } };
+  if (type === 'typedText') return { ...rule, trigger: { type: 'typedText', sequence: '' } };
+  if (type === 'keyDown') return { ...rule, trigger: { type: 'keyDown', code: 0 } };
+  if (type === 'keyUp') return { ...rule, trigger: { type: 'keyUp', code: 0 } };
+  if (type === 'mouseDown') return { ...rule, trigger: { type: 'mouseDown', code: 1 } };
+  return { ...rule, trigger: { type: 'mouseUp', code: 1 } };
 }
 
 export const RulesPage: React.FC<RulesPageProps> = ({ mode = 'all' }) => {
@@ -171,6 +190,7 @@ export const RulesPage: React.FC<RulesPageProps> = ({ mode = 'all' }) => {
   const [query, setQuery] = useState('');
   const [pendingIntent, setPendingIntent] = useState<EditorIntent | null>(null);
   const [ruleToDelete, setRuleToDelete] = useState<FrontendRule | null>(null);
+  const [saving, setSaving] = useState(false);
 
   const modeRules = useMemo(
     () => activeProfile?.rules.filter((rule) => matchesMode(rule, mode)) ?? [],
@@ -203,6 +223,13 @@ export const RulesPage: React.FC<RulesPageProps> = ({ mode = 'all' }) => {
     setIsNewRule(false);
   };
 
+  const clearEditor = () => {
+    setSelectedRuleId(null);
+    setDraftRule(null);
+    setBaseline('');
+    setIsNewRule(false);
+  };
+
   const openNewRule = () => {
     const next = makeNewRule(mode);
     setSelectedRuleId(null);
@@ -216,71 +243,60 @@ export const RulesPage: React.FC<RulesPageProps> = ({ mode = 'all' }) => {
       openNewRule();
       return;
     }
-    const rule = activeProfile?.rules.find((item) => item.id === intent.id);
+
+    const rule = useProfileStore.getState().profiles
+      .find((profile) => profile.id === useProfileStore.getState().activeProfileId)
+      ?.rules.find((item) => item.id === intent.id);
     if (rule) openExistingRule(rule);
   };
 
   const requestIntent = (intent: EditorIntent) => {
-    if (isDirty) {
-      setPendingIntent(intent);
-    } else {
-      applyIntent(intent);
-    }
+    if (saving) return;
+    if (isDirty) setPendingIntent(intent);
+    else applyIntent(intent);
   };
 
   useEffect(() => {
-    if (!activeProfile) {
-      setSelectedRuleId(null);
-      setDraftRule(null);
-      setBaseline('');
-      setIsNewRule(false);
-      return;
-    }
+    setQuery('');
+    setPendingIntent(null);
+    setRuleToDelete(null);
 
-    if (isNewRule) return;
-
-    const selected = modeRules.find((rule) => rule.id === selectedRuleId);
-    if (selected) {
-      if (!draftRule || draftRule.id !== selected.id) openExistingRule(selected);
-      return;
-    }
-
-    if (!isDirty) {
-      const first = modeRules[0];
-      if (first) openExistingRule(first);
-      else {
-        setSelectedRuleId(null);
-        setDraftRule(null);
-        setBaseline('');
-      }
-    }
-  }, [activeProfileId, mode, modeRules, selectedRuleId, draftRule?.id, isDirty, isNewRule]);
+    const state = useProfileStore.getState();
+    const profile = state.profiles.find((item) => item.id === state.activeProfileId);
+    const first = profile?.rules.find((rule) => matchesMode(rule, mode));
+    if (first) openExistingRule(first);
+    else clearEditor();
+  }, [activeProfileId, mode]);
 
   const handleSaveRule = async () => {
-    if (!activeProfile || !draftRule || draftRule.actions.length === 0) return;
+    if (!activeProfile || !draftRule || draftRule.actions.length === 0 || saving) return;
 
     const savedRule = structuredClone(draftRule);
     const nextRules = isNewRule
       ? [...activeProfile.rules, savedRule]
       : activeProfile.rules.map((rule) => rule.id === savedRule.id ? savedRule : rule);
 
-    await saveProfile({ ...activeProfile, rules: nextRules });
-    setSelectedRuleId(savedRule.id);
-    setDraftRule(savedRule);
-    setBaseline(JSON.stringify(savedRule));
-    setIsNewRule(false);
+    setSaving(true);
+    try {
+      const saved = await saveProfile({ ...activeProfile, rules: nextRules });
+      if (!saved) return;
+
+      setSelectedRuleId(savedRule.id);
+      setDraftRule(savedRule);
+      setBaseline(JSON.stringify(savedRule));
+      setIsNewRule(false);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const resetDraft = () => {
+    if (saving) return;
+
     if (isNewRule) {
       const first = modeRules[0];
       if (first) openExistingRule(first);
-      else {
-        setDraftRule(null);
-        setBaseline('');
-        setSelectedRuleId(null);
-        setIsNewRule(false);
-      }
+      else clearEditor();
       return;
     }
 
@@ -289,18 +305,20 @@ export const RulesPage: React.FC<RulesPageProps> = ({ mode = 'all' }) => {
   };
 
   const deleteRule = async (rule: FrontendRule) => {
-    if (!activeProfile) return;
+    if (!activeProfile || saving) return;
     const nextRules = activeProfile.rules.filter((item) => item.id !== rule.id);
-    await saveProfile({ ...activeProfile, rules: nextRules });
 
-    const nextVisible = nextRules.filter((item) => matchesMode(item, mode));
-    const next = nextVisible[0] ?? null;
-    if (next) openExistingRule(next);
-    else {
-      setSelectedRuleId(null);
-      setDraftRule(null);
-      setBaseline('');
-      setIsNewRule(false);
+    setSaving(true);
+    try {
+      const saved = await saveProfile({ ...activeProfile, rules: nextRules });
+      if (!saved) return;
+
+      const nextVisible = nextRules.filter((item) => matchesMode(item, mode));
+      const next = nextVisible[0] ?? null;
+      if (next) openExistingRule(next);
+      else clearEditor();
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -315,16 +333,14 @@ export const RulesPage: React.FC<RulesPageProps> = ({ mode = 'all' }) => {
       const command = (event as CustomEvent<RuleCommand>).detail;
       if (command === 'add') {
         requestIntent({ type: 'new' });
-      } else if (command === 'edit') {
-        if (!draftRule && selectedRuleId) requestIntent({ type: 'select', id: selectedRuleId });
-      } else if (command === 'delete' && draftRule && !isNewRule) {
+      } else if (command === 'delete' && draftRule && !isNewRule && !saving) {
         setRuleToDelete(draftRule);
       }
     };
 
     window.addEventListener(RULE_COMMAND_EVENT, onCommand);
     return () => window.removeEventListener(RULE_COMMAND_EVENT, onCommand);
-  }, [draftRule, selectedRuleId, isNewRule, isDirty, activeProfile, mode]);
+  }, [draftRule, isNewRule, isDirty, saving]);
 
   if (!activeProfile) {
     if (!daemonConnected) {
@@ -346,12 +362,15 @@ export const RulesPage: React.FC<RulesPageProps> = ({ mode = 'all' }) => {
   }
 
   const viewTitle = mode === 'macros'
-    ? t('nav.macros', 'Макросы')
+    ? t('nav.macros', { defaultValue: 'Макросы' })
     : mode === 'text'
-      ? t('nav.text', 'Текст')
-      : t('rules.title', 'Список правил');
+      ? t('nav.text', { defaultValue: 'Текст' })
+      : t('rules.title', { defaultValue: 'Список правил' });
 
-  const saveDisabled = !draftRule || draftRule.actions.length === 0 || !isDirty;
+  const saveDisabled = !draftRule
+    || draftRule.actions.length === 0
+    || saving
+    || (!isDirty && !isNewRule);
   const isTapHold = draftRule?.trigger.type === 'tapHoldKeyDown';
 
   return (
@@ -369,7 +388,7 @@ export const RulesPage: React.FC<RulesPageProps> = ({ mode = 'all' }) => {
               <input
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder={t('rules.search_placeholder', 'Поиск правил')}
+                placeholder={t('rules.search_placeholder', { defaultValue: 'Поиск правил' })}
                 className="w-full h-7 pl-7 pr-2 text-[11px] bg-app-bg border border-app-border outline-none focus:border-app-primary"
               />
             </label>
@@ -389,8 +408,9 @@ export const RulesPage: React.FC<RulesPageProps> = ({ mode = 'all' }) => {
                 <button
                   key={rule.id}
                   type="button"
+                  disabled={saving}
                   onClick={() => requestIntent({ type: 'select', id: rule.id })}
-                  className={`w-full min-h-[52px] px-2.5 py-1.5 text-left border-b border-app-border/55 flex items-start gap-2 transition-colors ${
+                  className={`w-full min-h-[52px] px-2.5 py-1.5 text-left border-b border-app-border/55 flex items-start gap-2 transition-colors disabled:opacity-60 ${
                     selected
                       ? 'bg-app-primary/10 shadow-[inset_2px_0_0_var(--color-primary)]'
                       : 'hover:bg-app-surface-hover/35'
@@ -415,14 +435,17 @@ export const RulesPage: React.FC<RulesPageProps> = ({ mode = 'all' }) => {
 
             {filteredRules.length === 0 && (
               <div className="py-8 px-4 text-center text-[11px] text-app-muted">
-                {query ? t('rules.search_empty', 'Ничего не найдено') : t('rules.empty_state')}
+                {query
+                  ? t('rules.search_empty', { defaultValue: 'Ничего не найдено' })
+                  : t('rules.empty_state')}
               </div>
             )}
 
             <button
               type="button"
+              disabled={saving}
               onClick={() => requestIntent({ type: 'new' })}
-              className="w-full h-9 px-3 text-left text-[11px] text-app-muted hover:text-app-primary hover:bg-app-surface flex items-center gap-2 border-b border-app-border/45"
+              className="w-full h-9 px-3 text-left text-[11px] text-app-muted hover:text-app-primary hover:bg-app-surface flex items-center gap-2 border-b border-app-border/45 disabled:opacity-40"
             >
               <ListPlus size={13} />
               {t('rules.add_rule')}
@@ -430,23 +453,26 @@ export const RulesPage: React.FC<RulesPageProps> = ({ mode = 'all' }) => {
           </div>
 
           <div className="h-8 px-3 flex items-center border-t border-app-border bg-app-surface/35 text-[10px] text-app-muted shrink-0">
-            {t('rules.total_rules', 'Всего правил')}: {modeRules.length}
+            {t('rules.total_rules', { defaultValue: 'Всего правил' })}: {modeRules.length}
           </div>
         </section>
 
         <section className="flex-1 min-w-0 flex flex-col bg-app-bg min-h-0">
           <div className="h-10 px-3 flex items-center border-b border-app-border bg-app-surface/45 shrink-0">
             <h2 className="text-xs font-semibold text-app-text">
-              {isNewRule ? t('ruleBuilder.modal.create_title') : t('rules.editor_title', 'Редактор правила')}
+              {isNewRule
+                ? t('ruleBuilder.modal.create_title')
+                : t('rules.editor_title', { defaultValue: 'Редактор правила' })}
             </h2>
-            {isDirty && <span className="ml-2 text-[10px] text-app-warning">● {t('rules.unsaved', 'изменено')}</span>}
+            {isDirty && <span className="ml-2 text-[10px] text-app-warning">● {t('rules.unsaved', { defaultValue: 'изменено' })}</span>}
+            {saving && <span className="ml-2 text-[10px] text-app-primary">{t('common.saving', { defaultValue: 'Сохранение…' })}</span>}
 
             {draftRule && (
               <div className="ml-auto flex items-center gap-1.5">
                 <button
                   type="button"
                   onClick={resetDraft}
-                  disabled={!isDirty && !isNewRule}
+                  disabled={saving || (!isDirty && !isNewRule)}
                   className="h-7 px-2 inline-flex items-center gap-1.5 border border-app-border bg-app-bg text-[10px] text-app-text hover:bg-app-surface-hover disabled:opacity-35"
                 >
                   <RotateCcw size={11} />
@@ -455,9 +481,10 @@ export const RulesPage: React.FC<RulesPageProps> = ({ mode = 'all' }) => {
                 {!isNewRule && (
                   <button
                     type="button"
+                    disabled={saving}
                     onClick={() => setRuleToDelete(draftRule)}
-                    className="h-7 w-7 inline-flex items-center justify-center border border-app-border bg-app-bg text-app-muted hover:bg-app-surface hover:text-app-danger"
-                    title={t('rules.delete_rule', 'Удалить')}
+                    className="h-7 w-7 inline-flex items-center justify-center border border-app-border bg-app-bg text-app-muted hover:bg-app-surface hover:text-app-danger disabled:opacity-35"
+                    title={t('rules.delete_rule', { defaultValue: 'Удалить' })}
                   >
                     <Trash2 size={12} />
                   </button>
@@ -477,52 +504,51 @@ export const RulesPage: React.FC<RulesPageProps> = ({ mode = 'all' }) => {
 
           {!draftRule ? (
             <div className="flex-1 flex items-center justify-center text-[11px] text-app-muted">
-              {t('rules.select_rule_hint', 'Выберите правило слева или создайте новое')}
+              {t('rules.select_rule_hint', { defaultValue: 'Выберите правило слева или создайте новое' })}
             </div>
           ) : (
             <div className="flex-1 min-h-0 overflow-y-auto p-3">
               <div className="max-w-5xl space-y-3">
-                <section className="border border-app-border bg-app-bg">
-                  <div className="h-8 px-2.5 flex items-center border-b border-app-border bg-app-surface/55 text-[11px] font-semibold text-app-text">
-                    {t('ruleBuilder.tabs.name', 'Основные свойства')}
-                  </div>
-                  <div className="grid grid-cols-[130px_minmax(0,1fr)]">
+                <EditorSection title={t('ruleBuilder.tabs.name', { defaultValue: 'Основные свойства' })}>
+                  <div className="grid grid-cols-[130px_minmax(0,1fr)] border border-app-border/70">
                     <label className="min-h-9 px-2.5 flex items-center border-b border-r border-app-border/70 bg-app-surface/25 text-[10px] text-app-muted">
-                      {t('ruleBuilder.tabs.name', 'Название')}
+                      {t('ruleBuilder.tabs.name')}
                     </label>
                     <div className="min-h-9 p-1.5 border-b border-app-border/70">
                       <input
                         type="text"
                         value={draftRule.name || ''}
+                        disabled={saving}
                         onChange={(event) => setDraftRule({ ...draftRule, name: event.target.value })}
-                        placeholder={t('ruleBuilder.placeholders.name', 'Название правила')}
-                        className="h-7 w-full border border-app-border bg-app-bg px-2 text-[11px] text-app-text outline-none focus:border-app-primary"
+                        placeholder={t('ruleBuilder.placeholders.name')}
+                        className={`${inputClass} w-full disabled:opacity-50`}
                       />
                     </div>
                     <label className="min-h-9 px-2.5 flex items-center border-r border-app-border/70 bg-app-surface/25 text-[10px] text-app-muted">
-                      {t('ruleBuilder.priority', 'Приоритет')}
+                      {t('ruleBuilder.priority', { defaultValue: 'Приоритет' })}
                     </label>
                     <div className="min-h-9 p-1.5 flex items-center gap-2">
                       <input
                         type="number"
                         value={draftRule.priority}
+                        disabled={saving}
                         onChange={(event) => setDraftRule({ ...draftRule, priority: Number.parseInt(event.target.value, 10) || 0 })}
-                        className="h-7 w-24 border border-app-border bg-app-bg px-2 text-[11px] font-mono text-app-text outline-none focus:border-app-primary"
+                        className={`${inputClass} w-24 font-mono disabled:opacity-50`}
                       />
-                      <span className="text-[10px] text-app-muted">{t('ruleBuilder.priority_hint', 'Большее значение выполняется раньше')}</span>
+                      <span className="text-[10px] text-app-muted">
+                        {t('ruleBuilder.priority_hint', { defaultValue: 'Большее значение выполняется раньше' })}
+                      </span>
                     </div>
                   </div>
-                </section>
+                </EditorSection>
 
-                <section className="border border-app-border bg-app-bg">
-                  <div className="h-8 px-2.5 flex items-center border-b border-app-border bg-app-surface/55 text-[11px] font-semibold text-app-text">
-                    {t('ruleBuilder.tabs.trigger')}
-                  </div>
-                  <div className="p-2.5 grid grid-cols-[180px_minmax(0,1fr)] gap-2">
+                <EditorSection title={t('ruleBuilder.tabs.trigger')}>
+                  <div className="grid grid-cols-[180px_minmax(0,1fr)] gap-2">
                     <select
                       value={draftRule.trigger.type}
+                      disabled={saving}
                       onChange={(event) => setDraftRule(changeTriggerType(draftRule, event.target.value as FrontendTrigger['type']))}
-                      className="h-7 border border-app-border bg-app-surface/45 px-2 text-[11px] text-app-text outline-none focus:border-app-primary"
+                      className={`${selectClass} bg-app-surface/45 disabled:opacity-50`}
                     >
                       <option value="keyDown">{t('ruleBuilder.trigger_types.keyDown')}</option>
                       <option value="keyUp">{t('ruleBuilder.trigger_types.keyUp')}</option>
@@ -537,9 +563,10 @@ export const RulesPage: React.FC<RulesPageProps> = ({ mode = 'all' }) => {
                         <input
                           type="text"
                           value={draftRule.trigger.sequence}
+                          disabled={saving}
                           onChange={(event) => setDraftRule({ ...draftRule, trigger: { type: 'typedText', sequence: event.target.value } })}
                           placeholder={t('ruleBuilder.placeholders.sequence')}
-                          className="h-7 flex-1 min-w-0 border border-app-border bg-app-bg px-2 text-[11px] text-app-text outline-none focus:border-app-primary"
+                          className={`${inputClass} flex-1 min-w-0 disabled:opacity-50`}
                         />
                       ) : (
                         <KeyPicker
@@ -558,141 +585,147 @@ export const RulesPage: React.FC<RulesPageProps> = ({ mode = 'all' }) => {
                             type="number"
                             min={1}
                             value={draftRule.trigger.timeoutMs}
-                            onChange={(event) => setDraftRule({
-                              ...draftRule,
-                              trigger: {
-                                ...draftRule.trigger,
-                                timeoutMs: Math.max(1, Number.parseInt(event.target.value, 10) || 200),
-                              },
-                            })}
-                            className="h-7 w-20 border border-app-border bg-app-bg px-2 text-[11px] font-mono text-app-text outline-none focus:border-app-primary"
+                            disabled={saving}
+                            onChange={(event) => {
+                              const timeoutMs = Math.max(1, Number.parseInt(event.target.value, 10) || 200);
+                              setDraftRule((current) => {
+                                if (!current || current.trigger.type !== 'tapHoldKeyDown') return current;
+                                return {
+                                  ...current,
+                                  trigger: {
+                                    type: 'tapHoldKeyDown',
+                                    code: current.trigger.code,
+                                    timeoutMs,
+                                  },
+                                };
+                              });
+                            }}
+                            className={`${inputClass} w-20 font-mono disabled:opacity-50`}
                           />
                           <span className="text-[9px] text-app-muted">ms</span>
                         </div>
                       )}
                     </div>
                   </div>
-                </section>
+                </EditorSection>
 
-                <section className="border border-app-border bg-app-bg">
-                  <div className="h-8 px-2.5 flex items-center border-b border-app-border bg-app-surface/55">
-                    <span className="text-[11px] font-semibold text-app-text">{t('ruleBuilder.tabs.conditions')}</span>
+                <EditorSection
+                  title={t('ruleBuilder.tabs.conditions')}
+                  action={(
                     <button
                       type="button"
+                      disabled={saving}
                       onClick={() => setDraftRule({
                         ...draftRule,
                         conditions: [...draftRule.conditions, { type: 'windowMatch', process: '', title: '' }],
                       })}
-                      className="ml-auto h-6 px-2 border border-app-border bg-app-bg text-[10px] text-app-primary hover:bg-app-surface"
+                      className="h-6 px-2 border border-app-border bg-app-bg text-[10px] text-app-primary hover:bg-app-surface disabled:opacity-40"
                     >
                       + {t('ruleBuilder.buttons.add_condition')}
                     </button>
-                  </div>
-                  <div className="p-2.5">
-                    {draftRule.conditions.length === 0 ? (
-                      <div className="py-1.5 text-[11px] text-app-muted">{t('ruleBuilder.hints.no_conditions_global')}</div>
-                    ) : (
-                      <div className="space-y-1.5">
-                        {draftRule.conditions.map((condition, index) => (
-                          <ConditionEditor
-                            key={index}
-                            condition={condition}
-                            onChange={(nextCondition) => {
-                              const conditions = [...draftRule.conditions];
-                              conditions[index] = nextCondition;
-                              setDraftRule({ ...draftRule, conditions });
-                            }}
-                            onRemove={() => setDraftRule({
-                              ...draftRule,
-                              conditions: draftRule.conditions.filter((_, itemIndex) => itemIndex !== index),
-                            })}
-                          />
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </section>
+                  )}
+                >
+                  {draftRule.conditions.length === 0 ? (
+                    <div className="py-1.5 text-[11px] text-app-muted">{t('ruleBuilder.hints.no_conditions_global')}</div>
+                  ) : (
+                    <div className={`space-y-1.5 ${saving ? 'pointer-events-none opacity-60' : ''}`}>
+                      {draftRule.conditions.map((condition, index) => (
+                        <ConditionEditor
+                          key={index}
+                          condition={condition}
+                          onChange={(nextCondition) => {
+                            const conditions = [...draftRule.conditions];
+                            conditions[index] = nextCondition;
+                            setDraftRule({ ...draftRule, conditions });
+                          }}
+                          onRemove={() => setDraftRule({
+                            ...draftRule,
+                            conditions: draftRule.conditions.filter((_, itemIndex) => itemIndex !== index),
+                          })}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </EditorSection>
 
-                <section className="border border-app-border bg-app-bg">
-                  <div className="h-8 px-2.5 flex items-center border-b border-app-border bg-app-surface/55">
-                    <span className="text-[11px] font-semibold text-app-text">
-                      {isTapHold ? t('ruleBuilder.tabs.tap_actions') : t('ruleBuilder.tabs.actions')}
-                    </span>
+                <EditorSection
+                  title={isTapHold ? t('ruleBuilder.tabs.tap_actions') : t('ruleBuilder.tabs.actions')}
+                  action={(
                     <button
                       type="button"
+                      disabled={saving}
                       onClick={() => setDraftRule({
                         ...draftRule,
                         actions: [...draftRule.actions, { type: 'typeText', text: '' }],
                       })}
-                      className="ml-auto h-6 px-2 border border-app-border bg-app-bg text-[10px] text-app-primary hover:bg-app-surface"
+                      className="h-6 px-2 border border-app-border bg-app-bg text-[10px] text-app-primary hover:bg-app-surface disabled:opacity-40"
                     >
                       + {t('ruleBuilder.buttons.add_action')}
                     </button>
-                  </div>
-                  <div className="p-2.5">
-                    {draftRule.actions.length === 0 ? (
-                      <div className="py-1.5 text-[11px] text-app-danger">{t('ruleBuilder.hints.must_have_action')}</div>
+                  )}
+                >
+                  {draftRule.actions.length === 0 ? (
+                    <div className="py-1.5 text-[11px] text-app-danger">{t('ruleBuilder.hints.must_have_action')}</div>
+                  ) : (
+                    <div className={`space-y-1.5 ${saving ? 'pointer-events-none opacity-60' : ''}`}>
+                      {draftRule.actions.map((action, index) => (
+                        <ActionEditor
+                          key={index}
+                          action={action}
+                          onChange={(nextAction) => {
+                            const actions = [...draftRule.actions];
+                            actions[index] = nextAction;
+                            setDraftRule({ ...draftRule, actions });
+                          }}
+                          onRemove={() => setDraftRule({
+                            ...draftRule,
+                            actions: draftRule.actions.filter((_, itemIndex) => itemIndex !== index),
+                          })}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </EditorSection>
+
+                {isTapHold && (
+                  <EditorSection
+                    title={t('ruleBuilder.tabs.hold_actions')}
+                    action={(
+                      <button
+                        type="button"
+                        disabled={saving}
+                        onClick={() => setDraftRule({
+                          ...draftRule,
+                          holdActions: [...(draftRule.holdActions || []), { type: 'holdLayer', layerId: '' }],
+                        })}
+                        className="h-6 px-2 border border-app-border bg-app-bg text-[10px] text-app-primary hover:bg-app-surface disabled:opacity-40"
+                      >
+                        + {t('ruleBuilder.buttons.add_hold_action')}
+                      </button>
+                    )}
+                  >
+                    {!draftRule.holdActions || draftRule.holdActions.length === 0 ? (
+                      <div className="py-1.5 text-[11px] text-app-muted">{t('ruleBuilder.hints.no_hold_actions')}</div>
                     ) : (
-                      <div className="space-y-1.5">
-                        {draftRule.actions.map((action, index) => (
+                      <div className={`space-y-1.5 ${saving ? 'pointer-events-none opacity-60' : ''}`}>
+                        {draftRule.holdActions.map((action, index) => (
                           <ActionEditor
                             key={index}
                             action={action}
                             onChange={(nextAction) => {
-                              const actions = [...draftRule.actions];
-                              actions[index] = nextAction;
-                              setDraftRule({ ...draftRule, actions });
+                              const holdActions = [...(draftRule.holdActions || [])];
+                              holdActions[index] = nextAction;
+                              setDraftRule({ ...draftRule, holdActions });
                             }}
                             onRemove={() => setDraftRule({
                               ...draftRule,
-                              actions: draftRule.actions.filter((_, itemIndex) => itemIndex !== index),
+                              holdActions: (draftRule.holdActions || []).filter((_, itemIndex) => itemIndex !== index),
                             })}
                           />
                         ))}
                       </div>
                     )}
-                  </div>
-                </section>
-
-                {isTapHold && (
-                  <section className="border border-app-border bg-app-bg">
-                    <div className="h-8 px-2.5 flex items-center border-b border-app-border bg-app-surface/55">
-                      <span className="text-[11px] font-semibold text-app-text">{t('ruleBuilder.tabs.hold_actions')}</span>
-                      <button
-                        type="button"
-                        onClick={() => setDraftRule({
-                          ...draftRule,
-                          holdActions: [...(draftRule.holdActions || []), { type: 'holdLayer', layerId: '' }],
-                        })}
-                        className="ml-auto h-6 px-2 border border-app-border bg-app-bg text-[10px] text-app-primary hover:bg-app-surface"
-                      >
-                        + {t('ruleBuilder.buttons.add_hold_action')}
-                      </button>
-                    </div>
-                    <div className="p-2.5">
-                      {!draftRule.holdActions || draftRule.holdActions.length === 0 ? (
-                        <div className="py-1.5 text-[11px] text-app-muted">{t('ruleBuilder.hints.no_hold_actions')}</div>
-                      ) : (
-                        <div className="space-y-1.5">
-                          {draftRule.holdActions.map((action, index) => (
-                            <ActionEditor
-                              key={index}
-                              action={action}
-                              onChange={(nextAction) => {
-                                const holdActions = [...(draftRule.holdActions || [])];
-                                holdActions[index] = nextAction;
-                                setDraftRule({ ...draftRule, holdActions });
-                              }}
-                              onRemove={() => setDraftRule({
-                                ...draftRule,
-                                holdActions: (draftRule.holdActions || []).filter((_, itemIndex) => itemIndex !== index),
-                              })}
-                            />
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </section>
+                  </EditorSection>
                 )}
               </div>
             </div>
@@ -702,9 +735,9 @@ export const RulesPage: React.FC<RulesPageProps> = ({ mode = 'all' }) => {
 
       <ConfirmDialog
         open={pendingIntent !== null}
-        title={t('ruleBuilder.unsaved_title', 'Несохранённые изменения')}
-        message={t('ruleBuilder.unsaved_message', 'Отбросить изменения и перейти дальше?')}
-        confirmLabel={t('ruleBuilder.discard_changes', 'Отбросить')}
+        title={t('ruleBuilder.unsaved_title', { defaultValue: 'Несохранённые изменения' })}
+        message={t('ruleBuilder.unsaved_message', { defaultValue: 'Отбросить изменения и перейти дальше?' })}
+        confirmLabel={t('ruleBuilder.discard_changes', { defaultValue: 'Отбросить' })}
         danger
         onCancel={() => setPendingIntent(null)}
         onConfirm={() => {
@@ -716,15 +749,20 @@ export const RulesPage: React.FC<RulesPageProps> = ({ mode = 'all' }) => {
 
       <ConfirmDialog
         open={ruleToDelete !== null}
-        title={t('rules.delete_rule', 'Удалить правило')}
-        message={t('rules.confirm_delete', 'Удалить выбранное правило?')}
-        confirmLabel={t('profiles_menu.delete_btn', 'Удалить')}
+        title={t('rules.delete_rule', { defaultValue: 'Удалить правило' })}
+        message={t('rules.confirm_delete', { defaultValue: 'Удалить выбранное правило?' })}
+        confirmLabel={t('profiles_menu.delete_btn', { defaultValue: 'Удалить' })}
         danger
-        onCancel={() => setRuleToDelete(null)}
+        onCancel={() => { if (!saving) setRuleToDelete(null); }}
         onConfirm={async () => {
           const rule = ruleToDelete;
-          setRuleToDelete(null);
-          if (rule) await deleteRule(rule);
+          if (!rule) return;
+          const beforeId = rule.id;
+          await deleteRule(rule);
+          const stillExists = useProfileStore.getState().profiles
+            .find((profile) => profile.id === useProfileStore.getState().activeProfileId)
+            ?.rules.some((item) => item.id === beforeId);
+          if (!stillExists) setRuleToDelete(null);
         }}
       />
     </>
