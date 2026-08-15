@@ -1,0 +1,47 @@
+name: v0.3.1 Package Current
+
+on:
+  push:
+    branches: [dev/v0.3.1-mouse-macros]
+    paths: [.github/workflows/v031-package-current.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dev/v0.3.1-mouse-macros
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+      - run: pnpm install --frozen-lockfile
+      - name: Frontend build
+        run: pnpm build
+      - name: Rust check
+        working-directory: src-tauri
+        run: cargo check --all-targets
+      - name: Rust tests
+        working-directory: src-tauri
+        run: cargo test
+      - name: Build NSIS
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: pnpm tauri build --bundles nsis
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KeyMaster-Pro-v0.3.1-Windows
+          path: src-tauri/target/release/bundle/nsis/*
+          if-no-files-found: error
