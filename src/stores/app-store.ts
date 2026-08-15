@@ -36,6 +36,7 @@ const defaultConfig: AppConfig = {
   autostart: false,
   minimizeToTray: true,
   language: 'ru',
+  languageUserSelected: false,
   kbHookEnabled: true,
   mouseHookEnabled: true,
   debugMode: false,
@@ -99,8 +100,6 @@ function persistConfigUpdate(partial: Partial<AppConfig>) {
     return
   }
 
-  // Редкие переключатели/язык/тема должны попасть на диск сразу. Если перед
-  // ними уже накопился пакет от slider'ов, отправляем всё одним свежим patch.
   pendingConfigUpdate = { ...pendingConfigUpdate, ...partial }
   const payload = takePendingConfigUpdate()
   void persistConfigPatch(payload).catch(() => {
@@ -117,6 +116,11 @@ async function flushPendingConfig(): Promise<void> {
   }
 }
 
+function systemUiLanguage(): 'ru' | 'en' {
+  if (typeof navigator === 'undefined') return 'ru'
+  return navigator.language.toLowerCase().startsWith('ru') ? 'ru' : 'en'
+}
+
 export const useAppStore = create<AppState>((set) => ({
   config: defaultConfig,
   setConfig: (partial) => {
@@ -126,8 +130,26 @@ export const useAppStore = create<AppState>((set) => ({
   loadConfig: async () => {
     try {
       const serverConfig = await invoke<AppConfig>('get_gui_config')
-      if (serverConfig) set({ config: serverConfig })
-    } catch {
+      if (!serverConfig) return
+
+      if (!serverConfig.languageUserSelected) {
+        // Старые версии записывали `en` как технический default, поэтому по
+        // одному полю language нельзя понять, выбирал ли его пользователь.
+        // Один раз берём язык Windows/WebView и фиксируем выбор маркером.
+        const language = systemUiLanguage()
+        const migratedConfig: AppConfig = {
+          ...serverConfig,
+          language,
+          languageUserSelected: true,
+        }
+        set({ config: migratedConfig })
+        await persistConfigPatch({ language, languageUserSelected: true })
+        return
+      }
+
+      set({ config: serverConfig })
+    } catch (error) {
+      console.error('Failed to load GUI config', error)
       // Offline/browser fallback.
     }
   },
