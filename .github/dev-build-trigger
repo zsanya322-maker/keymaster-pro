@@ -1,1 +1,1 @@
-0.3.0-checkpoint1: rule model v2 + keyboard chords + compact progressive-disclosure UI
+0.3.0-checkpoint2: chord runtime + modifier isolation + input lifecycle + schema v2 migration
