@@ -100,14 +100,20 @@ pub async fn stop_daemon() -> Result<serde_json::Value, String> {
 }
 
 /// Получить статус Daemon через IPC.
+/// Любой завершившийся status-check снимает spawn-guard: если daemon уже
+/// отвечает — запуск завершён успешно; если не отвечает — следующий retry
+/// имеет право попробовать запустить процесс ещё раз.
 #[tauri::command]
 pub async fn daemon_status(state: State<'_, GuiState>) -> Result<serde_json::Value, String> {
     match crate::daemon::ipc_client::call("get_status", None).await {
-        Ok(status) => Ok(serde_json::json!({
-            "connected": true,
-            "status": "running",
-            "details": status
-        })),
+        Ok(status) => {
+            state.spawning.store(false, Ordering::SeqCst);
+            Ok(serde_json::json!({
+                "connected": true,
+                "status": "running",
+                "details": status
+            }))
+        }
         Err(_) => {
             state.spawning.store(false, Ordering::SeqCst);
             Ok(serde_json::json!({
