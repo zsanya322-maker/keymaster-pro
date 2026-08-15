@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::schemas::frontend::{FrontendRule, LayerMeta};
+use crate::schemas::frontend::{FrontendRule, LayerMeta, RuleFolder};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -11,6 +11,8 @@ pub struct Profile {
     pub linked_apps: Vec<String>,
     pub rules: Vec<FrontendRule>,
     pub layers: Vec<LayerMeta>,
+    #[serde(default)]
+    pub folders: Vec<RuleFolder>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
