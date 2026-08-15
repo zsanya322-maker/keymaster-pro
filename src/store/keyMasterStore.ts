@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-export type Category = 'rules' | 'layers' | 'settings';
+export type Category = 'rules' | 'layers' | 'macros' | 'text' | 'settings';
 
 interface KeyMapStore {
   activeCategory: Category;
