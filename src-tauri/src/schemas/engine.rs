@@ -24,6 +24,10 @@ pub struct CompiledRule {
     pub priority: i32,
     /// Keyboard-only modifier requirement. Non-keyboard rules keep this at 0.
     pub required_modifiers: u16,
+    /// `true` for KeyDown/MouseDown and `false` for KeyUp/MouseUp.
+    /// Text-expansion rules use `true` because they are explicitly activated by
+    /// the text matcher rather than by an input edge.
+    pub trigger_on_down: bool,
     pub conditions: Vec<EngineCondition>,
     pub actions: Vec<EngineAction>,
 }
