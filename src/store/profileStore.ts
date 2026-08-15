@@ -70,6 +70,7 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
         linkedApps: [],
         rules: [],
         layers: [],
+        folders: [],
         ...partial,
       }
       await invoke('ipc_call', { method: 'profile.create', params: newProfile })
