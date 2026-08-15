@@ -21,17 +21,21 @@ import {
   genericizeModifierMask,
 } from '../../lib/keyCodes';
 
-type KeyPickerProps = {
+interface ChordKeyPickerProps {
   value: KeyChord;
   onChange: (chord: KeyChord) => void;
   className?: string;
   allowModifiers?: boolean;
-} | {
+}
+
+interface SingleKeyPickerProps {
   value: number;
   onChange: (code: number) => void;
   className?: string;
   allowModifiers?: false;
-};
+}
+
+type KeyPickerProps = ChordKeyPickerProps | SingleKeyPickerProps;
 
 const LISTEN_TIMEOUT_MS = 10_000;
 const MODIFIERS = [
@@ -47,12 +51,14 @@ const SIDE_MODIFIERS = [
   ['LWin', MOD_LWIN], ['RWin', MOD_RWIN],
 ] as const;
 
-export const KeyPicker: React.FC<KeyPickerProps> = (props) => {
+export function KeyPicker(props: ChordKeyPickerProps): React.ReactElement;
+export function KeyPicker(props: SingleKeyPickerProps): React.ReactElement;
+export function KeyPicker(props: KeyPickerProps): React.ReactElement {
   const { t } = useTranslation();
   const [isRecording, setIsRecording] = useState(false);
   const [preserveSides, setPreserveSides] = useState(false);
   const lastFinishTime = useRef(0);
-  const propsRef = useRef(props);
+  const propsRef = useRef<KeyPickerProps>(props);
   const numericMode = typeof props.value === 'number';
   const value: KeyChord = numericMode
     ? { code: props.value as number, modifiers: 0 }
@@ -67,9 +73,9 @@ export const KeyPicker: React.FC<KeyPickerProps> = (props) => {
   const emit = (next: KeyChord) => {
     const current = propsRef.current;
     if (typeof current.value === 'number') {
-      (current.onChange as (code: number) => void)(next.code);
+      current.onChange(next.code);
     } else {
-      (current.onChange as (chord: KeyChord) => void)(next);
+      current.onChange(next);
     }
   };
 
@@ -233,4 +239,4 @@ export const KeyPicker: React.FC<KeyPickerProps> = (props) => {
       </details>
     </div>
   );
-};
+}
