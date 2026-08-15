@@ -18,7 +18,7 @@ import { ConditionEditor } from '../components/ruleBuilder/ConditionEditor';
 import { KeyPicker } from '../components/ruleBuilder/KeyPicker';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import type { FrontendAction, FrontendCondition, FrontendRule, FrontendTrigger } from '../lib/types';
-import { vkToName } from '../lib/keyCodes';
+import { formatKeyChord, vkToName } from '../lib/keyCodes';
 import {
   RULE_COMMAND_EVENT,
   RULE_SEARCH_EVENT,
@@ -86,6 +86,7 @@ function formatTriggerKey(trigger: FrontendTrigger): string {
   switch (trigger.type) {
     case 'keyDown':
     case 'keyUp':
+      return formatKeyChord({ code: trigger.code, modifiers: trigger.modifiers });
     case 'mouseDown':
     case 'mouseUp':
     case 'tapHoldKeyDown':
@@ -111,7 +112,7 @@ function isMouseTrigger(trigger: FrontendTrigger): boolean {
 }
 
 function isInvalidMouseTrigger(trigger: FrontendTrigger): boolean {
-  return isMouseTrigger(trigger) && 'code' in trigger && (trigger.code < 1 || trigger.code > 5);
+  return isMouseTrigger(trigger) && (trigger.code < 1 || trigger.code > 5);
 }
 
 function formatConditionLabel(condition: FrontendCondition, t: TFunction): string {
@@ -131,7 +132,8 @@ function formatConditionLabel(condition: FrontendCondition, t: TFunction): strin
 
 function formatActionLabel(action: FrontendAction, t: TFunction): string {
   switch (action.type) {
-    case 'remapKey': return `${t('ruleBuilder.action_types.remapKey')} → ${vkToName(action.code)}`;
+    case 'remapKey':
+      return `${t('ruleBuilder.action_types.remapKey')} → ${formatKeyChord({ code: action.code, modifiers: action.modifiers })}`;
     case 'remapMouse': return `${t('ruleBuilder.action_types.remapMouse')} → ${vkToName(action.code)}`;
     case 'typeText': return `${t('ruleBuilder.action_types.typeText')}: “${action.text}”`;
     case 'runMacro': return `${t('ruleBuilder.action_types.runMacro')} (${action.steps.length})`;
@@ -163,47 +165,48 @@ function matchesMode(rule: FrontendRule, mode: RulesViewMode): boolean {
   return rule.trigger.type === 'typedText' || rule.actions.some((action) => action.type === 'typeText');
 }
 
-function makeNewRule(mode: RulesViewMode): FrontendRule {
+function baseRule(order = 0): Pick<FrontendRule, 'id' | 'name' | 'holdActions' | 'conditions' | 'priority' | 'enabled' | 'folderId' | 'order'> {
+  return {
+    id: crypto.randomUUID(),
+    name: '',
+    holdActions: [],
+    conditions: [],
+    priority: 0,
+    enabled: true,
+    folderId: null,
+    order,
+  };
+}
+
+function makeNewRule(mode: RulesViewMode, order = 0): FrontendRule {
   if (mode === 'macros') {
     return {
-      id: crypto.randomUUID(),
-      name: '',
-      trigger: { type: 'keyDown', code: 0 },
+      ...baseRule(order),
+      trigger: { type: 'keyDown', code: 0, modifiers: 0 },
       actions: [{ type: 'runMacro', steps: [] }],
-      holdActions: [],
-      conditions: [],
-      priority: 0,
     };
   }
 
   if (mode === 'text') {
     return {
-      id: crypto.randomUUID(),
-      name: '',
+      ...baseRule(order),
       trigger: { type: 'typedText', sequence: '' },
       actions: [{ type: 'typeText', text: '' }],
-      holdActions: [],
-      conditions: [],
-      priority: 0,
     };
   }
 
   return {
-    id: crypto.randomUUID(),
-    name: '',
-    trigger: { type: 'keyDown', code: 0 },
+    ...baseRule(order),
+    trigger: { type: 'keyDown', code: 0, modifiers: 0 },
     actions: [],
-    holdActions: [],
-    conditions: [],
-    priority: 0,
   };
 }
 
 function changeTriggerType(rule: FrontendRule, type: FrontendTrigger['type']): FrontendRule {
   if (type === 'tapHoldKeyDown') return { ...rule, trigger: { type: 'tapHoldKeyDown', code: 0, timeoutMs: 200 } };
   if (type === 'typedText') return { ...rule, trigger: { type: 'typedText', sequence: '' } };
-  if (type === 'keyDown') return { ...rule, trigger: { type: 'keyDown', code: 0 } };
-  if (type === 'keyUp') return { ...rule, trigger: { type: 'keyUp', code: 0 } };
+  if (type === 'keyDown') return { ...rule, trigger: { type: 'keyDown', code: 0, modifiers: 0 } };
+  if (type === 'keyUp') return { ...rule, trigger: { type: 'keyUp', code: 0, modifiers: 0 } };
   if (type === 'mouseDown') return { ...rule, trigger: { type: 'mouseDown', code: 1 } };
   return { ...rule, trigger: { type: 'mouseUp', code: 1 } };
 }
@@ -271,7 +274,7 @@ export const RulesPage: React.FC<RulesPageProps> = ({ mode = 'all' }) => {
   };
 
   const openNewRule = () => {
-    const next = makeNewRule(mode);
+    const next = makeNewRule(mode, activeProfile?.rules.length ?? 0);
     setSelectedRuleId(null);
     setDraftRule(next);
     setBaseline(JSON.stringify(next));
@@ -420,9 +423,7 @@ export const RulesPage: React.FC<RulesPageProps> = ({ mode = 'all' }) => {
           <div className="h-9 px-2.5 flex items-center border-b border-app-border bg-app-surface/35 shrink-0">
             <h2 className="text-[11px] font-semibold text-app-text">{viewTitle}</h2>
             {query && (
-              <span className="ml-2 text-[9px] text-app-primary truncate">
-                “{query}”
-              </span>
+              <span className="ml-2 text-[9px] text-app-primary truncate">“{query}”</span>
             )}
             <span className="ml-auto text-[9px] font-mono text-app-muted">{filteredRules.length}/{modeRules.length}</span>
           </div>
@@ -447,7 +448,7 @@ export const RulesPage: React.FC<RulesPageProps> = ({ mode = 'all' }) => {
                     selected
                       ? 'bg-app-primary/10 shadow-[inset_2px_0_0_var(--color-primary)]'
                       : 'hover:bg-app-surface-hover/30'
-                  }`}
+                  } ${rule.enabled ? '' : 'opacity-50'}`}
                 >
                   <TriggerIcon size={13} className={`shrink-0 ${invalidMouse ? 'text-app-danger' : selected ? 'text-app-primary' : 'text-app-muted'}`} />
                   <span className="min-w-0 flex-1">
@@ -540,7 +541,7 @@ export const RulesPage: React.FC<RulesPageProps> = ({ mode = 'all' }) => {
             <div className="flex-1 min-h-0 overflow-y-auto p-2">
               <div className="w-full max-w-[840px] space-y-2">
                 <EditorSection title={t('ruleBuilder.tabs.name')}>
-                  <PropertyRow label={t('common.name', { defaultValue: 'Название' })}>
+                  <PropertyRow label={t('common.name', { defaultValue: 'Название' })} last>
                     <input
                       type="text"
                       value={draftRule.name || ''}
@@ -548,19 +549,6 @@ export const RulesPage: React.FC<RulesPageProps> = ({ mode = 'all' }) => {
                       onChange={(event) => setDraftRule({ ...draftRule, name: event.target.value })}
                       placeholder={t('ruleBuilder.placeholders.name')}
                       className={`${inputClass} w-full max-w-[520px] disabled:opacity-50`}
-                    />
-                  </PropertyRow>
-                  <PropertyRow
-                    label={t('ruleBuilder.priority')}
-                    hint={t('ruleBuilder.priority_hint')}
-                    last
-                  >
-                    <input
-                      type="number"
-                      value={draftRule.priority}
-                      disabled={saving}
-                      onChange={(event) => setDraftRule({ ...draftRule, priority: Number.parseInt(event.target.value, 10) || 0 })}
-                      className={`${inputClass} w-24 font-mono disabled:opacity-50`}
                     />
                   </PropertyRow>
                 </EditorSection>
@@ -581,7 +569,7 @@ export const RulesPage: React.FC<RulesPageProps> = ({ mode = 'all' }) => {
                       <option value="typedText">{t('ruleBuilder.trigger_types.typedText')}</option>
                     </select>
 
-                    {draftRule.trigger.type === 'typedText' ? (
+                    {draftRule.trigger.type === 'typedText' && (
                       <input
                         type="text"
                         value={draftRule.trigger.sequence}
@@ -590,88 +578,144 @@ export const RulesPage: React.FC<RulesPageProps> = ({ mode = 'all' }) => {
                         placeholder={t('ruleBuilder.placeholders.sequence')}
                         className={`${inputClass} flex-1 min-w-0 max-w-[520px] disabled:opacity-50`}
                       />
-                    ) : (
+                    )}
+
+                    {(draftRule.trigger.type === 'keyDown' || draftRule.trigger.type === 'keyUp') && (
                       <KeyPicker
-                        value={draftRule.trigger.code}
-                        onChange={(code) => setDraftRule({
+                        value={{ code: draftRule.trigger.code, modifiers: draftRule.trigger.modifiers }}
+                        onChange={(chord) => setDraftRule({
                           ...draftRule,
-                          trigger: { ...draftRule.trigger, code } as FrontendTrigger,
+                          trigger: { ...draftRule.trigger, ...chord },
                         })}
                         className="flex-1 min-w-0 max-w-[520px] text-left"
                       />
                     )}
 
                     {draftRule.trigger.type === 'tapHoldKeyDown' && (
-                      <div className="flex items-center gap-1 shrink-0">
-                        <input
-                          type="number"
-                          min={1}
-                          value={draftRule.trigger.timeoutMs}
-                          disabled={saving}
-                          onChange={(event) => {
-                            const timeoutMs = Math.max(1, Number.parseInt(event.target.value, 10) || 200);
-                            setDraftRule((current) => {
-                              if (!current || current.trigger.type !== 'tapHoldKeyDown') return current;
-                              return {
-                                ...current,
-                                trigger: {
-                                  type: 'tapHoldKeyDown',
-                                  code: current.trigger.code,
-                                  timeoutMs,
-                                },
-                              };
-                            });
-                          }}
-                          className={`${inputClass} w-20 font-mono disabled:opacity-50`}
+                      <>
+                        <KeyPicker
+                          value={{ code: draftRule.trigger.code, modifiers: 0 }}
+                          allowModifiers={false}
+                          onChange={(chord) => setDraftRule({
+                            ...draftRule,
+                            trigger: { ...draftRule.trigger, code: chord.code },
+                          })}
+                          className="flex-1 min-w-0 max-w-[420px] text-left"
                         />
-                        <span className="text-[9px] text-app-muted">ms</span>
-                      </div>
+                        <details className="relative shrink-0">
+                          <summary className="list-none h-7 px-2 inline-flex items-center border border-app-border bg-app-bg text-[9px] text-app-muted hover:bg-app-surface cursor-pointer">
+                            {t('common.advanced', { defaultValue: 'Доп.' })}
+                          </summary>
+                          <div className="absolute z-30 right-0 top-8 w-48 border border-app-border bg-app-bg shadow-lg p-2">
+                            <div className="text-[9px] text-app-muted mb-1">{t('ruleBuilder.priority_hint', { defaultValue: 'Tap-Hold timeout, ms' })}</div>
+                            <input
+                              type="number"
+                              min={1}
+                              value={draftRule.trigger.timeoutMs}
+                              disabled={saving}
+                              onChange={(event) => {
+                                const timeoutMs = Math.max(1, Number.parseInt(event.target.value, 10) || 200);
+                                setDraftRule((current) => {
+                                  if (!current || current.trigger.type !== 'tapHoldKeyDown') return current;
+                                  return { ...current, trigger: { ...current.trigger, timeoutMs } };
+                                });
+                              }}
+                              className={`${inputClass} w-full font-mono disabled:opacity-50`}
+                            />
+                          </div>
+                        </details>
+                      </>
+                    )}
+
+                    {(draftRule.trigger.type === 'mouseDown' || draftRule.trigger.type === 'mouseUp') && (
+                      <select
+                        value={draftRule.trigger.code}
+                        disabled={saving}
+                        onChange={(event) => setDraftRule({
+                          ...draftRule,
+                          trigger: { ...draftRule.trigger, code: Number.parseInt(event.target.value, 10) || 1 },
+                        })}
+                        className={`${selectClass} flex-1 min-w-0 max-w-[520px] disabled:opacity-50`}
+                      >
+                        <option value="1">{t('ruleBuilder.action_options.mouse_left')}</option>
+                        <option value="2">{t('ruleBuilder.action_options.mouse_right')}</option>
+                        <option value="3">{t('ruleBuilder.action_options.mouse_middle')}</option>
+                        <option value="4">{t('ruleBuilder.action_options.mouse_x1')}</option>
+                        <option value="5">{t('ruleBuilder.action_options.mouse_x2')}</option>
+                      </select>
                     )}
                   </div>
                 </EditorSection>
 
-                <EditorSection
-                  title={t('ruleBuilder.tabs.conditions')}
-                  action={(
-                    <button
-                      type="button"
-                      disabled={saving}
-                      onClick={() => setDraftRule({
-                        ...draftRule,
-                        conditions: [...draftRule.conditions, { type: 'windowMatch', process: '', title: '' }],
-                      })}
-                      className="h-5 px-1.5 text-[9px] text-app-primary hover:bg-app-surface disabled:opacity-40"
-                    >
-                      + {t('ruleBuilder.buttons.add_condition')}
-                    </button>
-                  )}
-                >
-                  <div className="p-1.5">
-                    {draftRule.conditions.length === 0 ? (
-                      <div className="h-7 px-1 flex items-center text-[10px] text-app-muted">
-                        {t('ruleBuilder.hints.no_conditions_global')}
+                <details className="border border-app-border bg-app-bg group">
+                  <summary className="h-7 px-2 flex items-center cursor-pointer select-none bg-app-surface/25 text-[10px] text-app-muted hover:text-app-text">
+                    {t('common.advanced', { defaultValue: 'Дополнительно' })}
+                    <span className="ml-auto text-[9px] font-mono">
+                      {draftRule.conditions.length > 0 ? `${draftRule.conditions.length} cond.` : ''}
+                    </span>
+                  </summary>
+                  <div className="border-t border-app-border">
+                    <PropertyRow label={t('ruleBuilder.priority')} hint={t('ruleBuilder.priority_hint')}>
+                      <input
+                        type="number"
+                        value={draftRule.priority}
+                        disabled={saving}
+                        onChange={(event) => setDraftRule({ ...draftRule, priority: Number.parseInt(event.target.value, 10) || 0 })}
+                        className={`${inputClass} w-24 font-mono disabled:opacity-50`}
+                      />
+                    </PropertyRow>
+                    <PropertyRow label={t('common.enabled', { defaultValue: 'Включено' })} last>
+                      <input
+                        type="checkbox"
+                        checked={draftRule.enabled}
+                        disabled={saving}
+                        onChange={(event) => setDraftRule({ ...draftRule, enabled: event.target.checked })}
+                      />
+                    </PropertyRow>
+
+                    <div className="border-t border-app-border">
+                      <div className="h-7 px-2 flex items-center bg-app-surface/15 text-[10px] text-app-muted">
+                        {t('ruleBuilder.tabs.conditions')}
+                        <button
+                          type="button"
+                          disabled={saving}
+                          onClick={() => setDraftRule({
+                            ...draftRule,
+                            conditions: [...draftRule.conditions, { type: 'windowMatch', process: '', title: '' }],
+                          })}
+                          className="ml-auto h-5 px-1.5 text-[9px] text-app-primary hover:bg-app-surface disabled:opacity-40"
+                        >
+                          + {t('ruleBuilder.buttons.add_condition')}
+                        </button>
                       </div>
-                    ) : (
-                      <div className={`space-y-1 ${saving ? 'pointer-events-none opacity-60' : ''}`}>
-                        {draftRule.conditions.map((condition, index) => (
-                          <ConditionEditor
-                            key={index}
-                            condition={condition}
-                            onChange={(nextCondition) => {
-                              const conditions = [...draftRule.conditions];
-                              conditions[index] = nextCondition;
-                              setDraftRule({ ...draftRule, conditions });
-                            }}
-                            onRemove={() => setDraftRule({
-                              ...draftRule,
-                              conditions: draftRule.conditions.filter((_, itemIndex) => itemIndex !== index),
-                            })}
-                          />
-                        ))}
+                      <div className="p-1.5">
+                        {draftRule.conditions.length === 0 ? (
+                          <div className="h-7 px-1 flex items-center text-[10px] text-app-muted">
+                            {t('ruleBuilder.hints.no_conditions_global')}
+                          </div>
+                        ) : (
+                          <div className={`space-y-1 ${saving ? 'pointer-events-none opacity-60' : ''}`}>
+                            {draftRule.conditions.map((condition, index) => (
+                              <ConditionEditor
+                                key={index}
+                                condition={condition}
+                                onChange={(nextCondition) => {
+                                  const conditions = [...draftRule.conditions];
+                                  conditions[index] = nextCondition;
+                                  setDraftRule({ ...draftRule, conditions });
+                                }}
+                                onRemove={() => setDraftRule({
+                                  ...draftRule,
+                                  conditions: draftRule.conditions.filter((_, itemIndex) => itemIndex !== index),
+                                })}
+                              />
+                            ))}
+                          </div>
+                        )}
                       </div>
-                    )}
+                    </div>
                   </div>
-                </EditorSection>
+                </details>
 
                 <EditorSection
                   title={isTapHold ? t('ruleBuilder.tabs.tap_actions') : t('ruleBuilder.tabs.actions')}
