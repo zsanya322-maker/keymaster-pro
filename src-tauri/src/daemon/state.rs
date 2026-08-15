@@ -6,11 +6,12 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
-use crate::shared::types::AppConfig;
 use crate::schemas::engine::EngineSchema;
+use crate::schemas::frontend::KeyChord;
+use crate::shared::types::AppConfig;
 use crate::simulator::SimulatorSender;
 
-/// Ссылка на разделяемое состояние daemon
+/// Ссылка на разделяемое состояние Daemon
 pub type DaemonStateRef = Arc<RwLock<DaemonState>>;
 
 /// Глобальное состояние Daemon
@@ -39,7 +40,6 @@ pub struct DaemonState {
     /// Keystrokes processed counter
     pub keystrokes_processed: std::sync::atomic::AtomicUsize,
     /// Last keyboard/mouse hook processing latency in microseconds
-    /// Last keyboard/mouse hook processing latency in microseconds
     pub last_latency_us: std::sync::atomic::AtomicU64,
     /// Return the cursor to its pre-macro position after playback finishes
     pub restore_mouse_after_macro: bool,
@@ -53,14 +53,12 @@ pub struct DaemonState {
     /// Buffer for tracking rolling text inputs for text expansion
     pub typed_buffer: std::sync::Mutex<String>,
     /// Режим захвата клавиши/кнопки мыши для KeyPicker.
-    /// Когда true, оба LL-хука сразу возвращают PassThrough, минуя engine —
-    /// это позволяет GUI записать любую клавишу/кнопку, даже если активное правило
-    /// её блокирует. GUI выставляет флаг через IPC только на время listening.
+    /// Keyboard hook в этом режиме сам собирает chord и блокирует его до Windows,
+    /// чтобы Win/Alt-комбинации можно было записывать без системного side-effect.
     pub key_capture_active: std::sync::atomic::AtomicBool,
+    /// Последний chord, захваченный keyboard LL-hook. GUI забирает его polling-ом.
+    pub last_captured_key: std::sync::Mutex<Option<KeyChord>>,
     /// Последняя нажатая кнопка мыши в режиме key_capture_active.
-    /// Хук записывает сюда код 1-5 (L/R/M/X1/X2), а GUI забирает поллингом
-    /// через keycapture.get_captured_mouse (с auto-reset в None после чтения).
-    /// Решает проблему X1/X2, которые WebView2 не передаёт в JS как mousedown.
     pub last_captured_mouse: std::sync::Mutex<Option<u8>>,
 }
 
@@ -89,6 +87,7 @@ impl DaemonState {
             last_record_time: std::sync::Mutex::new(None),
             typed_buffer: std::sync::Mutex::new(String::new()),
             key_capture_active: std::sync::atomic::AtomicBool::new(false),
+            last_captured_key: std::sync::Mutex::new(None),
             last_captured_mouse: std::sync::Mutex::new(None),
         }
     }
@@ -123,6 +122,7 @@ impl Default for DaemonState {
             last_record_time: std::sync::Mutex::new(None),
             typed_buffer: std::sync::Mutex::new(String::new()),
             key_capture_active: std::sync::atomic::AtomicBool::new(false),
+            last_captured_key: std::sync::Mutex::new(None),
             last_captured_mouse: std::sync::Mutex::new(None),
         }
     }
