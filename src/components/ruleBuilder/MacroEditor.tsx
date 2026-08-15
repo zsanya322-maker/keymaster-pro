@@ -168,7 +168,7 @@ export const MacroEditor: React.FC<MacroEditorProps> = ({ steps, onChange }) => 
 
   const createDefaultAction = (type: MacroAction['type']): MacroAction => {
     if (type === 'mouseMove') return { type, dx: 0, dy: 0 };
-    if (type === 'mouseScroll') return { type, delta: 0 };
+    if (type === 'mouseScroll' || type === 'mouseHScroll') return { type, delta: 0 };
     if (type === 'mouseToAbsolute') return { type, x: 0, y: 0 };
     if (type === 'mouseDown' || type === 'mouseUp') return { type, code: 1 };
     return { type, code: 0 };
@@ -258,6 +258,7 @@ export const MacroEditor: React.FC<MacroEditorProps> = ({ steps, onChange }) => 
           </>
         );
       case 'mouseScroll':
+      case 'mouseHScroll':
         return (
           <>
             <span className="text-[10px] text-app-muted">Delta</span>
@@ -266,7 +267,7 @@ export const MacroEditor: React.FC<MacroEditorProps> = ({ steps, onChange }) => 
               value={action.delta}
               disabled={isRecording}
               onChange={(event) => updateAction(index, {
-                type: 'mouseScroll',
+                type: action.type,
                 delta: Number.parseInt(event.target.value, 10) || 0,
               })}
               className={`${inputClass} w-full text-right font-mono`}
@@ -414,6 +415,7 @@ export const MacroEditor: React.FC<MacroEditorProps> = ({ steps, onChange }) => 
                 <option value="mouseUp">{t('macro.step_types.mouseUp')}</option>
                 <option value="mouseMove">{t('macro.step_types.mouseMove_rel')}</option>
                 <option value="mouseScroll">{t('macro.step_types.mouseScroll')}</option>
+                <option value="mouseHScroll">{t('macro.step_types.mouseHScroll', { defaultValue: 'Гориз. колесо' })}</option>
                 <option value="mouseToAbsolute">{t('macro.step_types.mouseMove_abs')}</option>
               </select>
 

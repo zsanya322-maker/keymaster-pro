@@ -79,6 +79,7 @@ export type MacroAction =
   | { type: 'mouseUp'; code: number }
   | { type: 'mouseMove'; dx: number; dy: number }
   | { type: 'mouseScroll'; delta: number }
+  | { type: 'mouseHScroll'; delta: number }
   | { type: 'mouseToAbsolute'; x: number; y: number }
 
 export interface MacroStep {

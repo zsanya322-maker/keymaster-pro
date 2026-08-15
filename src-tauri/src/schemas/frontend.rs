@@ -162,6 +162,7 @@ pub enum MacroAction {
     MouseUp { code: u8 },
     MouseMove { dx: i32, dy: i32 },
     MouseScroll { delta: i32 },
+    MouseHScroll { delta: i32 },
     MouseToAbsolute { x: i32, y: i32 },
 }
 

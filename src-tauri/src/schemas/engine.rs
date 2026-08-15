@@ -80,6 +80,7 @@ pub enum SimulatorCommand {
     Delay(u32),
     MouseMove { dx: i32, dy: i32 },
     MouseScroll { delta: i32 },
+    MouseHScroll { delta: i32 },
     MouseAbsolute { x: i32, y: i32 },
     /// Re-assert only source modifiers that are still physically held when the
     /// command executes. Used at the end of asynchronous macro jobs.

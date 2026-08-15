@@ -14,7 +14,7 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     KEYEVENTF_KEYUP, KEYEVENTF_UNICODE,
     MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP,
     MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP, MOUSEEVENTF_XDOWN, MOUSEEVENTF_XUP,
-    MOUSEEVENTF_MOVE, MOUSEEVENTF_WHEEL, MOUSEEVENTF_ABSOLUTE,
+    MOUSEEVENTF_MOVE, MOUSEEVENTF_WHEEL, MOUSEEVENTF_HWHEEL, MOUSEEVENTF_ABSOLUTE,
 };
 
 /// Два независимых канала симуляции.
@@ -106,7 +106,8 @@ fn execute_command(cmd: SimulatorCommand) {
         SimulatorCommand::TypeString(text) => type_string(&text),
         SimulatorCommand::Delay(ms) => thread::sleep(Duration::from_millis(ms as u64)),
         SimulatorCommand::MouseMove { dx, dy } => move_mouse(dx, dy),
-        SimulatorCommand::MouseScroll { delta } => scroll_mouse(delta),
+        SimulatorCommand::MouseScroll { delta } => scroll_mouse(delta, false),
+        SimulatorCommand::MouseHScroll { delta } => scroll_mouse(delta, true),
         SimulatorCommand::MouseAbsolute { x, y } => move_mouse_absolute(x, y),
         SimulatorCommand::RestorePhysicalModifiers { mask } => {
             for vk in crate::daemon::engine::currently_held_modifier_vks(mask) {
@@ -247,7 +248,7 @@ fn move_mouse(dx: i32, dy: i32) {
 fn move_mouse(_dx: i32, _dy: i32) {}
 
 #[cfg(target_os = "windows")]
-fn scroll_mouse(delta: i32) {
+fn scroll_mouse(delta: i32, horizontal: bool) {
     let input = INPUT {
         r#type: INPUT_MOUSE,
         Anonymous: INPUT_0 {
@@ -255,7 +256,7 @@ fn scroll_mouse(delta: i32) {
                 dx: 0,
                 dy: 0,
                 mouseData: delta as u32,
-                dwFlags: MOUSEEVENTF_WHEEL,
+                dwFlags: if horizontal { MOUSEEVENTF_HWHEEL } else { MOUSEEVENTF_WHEEL },
                 time: 0,
                 dwExtraInfo: 0,
             },
@@ -267,7 +268,7 @@ fn scroll_mouse(delta: i32) {
 }
 
 #[cfg(not(target_os = "windows"))]
-fn scroll_mouse(_delta: i32) {}
+fn scroll_mouse(_delta: i32, _horizontal: bool) {}
 
 #[cfg(target_os = "windows")]
 fn move_mouse_absolute(x: i32, y: i32) {

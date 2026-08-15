@@ -430,7 +430,11 @@ extern "system" fn mouse_hook_callback(
                     };
                     action_to_record = Some(action);
                 } else if delta != 0 {
-                    action_to_record = Some(crate::schemas::frontend::MacroAction::MouseScroll { delta });
+                    action_to_record = Some(if msg_type == WM_MOUSEHWHEEL as u32 {
+                        crate::schemas::frontend::MacroAction::MouseHScroll { delta }
+                    } else {
+                        crate::schemas::frontend::MacroAction::MouseScroll { delta }
+                    });
                 } else if msg_type == WM_MOUSEMOVE as u32 {
                     let record_mouse_moves = s.record_mouse_moves.load(Ordering::Relaxed);
                     let record_mouse_drag_drop_only = s.record_mouse_drag_drop_only.load(Ordering::Relaxed);

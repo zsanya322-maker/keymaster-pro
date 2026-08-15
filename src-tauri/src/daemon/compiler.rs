@@ -220,6 +220,9 @@ fn compile_action(action: &FrontendAction) -> EngineAction {
                     MacroAction::MouseScroll { delta } => {
                         commands.push(SimulatorCommand::MouseScroll { delta })
                     }
+                    MacroAction::MouseHScroll { delta } => {
+                        commands.push(SimulatorCommand::MouseHScroll { delta })
+                    }
                     MacroAction::MouseToAbsolute { x, y } => {
                         commands.push(SimulatorCommand::MouseAbsolute { x, y })
                     }
