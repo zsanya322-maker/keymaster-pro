@@ -41,6 +41,7 @@ pub struct CompiledRule {
 
 #[derive(Debug, Clone)]
 pub struct CompiledMouseMoveRule {
+    pub rule_id_hash: u64,
     pub priority: i32,
     pub min_distance: u16,
     pub cooldown_ms: u32,
