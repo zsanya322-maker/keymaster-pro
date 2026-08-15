@@ -58,72 +58,121 @@ pub fn run() {
             gui::commands::update_gui_config,
         ])
         .setup(|app| {
-            // Spawn background task to listen for daemon events
+            // Background event subscription is a long-lived connection distinct
+            // from request/response IPC. Handshake is bounded and validated so a
+            // half-alive daemon cannot park this task forever before reconnect.
             let app_handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
+                use tauri::Emitter;
                 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
                 use tokio::net::windows::named_pipe::ClientOptions;
-                use tauri::Emitter;
+
+                const SUBSCRIBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+                const RECONNECT_DELAY: std::time::Duration = std::time::Duration::from_millis(500);
 
                 loop {
-                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                    tokio::time::sleep(RECONNECT_DELAY).await;
                     let pipe_path = crate::shared::constants::IPC_PIPE_NAME;
 
                     let mut pipe = match ClientOptions::new().open(pipe_path) {
-                        Ok(p) => {
-                            tracing::info!("GUI event listener connected to Named Pipe: {}", pipe_path);
-                            p
-                        },
+                        Ok(pipe) => pipe,
                         Err(_) => continue,
                     };
 
+                    let request_id = serde_json::json!(999);
                     let sub_request = crate::daemon::ipc_types::JsonRpcRequest {
                         jsonrpc: "2.0".to_string(),
                         method: "subscribe_events".to_string(),
                         params: None,
-                        id: Some(serde_json::json!(999)),
+                        id: Some(request_id.clone()),
                     };
 
                     let mut req_bytes = match serde_json::to_string(&sub_request) {
-                        Ok(r) => r,
-                        Err(_) => continue,
+                        Ok(value) => value,
+                        Err(error) => {
+                            tracing::warn!("Event subscription serialization failed: {}", error);
+                            continue;
+                        }
                     };
                     req_bytes.push('\n');
 
-                    if pipe.write_all(req_bytes.as_bytes()).await.is_err() {
-                        continue;
-                    }
-                    if pipe.flush().await.is_err() {
-                        continue;
-                    }
-
-                    let (reader, mut _writer) = tokio::io::split(pipe);
-                    let mut lines = BufReader::new(reader).lines();
-
-                    if lines.next_line().await.is_err() {
-                        continue;
-                    }
-
-                    while let Ok(Some(line)) = lines.next_line().await {
-                        if let Ok(event) = serde_json::from_str::<crate::gui::events::DaemonEvent>(&line) {
-                            let _ = app_handle.emit("daemon-event", event);
+                    let send_result = tokio::time::timeout(SUBSCRIBE_TIMEOUT, async {
+                        pipe.write_all(req_bytes.as_bytes()).await?;
+                        pipe.flush().await
+                    })
+                    .await;
+                    match send_result {
+                        Ok(Ok(())) => {}
+                        Ok(Err(error)) => {
+                            tracing::debug!("Event subscription write failed: {}", error);
+                            continue;
+                        }
+                        Err(_) => {
+                            tracing::warn!("Event subscription write timeout");
+                            continue;
                         }
                     }
+
+                    let (reader, _writer) = tokio::io::split(pipe);
+                    let mut lines = BufReader::new(reader).lines();
+                    let ack_line = match tokio::time::timeout(SUBSCRIBE_TIMEOUT, lines.next_line()).await {
+                        Ok(Ok(Some(line))) => line,
+                        Ok(Ok(None)) => continue,
+                        Ok(Err(error)) => {
+                            tracing::debug!("Event subscription ACK read failed: {}", error);
+                            continue;
+                        }
+                        Err(_) => {
+                            tracing::warn!("Event subscription ACK timeout");
+                            continue;
+                        }
+                    };
+
+                    let ack = match serde_json::from_str::<crate::daemon::ipc_types::JsonRpcResponse>(&ack_line) {
+                        Ok(response) => response,
+                        Err(error) => {
+                            tracing::warn!("Event subscription invalid ACK: {}", error);
+                            continue;
+                        }
+                    };
+                    let subscribed = ack.jsonrpc == "2.0"
+                        && ack.id == request_id
+                        && ack.error.is_none()
+                        && ack
+                            .result
+                            .as_ref()
+                            .and_then(|value| value.get("subscribed"))
+                            .and_then(|value| value.as_bool())
+                            == Some(true);
+                    if !subscribed {
+                        tracing::warn!("Event subscription rejected or malformed: {:?}", ack);
+                        continue;
+                    }
+
+                    tracing::info!("GUI event listener subscribed to Named Pipe: {}", pipe_path);
+                    while let Ok(Some(line)) = lines.next_line().await {
+                        match serde_json::from_str::<crate::gui::events::DaemonEvent>(&line) {
+                            Ok(event) => {
+                                let _ = app_handle.emit("daemon-event", event);
+                            }
+                            Err(error) => {
+                                tracing::warn!("Ignoring malformed daemon event: {}", error);
+                            }
+                        }
+                    }
+                    tracing::debug!("GUI event listener disconnected; reconnecting");
                 }
             });
 
-            // Check window icon
             let has_icon = app.default_window_icon().is_some();
             info!("Default window icon loaded: {}", has_icon);
 
-            // Set up System Tray
             if let Err(e) = gui::tray::setup_tray(app) {
                 error!("Failed to set up system tray: {:?}", e);
                 return Err(e);
             }
             info!("System tray configured successfully");
 
-            // Workaround: show and focus window on startup
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.show();
                 let _ = window.set_focus();
