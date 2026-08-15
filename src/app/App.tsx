@@ -23,6 +23,8 @@ import { ToastViewport } from './ToastViewport'
 import { useToastQueue } from './useToastQueue'
 import { useDaemonConnection, type DaemonStatus } from './useDaemonConnection'
 
+const PROFILE_SCHEMA_VERSION = 1
+
 interface ImportedProfileMeta {
   id?: string
   name?: string
@@ -83,7 +85,7 @@ function App() {
       if (profile.name.includes('Ошибка загрузки') && !recoveryNotified.current.has(profile.id)) {
         recoveryNotified.current.add(profile.id)
         showToast(
-          `Профиль “${profile.id}” не удалось корректно прочитать. Исходный файл сохранён, создан защитный бэкап.`,
+          `Профиль “${profile.id}” не удалось корректно прочитать. Исходный файл оставлен без изменений; защитный backup создаётся по возможности.`,
           'warning',
         )
       }
@@ -229,7 +231,8 @@ function App() {
       })
       if (!filePath) return
 
-      await writeTextFile(filePath, JSON.stringify(activeProfile, null, 2))
+      const exportData = { ...activeProfile, schemaVersion: PROFILE_SCHEMA_VERSION }
+      await writeTextFile(filePath, JSON.stringify(exportData, null, 2))
       showToast(`Профиль “${activeProfile.name}” экспортирован`, 'success')
     } catch (error) {
       showToast(`Ошибка экспорта: ${errorMessage(error)}`, 'error')
