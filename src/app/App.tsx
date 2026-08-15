@@ -34,7 +34,7 @@ import { OnboardingWizard } from '../components/OnboardingWizard'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { TextPromptDialog } from '../components/TextPromptDialog'
 
-const APP_VERSION = '0.2.1'
+const APP_VERSION = '0.2.2'
 
 interface DaemonStatus {
   connected: boolean
