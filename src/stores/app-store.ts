@@ -34,7 +34,7 @@ const defaultConfig: AppConfig = {
   activeProfileId: null,
   autostart: false,
   minimizeToTray: true,
-  language: 'en',
+  language: 'ru',
   kbHookEnabled: true,
   mouseHookEnabled: true,
   debugMode: false,
@@ -47,15 +47,36 @@ const defaultConfig: AppConfig = {
   tapHoldTimeoutMs: 200,
 }
 
+let pendingConfigUpdate: Partial<AppConfig> = {}
+let configUpdateTimer: ReturnType<typeof setTimeout> | null = null
+let configUpdateInFlight: Promise<unknown> = Promise.resolve()
+
+function queueConfigUpdate(partial: Partial<AppConfig>) {
+  pendingConfigUpdate = { ...pendingConfigUpdate, ...partial }
+
+  if (configUpdateTimer) clearTimeout(configUpdateTimer)
+  configUpdateTimer = setTimeout(() => {
+    const payload = pendingConfigUpdate
+    pendingConfigUpdate = {}
+    configUpdateTimer = null
+
+    // Сериализуем записи: следующий пакет отправляется только после предыдущего,
+    // поэтому старое значение не может завершиться позже нового и затереть его.
+    configUpdateInFlight = configUpdateInFlight
+      .catch(() => undefined)
+      .then(() => invoke('ipc_call', { method: 'update_config', params: payload }))
+      .catch(() => {
+        // Offline fallback: локальный UI продолжает работать.
+      })
+  }, 150)
+}
+
 export const useAppStore = create<AppState>((set) => ({
   config: defaultConfig,
-  setConfig: (partial) => set((state) => {
-    const newConfig = { ...state.config, ...partial }
-    invoke('ipc_call', { method: 'update_config', params: partial }).catch(() => {
-      // Offline fallback.
-    })
-    return { config: newConfig }
-  }),
+  setConfig: (partial) => {
+    set((state) => ({ config: { ...state.config, ...partial } }))
+    queueConfigUpdate(partial)
+  },
   loadConfig: async () => {
     try {
       const serverConfig = await invoke<AppConfig>('get_gui_config')
