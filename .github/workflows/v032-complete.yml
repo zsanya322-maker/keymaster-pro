@@ -6,6 +6,7 @@ on:
       - dev/v0.3.2-profiles-context
     paths:
       - .github/workflows/v032-complete.yml
+      - scripts/v032_current_fix.py
 
 permissions:
   contents: write
