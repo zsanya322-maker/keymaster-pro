@@ -41,96 +41,19 @@ jobs:
         with:
           workspaces: ./src-tauri -> target
 
-      - name: Recover complete v0.3.2 staging scripts
+      - name: Recover v0.3.2 staging scripts
         shell: pwsh
         run: |
-          git show 163f5179d3a9576f8057ed1ef77c932ef41e97bf:scripts/v032_profiles_context.py | Out-File -Encoding utf8 "$env:RUNNER_TEMP\v032_profiles_context.py"
-          git show 163f5179d3a9576f8057ed1ef77c932ef41e97bf:scripts/v032_frontend_fix.py | Out-File -Encoding utf8 "$env:RUNNER_TEMP\v032_frontend_fix.py"
-          git show 163f5179d3a9576f8057ed1ef77c932ef41e97bf:scripts/v032_rust_fix.py | Out-File -Encoding utf8 "$env:RUNNER_TEMP\v032_rust_fix.py"
-          New-Item -ItemType Directory -Force scripts | Out-Null
-          Copy-Item "$env:RUNNER_TEMP\v032_profiles_context.py" scripts\v032_profiles_context.py
-          Copy-Item "$env:RUNNER_TEMP\v032_frontend_fix.py" scripts\v032_frontend_fix.py
-          Copy-Item "$env:RUNNER_TEMP\v032_rust_fix.py" scripts\v032_rust_fix.py
+          git show 163f5179d3a9576f8057ed1ef77c932ef41e97bf:scripts/v032_profiles_context.py | Out-File -Encoding utf8 scripts\v032_profiles_context.py
+          git show 163f5179d3a9576f8057ed1ef77c932ef41e97bf:scripts/v032_frontend_fix.py | Out-File -Encoding utf8 scripts\v032_frontend_fix.py
+          git show 163f5179d3a9576f8057ed1ef77c932ef41e97bf:scripts/v032_rust_fix.py | Out-File -Encoding utf8 scripts\v032_rust_fix.py
 
       - name: Apply complete v0.3.2 implementation
         run: |
           python scripts/v032_profiles_context.py
           python scripts/v032_frontend_fix.py
           python scripts/v032_rust_fix.py
-
-      - name: Apply current-head compatibility fixes
-        shell: python
-        run: |
-          from pathlib import Path
-
-          def read(p): return Path(p).read_text(encoding='utf-8')
-          def write(p, s): Path(p).write_text(s, encoding='utf-8')
-
-          # v0.3.1 mouse API lives in KeyboardAndMouse in windows 0.62.
-          p='src-tauri/src/daemon/mouse_triggers.rs'; s=read(p)
-          s=s.replace(
-              'use windows::Win32::UI::WindowsAndMessaging::{\n        GetDoubleClickTime, GetSystemMetrics, SM_CXDOUBLECLK, SM_CYDOUBLECLK,\n    };',
-              'use windows::Win32::UI::Input::KeyboardAndMouse::GetDoubleClickTime;\n    use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXDOUBLECLK, SM_CYDOUBLECLK};'
-          )
-          write(p,s)
-
-          # Correct windows-rs 0.62 module ownership and keep the existing runner API.
-          p='src-tauri/src/trackers/context_tracker.rs'; s=read(p)
-          s=s.replace(
-              'use windows::Win32::Foundation::{CloseHandle,HWND};',
-              'use windows::Win32::Foundation::{CloseHandle,HWND,RECT};'
-          )
-          s=s.replace(
-              'use windows::Win32::UI::Accessibility::{SetWinEventHook,UnhookWinEvent,HWINEVENTHOOK,EVENT_SYSTEM_FOREGROUND,WINEVENT_OUTOFCONTEXT};',
-              'use windows::Win32::UI::Accessibility::{SetWinEventHook,UnhookWinEvent,HWINEVENTHOOK};'
-          )
-          s=s.replace(
-              'use windows::Win32::UI::WindowsAndMessaging::{DispatchMessageW,GetClassNameW,GetForegroundWindow,GetMessageW,GetWindowRect,GetWindowTextW,GetWindowThreadProcessId,MSG,RECT,TranslateMessage,GetMonitorInfoW,MonitorFromWindow,MONITORINFO,MONITOR_DEFAULTTONEAREST};',
-              'use windows::Win32::Graphics::Gdi::{GetMonitorInfoW,MonitorFromWindow,MONITORINFO,MONITOR_DEFAULTTONEAREST};\n use windows::Win32::UI::WindowsAndMessaging::{DispatchMessageW,GetClassNameW,GetForegroundWindow,GetMessageW,GetWindowRect,GetWindowTextW,GetWindowThreadProcessId,MSG,TranslateMessage,EVENT_SYSTEM_FOREGROUND,WINEVENT_OUTOFCONTEXT};'
-          )
-          s=s.replace(
-              'if let Some(h)=hook{let _=UnhookWinEvent(h);}',
-              'if !hook.is_invalid(){let _=UnhookWinEvent(hook);}'
-          )
-          if 'pub fn spawn_context_tracker' not in s:
-              s += '\n// Compatibility with the daemon runner lifecycle.\npub fn spawn_context_tracker(_initial: AppContextState) { start_context_tracker(); }\npub fn stop_context_tracker() {}\n'
-          # Revision changes only when a new foreground snapshot is committed.
-          old='x.active_process=process;x.active_process_path=path;x.active_window_title=t;x.active_window_class=c;x.window_width=w;x.window_height=h;x.fullscreen=full;x.monitor_id=monitor;x.virtual_desktop_id=vd;'
-          new='x.revision=x.revision.wrapping_add(1);x.active_process=process;x.active_process_path=path;x.active_window_title=t;x.active_window_class=c;x.window_width=w;x.window_height=h;x.fullscreen=full;x.monitor_id=monitor;x.virtual_desktop_id=vd;'
-          s=s.replace(old,new)
-          write(p,s)
-
-          # Ensure ContextMatch is compiled even if an older staging anchor missed it.
-          p='src-tauri/src/daemon/compiler.rs'; s=read(p)
-          if 'FrontendCondition::ContextMatch' not in s:
-              anchor='        FrontendCondition::WindowMatch { process, title } => EngineCondition::WindowMatch {'
-              block='''        FrontendCondition::ContextMatch { process, path, title, class_name, virtual_desktop_id, monitor_id, min_width, max_width, min_height, max_height, fullscreen, mode } => EngineCondition::ContextMatch {
-            process: process.as_ref().filter(|v| !v.trim().is_empty()).map(|v| v.trim().to_lowercase()),
-            path: path.as_ref().filter(|v| !v.trim().is_empty()).map(|v| v.trim().to_lowercase()),
-            title: title.as_ref().filter(|v| !v.trim().is_empty()).map(|v| v.trim().to_lowercase()),
-            class_name: class_name.as_ref().filter(|v| !v.trim().is_empty()).map(|v| v.trim().to_lowercase()),
-            virtual_desktop_id: virtual_desktop_id.clone(), monitor_id: monitor_id.clone(),
-            min_width: *min_width, max_width: *max_width, min_height: *min_height, max_height: *max_height,
-            fullscreen: *fullscreen, mode: *mode,
-        },
-'''
-              if anchor not in s: raise SystemExit('compiler WindowMatch anchor missing')
-              s=s.replace(anchor,block+anchor,1)
-          write(p,s)
-
-          # Fix the one current-head Profile constructor not covered by old vec![] matching.
-          p='src-tauri/src/daemon/router.rs'; s=read(p)
-          needle='                    linked_apps: input.linked_apps.unwrap_or_default(),\n                    rules: vec![],'
-          if needle in s:
-              s=s.replace(needle,'                    linked_apps: input.linked_apps.unwrap_or_default(),\n                    bindings: vec![],\n                    order: 0,\n                    rules: vec![],',1)
-          write(p,s)
-
-          # All product metadata must agree on 0.3.2.
-          for p in ['package.json','src-tauri/tauri.conf.json']:
-              s=read(p).replace('"version": "0.3.1"','"version": "0.3.2"')
-              write(p,s)
-          p='src-tauri/Cargo.toml'; s=read(p).replace('version = "0.3.1"','version = "0.3.2"'); write(p,s)
-          print('Current-head compatibility fixes applied')
+          python scripts/v032_current_fix.py
 
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
@@ -154,7 +77,7 @@ jobs:
         run: |
           git config user.name "AlexB322"
           git config user.email "264132173+zsanya322-maker@users.noreply.github.com"
-          Remove-Item -Recurse -Force scripts
+          git rm -r -f scripts
           git rm -f .github/workflows/v032-complete.yml
           if (Test-Path .github/workflows/v032-finalize.yml) { git rm -f .github/workflows/v032-finalize.yml }
           if (Test-Path .github/workflows/v032-rust-diagnostics.yml) { git rm -f .github/workflows/v032-rust-diagnostics.yml }
