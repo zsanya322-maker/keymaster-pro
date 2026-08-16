@@ -1,0 +1,128 @@
+name: v0.3.2 Finalize
+
+on:
+  push:
+    branches:
+      - dev/v0.3.2-profiles-context
+    paths:
+      - .github/workflows/v032-finalize.yml
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  finalize:
+    runs-on: windows-2025
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: dev/v0.3.2-profiles-context
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri -> target
+
+      - name: Fix remaining v0.3.2 profile initializers and metadata
+        shell: python
+        run: |
+          from pathlib import Path
+
+          targets = [
+              Path('src-tauri/src/daemon/router.rs'),
+              Path('src-tauri/src/daemon/runner.rs'),
+              Path('src-tauri/src/daemon/router_tests.rs'),
+              Path('src-tauri/src/shared/persistence.rs'),
+          ]
+
+          inserted = 0
+          for path in targets:
+              lines = path.read_text(encoding='utf-8').splitlines(keepends=True)
+              out = []
+              i = 0
+              while i < len(lines):
+                  line = lines[i]
+                  out.append(line)
+                  if 'linked_apps: vec![],' in line:
+                      indent = line[:len(line) - len(line.lstrip())]
+                      next_text = ''.join(lines[i + 1:i + 4])
+                      if 'bindings:' not in next_text:
+                          newline = '\r\n' if line.endswith('\r\n') else '\n'
+                          out.append(f'{indent}bindings: vec![],{newline}')
+                          out.append(f'{indent}order: 0,{newline}')
+                          inserted += 1
+                  i += 1
+              path.write_text(''.join(out), encoding='utf-8', newline='')
+
+          if inserted < 7:
+              raise SystemExit(f'Expected to fix at least 7 legacy Profile initializers, fixed {inserted}')
+
+          package = Path('package.json')
+          text = package.read_text(encoding='utf-8')
+          text2 = text.replace('"version": "0.3.1"', '"version": "0.3.2"', 1)
+          if text2 == text:
+              raise SystemExit('package.json version marker 0.3.1 not found')
+          package.write_text(text2, encoding='utf-8')
+
+          tauri = Path('src-tauri/tauri.conf.json')
+          text = tauri.read_text(encoding='utf-8')
+          text2 = text.replace('"version": "0.3.1"', '"version": "0.3.2"', 1)
+          if text2 == text:
+              raise SystemExit('tauri.conf.json version marker 0.3.1 not found')
+          tauri.write_text(text2, encoding='utf-8')
+
+          print(f'Updated {inserted} Profile initializers and v0.3.2 metadata')
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Frontend build
+        run: pnpm build
+
+      - name: Rust check
+        working-directory: src-tauri
+        run: cargo check --all-targets
+
+      - name: Rust tests
+        working-directory: src-tauri
+        run: cargo test --all-targets
+
+      - name: Build NSIS checkpoint
+        run: pnpm tauri build --bundles nsis
+
+      - name: Commit validated v0.3.2 checkpoint
+        shell: pwsh
+        run: |
+          git config user.name "AlexB322"
+          git config user.email "264132173+zsanya322-maker@users.noreply.github.com"
+          git rm -f .github/workflows/v032-finalize.yml
+          if (Test-Path .github/workflows/v032-rust-diagnostics.yml) { git rm -f .github/workflows/v032-rust-diagnostics.yml }
+          if (Test-Path .github/workflows/v032-rust-diagnostics-lite.yml) { git rm -f .github/workflows/v032-rust-diagnostics-lite.yml }
+          git add package.json src-tauri/tauri.conf.json src-tauri/src/daemon/router.rs src-tauri/src/daemon/runner.rs src-tauri/src/daemon/router_tests.rs src-tauri/src/shared/persistence.rs
+          git commit -m "feat(0.3.2): finalize profiles and rich context"
+          git push origin HEAD:dev/v0.3.2-profiles-context
+
+      - name: Upload v0.3.2 NSIS
+        uses: actions/upload-artifact@v4
+        with:
+          name: keymaster-pro-v0.3.2-nsis
+          path: src-tauri/target/release/bundle/nsis/*
+          if-no-files-found: error
