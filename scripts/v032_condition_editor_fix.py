@@ -1,41 +1,197 @@
 from pathlib import Path
 
+# Historical staging conditionally patched this component based on whether the
+# string "contextMatch" existed anywhere in the file. On the current tree that
+# makes UI insertion order-dependent. Replace the compact editor deterministically
+# after the staging scripts have established the v0.3.2 TypeScript union.
 editor_path = Path('src/components/ruleBuilder/ConditionEditor.tsx')
-text = editor_path.read_text(encoding='utf-8')
-start_marker = "            {condition.type === 'contextMatch' && ("
-end_marker = "            {condition.type === 'windowMatch' && ("
-start = text.find(start_marker)
-end = text.find(end_marker, start + 1)
-if start < 0 or end <= start:
-    raise SystemExit(f'ConditionEditor markers missing: start={start}, end={end}')
+editor_path.write_text(r'''import React, { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { invoke } from '@tauri-apps/api/core';
+import { Crosshair, Trash2 } from 'lucide-react';
+import type { FrontendCondition } from '../../lib/types';
+import { useProfileStore } from '../../store/profileStore';
 
-rich_editor = r'''            {condition.type === 'contextMatch' && (
-              <div className="flex-1 min-w-0 grid grid-cols-2 gap-1">
-                <input className={controlClass} placeholder="process.exe" value={condition.process || ''} onChange={(e) => onChange({ ...condition, process: e.target.value || undefined })} />
-                <input className={controlClass} placeholder="path contains" value={condition.path || ''} onChange={(e) => onChange({ ...condition, path: e.target.value || undefined })} />
-                <input className={controlClass} placeholder="title contains" value={condition.title || ''} onChange={(e) => onChange({ ...condition, title: e.target.value || undefined })} />
-                <input className={controlClass} placeholder="window class" value={condition.className || ''} onChange={(e) => onChange({ ...condition, className: e.target.value || undefined })} />
-                <input className={controlClass} placeholder="virtual desktop GUID" value={condition.virtualDesktopId || ''} onChange={(e) => onChange({ ...condition, virtualDesktopId: e.target.value || undefined })} />
-                <input className={controlClass} placeholder="monitor id" value={condition.monitorId || ''} onChange={(e) => onChange({ ...condition, monitorId: e.target.value || undefined })} />
-                <input className={controlClass} type="number" placeholder="min width" value={condition.minWidth ?? ''} onChange={(e) => onChange({ ...condition, minWidth: e.target.value ? Number(e.target.value) : undefined })} />
-                <input className={controlClass} type="number" placeholder="max width" value={condition.maxWidth ?? ''} onChange={(e) => onChange({ ...condition, maxWidth: e.target.value ? Number(e.target.value) : undefined })} />
-                <input className={controlClass} type="number" placeholder="min height" value={condition.minHeight ?? ''} onChange={(e) => onChange({ ...condition, minHeight: e.target.value ? Number(e.target.value) : undefined })} />
-                <input className={controlClass} type="number" placeholder="max height" value={condition.maxHeight ?? ''} onChange={(e) => onChange({ ...condition, maxHeight: e.target.value ? Number(e.target.value) : undefined })} />
-                <select className={selectClass} value={condition.fullscreen === undefined ? 'any' : condition.fullscreen ? 'true' : 'false'} onChange={(e) => onChange({ ...condition, fullscreen: e.target.value === 'any' ? undefined : e.target.value === 'true' })}><option value="any">Window mode: any</option><option value="true">Fullscreen</option><option value="false">Windowed</option></select>
-                <select className={selectClass} value={condition.mode} onChange={(e) => onChange({ ...condition, mode: e.target.value as 'any' | 'all' })}><option value="all">ALL</option><option value="any">ANY</option></select>
-                <button type="button" className="h-7 px-2 border border-app-border col-span-2" onClick={async () => { const c = await invoke<any>('ipc_call', { method: 'get_active_window' }); onChange({ ...condition, process: c.process, path: c.path, title: c.title, className: c.className, virtualDesktopId: c.virtualDesktopId, monitorId: c.monitorId, fullscreen: c.fullscreen }) }}>Capture active context</button>
-              </div>
-            )}
-'''
-editor_path.write_text(text[:start] + rich_editor + text[end:], encoding='utf-8')
+interface ConditionEditorProps {
+  condition: FrontendCondition;
+  onChange: (condition: FrontendCondition) => void;
+  onRemove: () => void;
+}
 
-# The main audit script still contains its older regex attempt. Make its guard
-# idempotent: this pre-step has already installed the full rich editor.
+type CapturedContext = {
+  process: string;
+  path: string;
+  title: string;
+  className: string;
+  width: number;
+  height: number;
+  fullscreen: boolean;
+  monitorId: string;
+  virtualDesktopId: string;
+};
+
+const controlClass = 'h-7 border border-app-border bg-app-bg px-2 text-[11px] text-app-text outline-none focus:border-app-primary';
+
+export const ConditionEditor: React.FC<ConditionEditorProps> = ({ condition, onChange, onRemove }) => {
+  const { t } = useTranslation();
+  const { activeProfileId, profiles } = useProfileStore();
+  const activeProfile = profiles.find((profile) => profile.id === activeProfileId);
+  const layers = activeProfile?.layers || [];
+
+  const [isCapturing, setIsCapturing] = useState(false);
+  const [countdown, setCountdown] = useState(3);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => () => {
+    if (intervalRef.current) clearInterval(intervalRef.current);
+  }, []);
+
+  const captureNow = async () => {
+    const result = await invoke<CapturedContext>('ipc_call', { method: 'get_active_window' });
+    if (condition.type === 'windowMatch') {
+      onChange({ type: 'windowMatch', process: result.process || '', title: result.title || '' });
+      return;
+    }
+    if (condition.type === 'contextMatch') {
+      onChange({
+        ...condition,
+        process: result.process || undefined,
+        path: result.path || undefined,
+        title: result.title || undefined,
+        className: result.className || undefined,
+        virtualDesktopId: result.virtualDesktopId || undefined,
+        monitorId: result.monitorId || undefined,
+        fullscreen: result.fullscreen,
+      });
+    }
+  };
+
+  const handleCapture = () => {
+    if (isCapturing || (condition.type !== 'windowMatch' && condition.type !== 'contextMatch')) return;
+    setIsCapturing(true);
+    setCountdown(3);
+    let currentCount = 3;
+    intervalRef.current = setInterval(async () => {
+      currentCount -= 1;
+      setCountdown(currentCount);
+      if (currentCount > 0) return;
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+      try {
+        await captureNow();
+      } catch (error) {
+        console.error('Failed to capture active context', error);
+      } finally {
+        setIsCapturing(false);
+      }
+    }, 1000);
+  };
+
+  const captureButton = (
+    <button
+      type="button"
+      disabled={isCapturing}
+      onClick={handleCapture}
+      className={`h-7 px-2 inline-flex items-center gap-1 border text-[10px] font-medium ${
+        isCapturing
+          ? 'border-amber-500/60 bg-amber-500/10 text-amber-500 cursor-not-allowed'
+          : 'border-app-border bg-app-bg text-app-text hover:bg-app-surface'
+      }`}
+      title="Capture active context"
+    >
+      <Crosshair size={11} />
+      {isCapturing
+        ? t('ruleBuilder.buttons.capturing', { defaultValue: '{{seconds}}...', seconds: countdown })
+        : t('ruleBuilder.buttons.capture', { defaultValue: 'Захват' })}
+    </button>
+  );
+
+  return (
+    <div className="border border-app-border/70 bg-app-bg">
+      <div className="min-h-9 px-1.5 py-1 flex items-start gap-1.5">
+        <select
+          value={condition.type}
+          onChange={(event) => {
+            const type = event.target.value;
+            if (type === 'layerActive') onChange({ type: 'layerActive', layerId: '' });
+            else if (type === 'virtualDesktop') onChange({ type: 'virtualDesktop', id: 0 });
+            else if (type === 'contextMatch') onChange({ type: 'contextMatch', mode: 'all' });
+            else onChange({ type: 'windowMatch', process: '', title: '' });
+          }}
+          className={`${controlClass} w-[154px] shrink-0 cursor-pointer bg-app-surface/35`}
+        >
+          <option value="windowMatch">{t('ruleBuilder.condition_types.windowMatch')}</option>
+          <option value="contextMatch">Context Match</option>
+          <option value="layerActive">{t('ruleBuilder.condition_types.layerActive')}</option>
+          <option value="virtualDesktop">{t('ruleBuilder.condition_types.virtualDesktop', { defaultValue: 'Виртуальный рабочий стол' })}</option>
+        </select>
+
+        <div className="flex-1 min-w-0">
+          {condition.type === 'windowMatch' && (
+            <div className="grid grid-cols-[minmax(105px,1fr)_minmax(105px,1fr)_auto] gap-1.5 items-start">
+              <input type="text" value={condition.process || ''} onChange={(event) => onChange({ ...condition, process: event.target.value })} placeholder={t('ruleBuilder.placeholders.process')} className={`${controlClass} min-w-0`} />
+              <input type="text" value={condition.title || ''} onChange={(event) => onChange({ ...condition, title: event.target.value })} placeholder={t('ruleBuilder.placeholders.title', { defaultValue: 'Заголовок окна' })} className={`${controlClass} min-w-0`} />
+              {captureButton}
+              <div className="col-span-3 text-[9px] leading-4 text-app-muted">{t('ruleBuilder.hints.windowMatch_or')}</div>
+            </div>
+          )}
+
+          {condition.type === 'contextMatch' && (
+            <div className="grid grid-cols-2 gap-1.5 items-start">
+              <input className={controlClass} placeholder="process.exe" value={condition.process || ''} onChange={(event) => onChange({ ...condition, process: event.target.value || undefined })} />
+              <input className={controlClass} placeholder="path contains" value={condition.path || ''} onChange={(event) => onChange({ ...condition, path: event.target.value || undefined })} />
+              <input className={controlClass} placeholder="title contains" value={condition.title || ''} onChange={(event) => onChange({ ...condition, title: event.target.value || undefined })} />
+              <input className={controlClass} placeholder="window class" value={condition.className || ''} onChange={(event) => onChange({ ...condition, className: event.target.value || undefined })} />
+              <input className={controlClass} placeholder="virtual desktop GUID" value={condition.virtualDesktopId || ''} onChange={(event) => onChange({ ...condition, virtualDesktopId: event.target.value || undefined })} />
+              <input className={controlClass} placeholder="monitor id" value={condition.monitorId || ''} onChange={(event) => onChange({ ...condition, monitorId: event.target.value || undefined })} />
+              <input className={controlClass} type="number" placeholder="min width" value={condition.minWidth ?? ''} onChange={(event) => onChange({ ...condition, minWidth: event.target.value ? Number(event.target.value) : undefined })} />
+              <input className={controlClass} type="number" placeholder="max width" value={condition.maxWidth ?? ''} onChange={(event) => onChange({ ...condition, maxWidth: event.target.value ? Number(event.target.value) : undefined })} />
+              <input className={controlClass} type="number" placeholder="min height" value={condition.minHeight ?? ''} onChange={(event) => onChange({ ...condition, minHeight: event.target.value ? Number(event.target.value) : undefined })} />
+              <input className={controlClass} type="number" placeholder="max height" value={condition.maxHeight ?? ''} onChange={(event) => onChange({ ...condition, maxHeight: event.target.value ? Number(event.target.value) : undefined })} />
+              <select className={controlClass} value={condition.fullscreen === undefined ? 'any' : condition.fullscreen ? 'true' : 'false'} onChange={(event) => onChange({ ...condition, fullscreen: event.target.value === 'any' ? undefined : event.target.value === 'true' })}>
+                <option value="any">Window mode: any</option><option value="true">Fullscreen</option><option value="false">Windowed</option>
+              </select>
+              <select className={controlClass} value={condition.mode} onChange={(event) => onChange({ ...condition, mode: event.target.value as 'any' | 'all' })}>
+                <option value="all">ALL</option><option value="any">ANY</option>
+              </select>
+              <div className="col-span-2 flex justify-end">{captureButton}</div>
+            </div>
+          )}
+
+          {condition.type === 'layerActive' && (
+            layers.length === 0 ? (
+              <div className="h-7 flex items-center text-[10px] text-app-danger">{t('ruleBuilder.hints.create_layer_first')}</div>
+            ) : (
+              <select value={condition.layerId} onChange={(event) => onChange({ ...condition, layerId: event.target.value })} className={`${controlClass} w-full cursor-pointer`}>
+                {!condition.layerId && <option value="">{t('ruleBuilder.hints.select_layer')}</option>}
+                {layers.map((layer) => <option key={layer.id} value={layer.id}>{layer.name}</option>)}
+              </select>
+            )
+          )}
+
+          {condition.type === 'virtualDesktop' && (
+            <input type="number" min={0} value={condition.id} onChange={(event) => onChange({ ...condition, id: Number(event.target.value) || 0 })} className={`${controlClass} w-full`} />
+          )}
+        </div>
+
+        <button type="button" onClick={onRemove} className="h-7 w-7 shrink-0 inline-flex items-center justify-center text-app-muted hover:bg-app-surface hover:text-app-danger" title={t('ruleBuilder.remove_condition_tooltip')}>
+          <Trash2 size={12} />
+        </button>
+      </div>
+    </div>
+  );
+};
+''', encoding='utf-8')
+
+# Make the main audit script's old best-effort JSX insertion explicitly
+# idempotent after this deterministic rewrite.
 fix_path = Path('scripts/v032_current_fix.py')
 fix = fix_path.read_text(encoding='utf-8')
 old = '''if count != 1:\n    raise SystemExit(f"ContextMatch editor replacement count={count}")'''
 new = '''if count != 1 and "Capture active context" not in s:\n    raise SystemExit(f"ContextMatch editor replacement count={count}")'''
-if old not in fix:
-    raise SystemExit('current-fix ContextMatch guard anchor missing')
-fix_path.write_text(fix.replace(old, new, 1), encoding='utf-8')
-print('Format-independent rich ContextMatch editor installed')
+if old in fix:
+    fix = fix.replace(old, new, 1)
+fix_path.write_text(fix, encoding='utf-8')
+print('Deterministic rich ConditionEditor written')
