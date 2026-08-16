@@ -18,6 +18,22 @@ s = s.replace(
 )
 write(p, s)
 
+# The historical rich-context staging predates the monotonic revision field that
+# exists on the current branch. Preserve it after the staging script rewrites
+# context.rs so auto-switch can react only to real foreground-context changes.
+p = "src-tauri/src/context.rs"
+s = read(p)
+if "pub revision: u64," not in s:
+    anchor = "pub struct AppContext {\n"
+    if anchor not in s:
+        raise SystemExit("AppContext struct anchor missing")
+    s = s.replace(
+        anchor,
+        anchor + "    /// Monotonic foreground-context revision. Layer changes do not increment it.\n    pub revision: u64,\n",
+        1,
+    )
+write(p, s)
+
 # Correct windows-rs 0.62 module ownership in the recovered rich tracker.
 p = "src-tauri/src/trackers/context_tracker.rs"
 s = read(p)
