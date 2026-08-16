@@ -53,7 +53,7 @@ jobs:
           }
           $blobs = @{
             "scripts/v032_profiles_context.py" = "e38b285721e915b45c33ab8daeb05527b5f891ca"
-            "scripts/v032_frontend_fix.py" = "b7e372d5bd6bddb66ff611a8c494bb6fb9ee61"
+            "scripts/v032_frontend_fix.py" = "b7e372d5bd6bddbbd66ff611a8c494bb6fb9ee61"
             "scripts/v032_rust_fix.py" = "c49b770f0d0ad143923bc3ee84dfa59c66e6ae29"
           }
           foreach ($entry in $blobs.GetEnumerator()) {
