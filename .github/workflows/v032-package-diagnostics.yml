@@ -1,0 +1,93 @@
+name: v0.3.2 Package Diagnostics
+
+on:
+  push:
+    branches:
+      - dev/v0.3.2-profiles-context
+    paths:
+      - .github/workflows/v032-package-diagnostics.yml
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  diagnose-package:
+    runs-on: windows-2025
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: dev/v0.3.2-profiles-context
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri -> target
+
+      - name: Recover v0.3.2 staging scripts from Git blobs
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $headers = @{
+            Authorization = "Bearer $env:GH_TOKEN"
+            Accept = "application/vnd.github+json"
+            "X-GitHub-Api-Version" = "2022-11-28"
+          }
+          $blobs = @{
+            "scripts/v032_profiles_context.py" = "e38b285721e915b45c33ab8daeb05527b5f891ca"
+            "scripts/v032_frontend_fix.py" = "b7e372d5bd6bddbbd66ff611a8c494bb6fb9ee61"
+            "scripts/v032_rust_fix.py" = "c49b770f0d0ad143923bc3ee84dfa59c66e6ae29"
+          }
+          foreach ($entry in $blobs.GetEnumerator()) {
+            $response = Invoke-RestMethod -Headers $headers -Uri "https://api.github.com/repos/${{ github.repository }}/git/blobs/$($entry.Value)"
+            $base64 = ($response.content -replace '\s', '')
+            [IO.File]::WriteAllBytes($entry.Key, [Convert]::FromBase64String($base64))
+          }
+
+      - name: Apply exact audited v0.3.2 patch stack
+        run: |
+          python scripts/v032_profiles_context.py
+          python scripts/v032_frontend_fix.py
+          python scripts/v032_rust_fix.py
+          python scripts/v032_condition_editor_fix.py
+          python scripts/v032_current_fix.py
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Capture NSIS output
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          pnpm tauri build --bundles nsis *>&1 | Tee-Object -FilePath V032_NSIS.log
+          $code = $LASTEXITCODE
+          "exit_code=$code" | Set-Content V032_NSIS_TAIL.log
+          Get-Content V032_NSIS.log -Tail 220 | Add-Content V032_NSIS_TAIL.log
+          Write-Host "Captured NSIS exit code $code"
+          exit 0
+
+      - name: Commit compact NSIS diagnostic tail
+        shell: pwsh
+        run: |
+          git config user.name "AlexB322"
+          git config user.email "264132173+zsanya322-maker@users.noreply.github.com"
+          git add V032_NSIS_TAIL.log
+          git commit -m "ci(0.3.2): capture NSIS packaging tail"
+          git push origin HEAD:dev/v0.3.2-profiles-context
