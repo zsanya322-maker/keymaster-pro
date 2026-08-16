@@ -7,6 +7,7 @@ on:
     paths:
       - .github/workflows/v032-complete.yml
       - scripts/v032_current_fix.py
+      - scripts/v032_condition_editor_fix.py
 
 permissions:
   contents: write
@@ -68,6 +69,7 @@ jobs:
           python scripts/v032_profiles_context.py
           python scripts/v032_frontend_fix.py
           python scripts/v032_rust_fix.py
+          python scripts/v032_condition_editor_fix.py
           python scripts/v032_current_fix.py
 
       - name: Install frontend dependencies
