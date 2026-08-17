@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use crate::shared::types::MatchMode;
 
 #[derive(Debug, Clone)]
 pub struct EngineSchema {
@@ -64,6 +65,12 @@ pub enum EngineCondition {
     VirtualDesktop { id: u32 },
     /// Объединённое условие «Активное окно»: срабатывает по ИЛИ.
     /// Хотя бы одно поле должно быть Some. None = не проверяется.
+    ContextMatch {
+        process: Option<String>, path: Option<String>, title: Option<String>, class_name: Option<String>,
+        virtual_desktop_id: Option<String>, monitor_id: Option<String>,
+        min_width: Option<i32>, max_width: Option<i32>, min_height: Option<i32>, max_height: Option<i32>,
+        fullscreen: Option<bool>, mode: MatchMode,
+    },
     WindowMatch {
         process_hash: Option<u64>,
         title_contains: Option<String>,

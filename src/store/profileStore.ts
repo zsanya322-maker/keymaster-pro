@@ -12,6 +12,9 @@ interface ProfileState {
   saveProfile: (profile: Profile) => Promise<boolean>
   createProfile: (profile: Partial<Profile>) => Promise<boolean>
   deleteProfile: (id: string) => Promise<boolean>
+  renameProfile: (id: string, name: string) => Promise<boolean>
+  duplicateProfile: (id: string, name: string) => Promise<boolean>
+  reorderProfiles: (ids: string[]) => Promise<boolean>
 }
 
 function mutationFailed(action: string, error: unknown) {
@@ -28,7 +31,7 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
     try {
       const res = await invoke<{ profiles: Profile[], active: string }>('ipc_call', { method: 'profile.list' })
       set({
-        profiles: res.profiles,
+        profiles: res.profiles.map(profile => ({ ...profile, bindings: profile.bindings ?? [], order: profile.order ?? 0 })),
         activeProfileId: res.active,
       })
       return true
@@ -68,6 +71,8 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
         name: 'New Profile',
         isDefault: false,
         linkedApps: [],
+        bindings: [],
+        order: 0,
         rules: [],
         layers: [],
         folders: [],
@@ -77,6 +82,36 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
       return await get().loadProfiles()
     } catch (error) {
       mutationFailed('Не удалось создать профиль', error)
+      return false
+    }
+  },
+
+  renameProfile: async (id, name) => {
+    try {
+      await invoke('ipc_call', { method: 'profile.rename', params: { id, name } })
+      return await get().loadProfiles()
+    } catch (error) {
+      mutationFailed('Не удалось переименовать профиль', error)
+      return false
+    }
+  },
+
+  duplicateProfile: async (id, name) => {
+    try {
+      await invoke('ipc_call', { method: 'profile.duplicate', params: { id, newId: crypto.randomUUID(), name } })
+      return await get().loadProfiles()
+    } catch (error) {
+      mutationFailed('Не удалось дублировать профиль', error)
+      return false
+    }
+  },
+
+  reorderProfiles: async (ids) => {
+    try {
+      await invoke('ipc_call', { method: 'profile.reorder', params: { ids } })
+      return await get().loadProfiles()
+    } catch (error) {
+      mutationFailed('Не удалось изменить порядок профилей', error)
       return false
     }
   },

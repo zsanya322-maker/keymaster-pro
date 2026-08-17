@@ -23,7 +23,7 @@ import { ToastViewport } from './ToastViewport'
 import { useToastQueue } from './useToastQueue'
 import { useDaemonConnection, type DaemonStatus } from './useDaemonConnection'
 
-const PROFILE_SCHEMA_VERSION = 3
+const PROFILE_SCHEMA_VERSION = 4
 
 interface ImportedProfileMeta {
   id?: string

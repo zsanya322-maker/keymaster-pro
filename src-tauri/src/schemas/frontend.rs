@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use crate::shared::types::MatchMode;
 
 pub mod key_modifiers {
     pub const CTRL: u16 = 1 << 0;
@@ -199,6 +200,14 @@ pub enum FrontendCondition {
     /// Объединённое условие «Активное окно»: срабатывает, если совпал процесс ИЛИ заголовок.
     /// process и title оба опциональны, но хотя бы один должен быть заполнен.
     /// Срабатывает по ИЛИ: достаточно совпадения любого из указанных полей.
+    ContextMatch {
+        #[serde(default)] process: Option<String>, #[serde(default)] path: Option<String>,
+        #[serde(default)] title: Option<String>, #[serde(default)] class_name: Option<String>,
+        #[serde(default)] virtual_desktop_id: Option<String>, #[serde(default)] monitor_id: Option<String>,
+        #[serde(default)] min_width: Option<i32>, #[serde(default)] max_width: Option<i32>,
+        #[serde(default)] min_height: Option<i32>, #[serde(default)] max_height: Option<i32>,
+        #[serde(default)] fullscreen: Option<bool>, #[serde(default)] mode: MatchMode,
+    },
     WindowMatch {
         #[serde(default)]
         process: Option<String>,

@@ -19,6 +19,9 @@ pub type DaemonStateRef = Arc<RwLock<DaemonState>>;
 pub struct DaemonState {
     /// Активный профиль
     pub active_profile_id: String,
+    pub preferred_profile_id: String,
+    pub auto_switch_profiles: bool,
+    pub manual_profile_lock: bool,
     /// Полная структура активного профиля
     pub active_profile: Option<crate::shared::types::Profile>,
     /// Скомпилированная схема движка
@@ -69,6 +72,9 @@ impl DaemonState {
     pub fn from_config(config: &AppConfig) -> Self {
         Self {
             active_profile_id: config.active_profile_id.clone(),
+            preferred_profile_id: config.active_profile_id.clone(),
+            auto_switch_profiles: config.auto_switch_profiles,
+            manual_profile_lock: config.manual_profile_lock,
             active_profile: None,
             engine_schema: EngineSchema::default(),
             simulator: None,
@@ -105,6 +111,9 @@ impl Default for DaemonState {
     fn default() -> Self {
         Self {
             active_profile_id: "1".to_string(),
+            preferred_profile_id: "1".to_string(),
+            auto_switch_profiles: false,
+            manual_profile_lock: false,
             active_profile: None,
             engine_schema: EngineSchema::default(),
             simulator: None,

@@ -127,6 +127,15 @@ function formatConditionLabel(condition: FrontendCondition, t: TFunction): strin
       return `${t('ruleBuilder.condition_types.layerActive')}: ${condition.layerId || '—'}`;
     case 'virtualDesktop':
       return `${t('ruleBuilder.condition_types.virtualDesktop')}: ${condition.id}`;
+    case 'contextMatch': {
+      const parts = [condition.process, condition.path, condition.title, condition.className, condition.virtualDesktopId, condition.monitorId].filter(Boolean)
+      const geometry = [condition.minWidth, condition.maxWidth, condition.minHeight, condition.maxHeight].some(value => value !== undefined)
+        ? `${condition.minWidth ?? '—'}..${condition.maxWidth ?? '—'} × ${condition.minHeight ?? '—'}..${condition.maxHeight ?? '—'}`
+        : ''
+      if (geometry) parts.push(geometry)
+      if (condition.fullscreen !== undefined) parts.push(condition.fullscreen ? 'fullscreen' : 'windowed')
+      return `Context (${condition.mode.toUpperCase()}): ${parts.length ? parts.join(' / ') : '—'}`
+    }
     case 'windowMatch': {
       const parts: string[] = [];
       if (condition.process) parts.push(condition.process);

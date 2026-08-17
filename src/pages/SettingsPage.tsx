@@ -15,6 +15,7 @@ import { useAppStore } from '../store/appStore';
 import { invoke } from '../lib/ipc';
 import { triggerToast } from '../lib/toast';
 import { KeyPicker } from '../components/ruleBuilder/KeyPicker';
+import { ProfileAutomationPanel } from '../components/ProfileAutomationPanel';
 
 type SettingsTab = 'general' | 'daemon' | 'logs';
 type UpdateInfo = Awaited<ReturnType<typeof check>>;
@@ -273,6 +274,8 @@ export function SettingsPage() {
                   <div className="flex justify-end"><Toggle checked={config.minimizeToTray} onChange={() => void handleToggle('minimizeToTray')} /></div>
                 </SettingRow>
               </Section>
+
+              <Section title={t('settings.profile_automation', { defaultValue: 'Профили и автопереключение' })}><ProfileAutomationPanel /></Section>
 
               <details className="border border-app-border bg-app-bg">
                 <summary className="h-8 px-3 flex items-center cursor-pointer select-none bg-app-surface/35 text-[11px] font-semibold text-app-text">

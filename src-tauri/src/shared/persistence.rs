@@ -20,7 +20,7 @@ use crate::shared::types::Profile;
 /// `schemaVersion` хранится в JSON на границе persistence и не входит в
 /// runtime-структуру `Profile`, поэтому существующий IPC/frontend контракт
 /// остаётся совместимым.
-pub const PROFILE_SCHEMA_VERSION: u32 = 3;
+pub const PROFILE_SCHEMA_VERSION: u32 = 4;
 
 #[derive(Debug, Clone)]
 struct LoadedProfile {
@@ -160,6 +160,15 @@ fn migrate_profile_value(mut value: Value) -> Result<(Value, bool), String> {
                 object.insert("schemaVersion".to_string(), json!(3));
                 version = 3;
             }
+            3 => {
+                // v3 -> v4: structured profile bindings/order while retaining linkedApps.
+                object.entry("order".to_string()).or_insert(json!(0));
+                if !object.contains_key("bindings") {
+                    let bindings=object.get("linkedApps").and_then(Value::as_array).map(|apps| apps.iter().filter_map(Value::as_str).map(|p|json!({"process":p,"mode":"any"})).collect::<Vec<_>>()).unwrap_or_default();
+                    object.insert("bindings".to_string(),json!(bindings));
+                }
+                object.insert("schemaVersion".to_string(),json!(4)); version=4;
+            }
             other => return Err(format!("Нет миграции для версии профиля {}", other)),
         }
     }
@@ -254,6 +263,8 @@ fn recovery_profile(id: &str) -> Profile {
         name: format!("{} (Ошибка загрузки)", id),
         is_default: false,
         linked_apps: vec![],
+        bindings: vec![],
+        order: 0,
         rules: vec![],
         layers: vec![],
         folders: vec![],
@@ -471,6 +482,10 @@ pub fn delete_profile(id: &str) -> Result<(), String> {
     Ok(())
 }
 
+pub fn list_profile_backups(id:&str)->Result<Vec<String>,String>{profile_path(id)?;let dir=backups_dir()?;let prefix=format!("{}_",id);let mut out=Vec::new();for e in fs::read_dir(&dir).map_err(|e|e.to_string())?{let e=e.map_err(|e|e.to_string())?;let n=e.file_name().to_string_lossy().to_string();if n.starts_with(&prefix)&&n.ends_with(".json"){out.push(n)}}out.sort_by(|a,b|b.cmp(a));Ok(out)}
+pub fn create_profile_backup(id:&str)->Result<String,String>{let path=profile_path(id)?;if !path.exists(){return Err("Profile not found".into())}Ok(backup_file(&path)?.file_name().unwrap_or_default().to_string_lossy().to_string())}
+pub fn restore_profile_backup(id:&str,name:&str)->Result<Profile,String>{let target=profile_path(id)?;if name.contains('/')||name.contains('\\')||!name.starts_with(&format!("{}_",id))||!name.ends_with(".json"){return Err("Invalid backup name".into())}let src=backups_dir()?.join(name);let data=fs::read_to_string(&src).map_err(|e|e.to_string())?;let value:Value=serde_json::from_str(&data).map_err(|e|e.to_string())?;let(profile,_,_)=profile_from_value(value)?;if profile.id!=id{return Err("Backup profile id mismatch".into())}if target.exists(){let _=backup_file(&target)?;}write_profile_value(&target,&export_profile_value(&profile)?)?;Ok(profile)}
+
 fn backup_file(path: &Path) -> Result<PathBuf, String> {
     let dir = backups_dir()?;
     let filename = path
@@ -589,6 +604,8 @@ mod tests {
             name: "Round Trip".to_string(),
             is_default: false,
             linked_apps: vec![],
+            bindings: vec![],
+            order: 0,
             rules: vec![],
             layers: vec![],
             folders: vec![],
@@ -680,6 +697,8 @@ mod tests {
             name: "Export".to_string(),
             is_default: false,
             linked_apps: vec![],
+            bindings: vec![],
+            order: 0,
             rules: vec![],
             layers: vec![],
             folders: vec![],

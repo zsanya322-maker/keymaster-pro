@@ -135,6 +135,15 @@ fn compile_condition(condition: &FrontendCondition) -> EngineCondition {
                 title_contains: Some("\0".to_string()),
             }
         }
+        FrontendCondition::ContextMatch { process, path, title, class_name, virtual_desktop_id, monitor_id, min_width, max_width, min_height, max_height, fullscreen, mode } => EngineCondition::ContextMatch {
+            process: process.as_ref().filter(|v| !v.trim().is_empty()).map(|v| v.trim().to_lowercase()),
+            path: path.as_ref().filter(|v| !v.trim().is_empty()).map(|v| v.trim().to_lowercase()),
+            title: title.as_ref().filter(|v| !v.trim().is_empty()).map(|v| v.trim().to_lowercase()),
+            class_name: class_name.as_ref().filter(|v| !v.trim().is_empty()).map(|v| v.trim().to_lowercase()),
+            virtual_desktop_id: virtual_desktop_id.clone(), monitor_id: monitor_id.clone(),
+            min_width: *min_width, max_width: *max_width, min_height: *min_height, max_height: *max_height,
+            fullscreen: *fullscreen, mode: *mode,
+        },
         FrontendCondition::WindowMatch { process, title } => EngineCondition::WindowMatch {
             process_hash: process
                 .as_ref()

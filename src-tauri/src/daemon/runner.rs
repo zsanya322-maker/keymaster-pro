@@ -101,6 +101,8 @@ fn resolve_startup_profile(
             name: "Default".to_string(),
             is_default: true,
             linked_apps: vec![],
+            bindings: vec![],
+            order: 0,
             rules: vec![],
             layers: vec![],
             folders: vec![],
@@ -276,12 +278,18 @@ pub fn run_daemon(parent_pid: Option<u32>) -> Result<(), String> {
                 let changed = s.kb_hook_enabled != updated.kb_hook_enabled
                     || s.mouse_hook_enabled != updated.mouse_hook_enabled
                     || s.restore_mouse_after_macro != updated.restore_mouse_after_macro
-                    || s.macro_emergency_stop_vk != updated.macro_emergency_stop_vk;
+                    || s.macro_emergency_stop_vk != updated.macro_emergency_stop_vk
+                    || s.auto_switch_profiles != updated.auto_switch_profiles
+                    || s.manual_profile_lock != updated.manual_profile_lock;
 
                 s.kb_hook_enabled = updated.kb_hook_enabled;
                 s.mouse_hook_enabled = updated.mouse_hook_enabled;
                 s.restore_mouse_after_macro = updated.restore_mouse_after_macro;
                 s.macro_emergency_stop_vk = updated.macro_emergency_stop_vk;
+                s.auto_switch_profiles = updated.auto_switch_profiles;
+                s.manual_profile_lock = updated.manual_profile_lock;
+                s.auto_switch_profiles=updated.auto_switch_profiles;
+                s.manual_profile_lock=updated.manual_profile_lock;
 
                 if changed {
                     info!(
@@ -296,13 +304,64 @@ pub fn run_daemon(parent_pid: Option<u32>) -> Result<(), String> {
         }
     });
 
-    // NOTE: Автопереключение профилей по активному окну убрано (раньше каждую секунду
-    // перетирало ручной выбор пользователя, откатывая на профиль с is_default=true).
-    // Профиль выбирается ТОЛЬКО вручную через UI. Последний активный сохраняется в config.
-    //
-    // ROADMAP: вернуть как настраиваемую фичу — галочка в настройках (вкл/выкл),
-    // матчит linked_apps профилей с активным процессом; fallback на дефолт только
-    // при включённой опции и без явного ручного выбора пользователя.
+    // Profile auto-switch is runtime-only. The persisted/preferred id changes only
+    // through profile.activate. Disk/profile evaluation is gated by foreground revision.
+    let profile_switch_state = state.clone();
+    tokio_rt.spawn(async move {
+        let mut last_revision = u64::MAX;
+        let mut last_signature: Option<(bool, bool, String, String)> = None;
+        loop {
+            tokio::time::sleep(std::time::Duration::from_millis(75)).await;
+            let (running, auto_switch, manual_lock, preferred, current) =
+                match profile_switch_state.read() {
+                    Ok(daemon) => (
+                        daemon.running,
+                        daemon.auto_switch_profiles,
+                        daemon.manual_profile_lock,
+                        daemon.preferred_profile_id.clone(),
+                        daemon.active_profile_id.clone(),
+                    ),
+                    Err(_) => continue,
+                };
+            if !running {
+                break;
+            }
+
+            let context = crate::trackers::context_tracker::get_context()
+                .and_then(|context| context.read().ok().map(|value| value.clone()))
+                .unwrap_or_default();
+            let signature = (auto_switch, manual_lock, preferred.clone(), current.clone());
+            if last_revision == context.revision && last_signature.as_ref() == Some(&signature) {
+                continue;
+            }
+            last_revision = context.revision;
+            last_signature = Some(signature);
+
+            let target = if auto_switch && !manual_lock {
+                let mut profiles = crate::shared::persistence::list_profiles()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter_map(|id| crate::shared::persistence::load_profile_checked(&id).ok())
+                    .collect::<Vec<_>>();
+                profiles.sort_by(|a, b| a.order.cmp(&b.order).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase())));
+                profiles
+                    .into_iter()
+                    .find(|profile| crate::daemon::profile_runtime::profile_matches(profile, &context))
+                    .or_else(|| crate::shared::persistence::load_profile_checked(&preferred).ok())
+            } else {
+                crate::shared::persistence::load_profile_checked(&preferred).ok()
+            };
+
+            if let Some(profile) = target {
+                if profile.id != current {
+                    if let Err(error) = crate::daemon::profile_runtime::activate_runtime(&profile_switch_state, profile) {
+                        warn!("Profile auto-switch failed: {}", error);
+                    }
+                }
+            }
+        }
+    });
+
 
     let taphold_state = state.clone();
     tokio_rt.spawn(async move {

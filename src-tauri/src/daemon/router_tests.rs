@@ -11,6 +11,8 @@ fn test_profile(id: String, name: &str, is_default: bool) -> Profile {
         name: name.to_string(),
         is_default,
         linked_apps: vec![],
+        bindings: vec![],
+        order: 0,
         rules: vec![],
         layers: vec![],
         folders: vec![],

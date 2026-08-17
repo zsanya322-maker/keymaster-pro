@@ -16,11 +16,16 @@ export interface RuleFolder {
   order: number
 }
 
+export type MatchMode = 'any' | 'all'
+export interface ProfileBinding { process?: string; path?: string; title?: string; className?: string; virtualDesktopId?: string; monitorId?: string; fullscreen?: boolean; mode: MatchMode }
+
 export interface Profile {
   id: Uuid
   name: string
   isDefault: boolean
   linkedApps: string[]
+  bindings: ProfileBinding[]
+  order: number
   rules: FrontendRule[]
   layers: LayerMeta[]
   folders: RuleFolder[]
@@ -96,6 +101,7 @@ export interface MacroStep {
 export type FrontendCondition =
   | { type: 'layerActive'; layerId: string }
   | { type: 'virtualDesktop'; id: number }
+  | { type: 'contextMatch'; process?: string; path?: string; title?: string; className?: string; virtualDesktopId?: string; monitorId?: string; minWidth?: number; maxWidth?: number; minHeight?: number; maxHeight?: number; fullscreen?: boolean; mode: MatchMode }
   | { type: 'windowMatch'; process?: string; title?: string }
 
 export interface AppConfig {
@@ -113,6 +119,8 @@ export interface AppConfig {
   rowPadding?: number
   restoreMouseAfterMacro?: boolean
   macroEmergencyStopVk?: number
+  autoSwitchProfiles?: boolean
+  manualProfileLock?: boolean
   tapHoldTimeoutMs?: number
   onboardingComplete?: boolean
 }

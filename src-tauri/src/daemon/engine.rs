@@ -218,6 +218,19 @@ fn check_conditions(conditions: &[EngineCondition], ctx: &crate::context::AppCon
                 // VirtualDesktop conditions to an impossible WindowMatch too.
                 return false;
             }
+            EngineCondition::ContextMatch { process,path,title,class_name,virtual_desktop_id,monitor_id,min_width,max_width,min_height,max_height,fullscreen,mode } => {
+                let mut checks=Vec::new();
+                if let Some(v)=process { checks.push(ctx.active_process.eq_ignore_ascii_case(v)); }
+                if let Some(v)=path { checks.push(ctx.active_process_path.to_lowercase().contains(v)); }
+                if let Some(v)=title { checks.push(ctx.active_window_title.to_lowercase().contains(v)); }
+                if let Some(v)=class_name { checks.push(ctx.active_window_class.eq_ignore_ascii_case(v)); }
+                if let Some(v)=virtual_desktop_id { checks.push(ctx.virtual_desktop_id.eq_ignore_ascii_case(v)); }
+                if let Some(v)=monitor_id { checks.push(ctx.monitor_id==*v); }
+                if let Some(v)=min_width { checks.push(ctx.window_width>=*v); } if let Some(v)=max_width { checks.push(ctx.window_width<=*v); }
+                if let Some(v)=min_height { checks.push(ctx.window_height>=*v); } if let Some(v)=max_height { checks.push(ctx.window_height<=*v); }
+                if let Some(v)=fullscreen { checks.push(ctx.fullscreen==*v); }
+                if checks.is_empty() || match mode { crate::shared::types::MatchMode::Any=>!checks.iter().any(|v|*v), crate::shared::types::MatchMode::All=>!checks.iter().all(|v|*v) } { return false; }
+            }
             EngineCondition::WindowMatch {
                 process_hash,
                 title_contains,

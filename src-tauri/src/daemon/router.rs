@@ -44,6 +44,79 @@ fn update_active_profile_runtime(
     Ok(())
 }
 
+fn remap_layer_action(
+    action: &mut crate::schemas::frontend::FrontendAction,
+    layer_ids: &std::collections::HashMap<String, String>,
+) {
+    use crate::schemas::frontend::FrontendAction;
+    match action {
+        FrontendAction::ToggleLayer { layer_id } | FrontendAction::HoldLayer { layer_id } => {
+            if let Some(new_id) = layer_ids.get(layer_id) {
+                *layer_id = new_id.clone();
+            }
+        }
+        _ => {}
+    }
+}
+
+fn regenerate_profile_identity(
+    profile: &mut crate::shared::types::Profile,
+    new_profile_id: String,
+    new_name: String,
+) {
+    let mut layer_ids = std::collections::HashMap::new();
+    for layer in &mut profile.layers {
+        let old_id = layer.id.clone();
+        let new_id = uuid::Uuid::new_v4().to_string();
+        layer.id = new_id.clone();
+        layer_ids.insert(old_id, new_id);
+    }
+
+    let mut folder_ids = std::collections::HashMap::new();
+    for folder in &mut profile.folders {
+        let old_id = folder.id.clone();
+        let new_id = uuid::Uuid::new_v4().to_string();
+        folder.id = new_id.clone();
+        folder_ids.insert(old_id, new_id);
+    }
+    for folder in &mut profile.folders {
+        if let Some(parent_id) = folder.parent_id.as_mut() {
+            if let Some(new_id) = folder_ids.get(parent_id) {
+                *parent_id = new_id.clone();
+            }
+        }
+    }
+
+    for rule in &mut profile.rules {
+        rule.id = uuid::Uuid::new_v4().to_string();
+        if let Some(folder_id) = rule.folder_id.as_mut() {
+            if let Some(new_id) = folder_ids.get(folder_id) {
+                *folder_id = new_id.clone();
+            }
+        }
+        for condition in &mut rule.conditions {
+            if let crate::schemas::frontend::FrontendCondition::LayerActive { layer_id } = condition {
+                if let Some(new_id) = layer_ids.get(layer_id) {
+                    *layer_id = new_id.clone();
+                }
+            }
+        }
+        for action in &mut rule.actions {
+            remap_layer_action(action, &layer_ids);
+        }
+        if let Some(actions) = rule.hold_actions.as_mut() {
+            for action in actions {
+                remap_layer_action(action, &layer_ids);
+            }
+        }
+    }
+
+    profile.id = new_profile_id;
+    profile.name = new_name;
+    profile.is_default = false;
+    profile.order = profile.order.saturating_add(1);
+}
+
 /// Helper function to load, modify, save, and update the active profile in DaemonState.
 /// Recovery placeholders are intentionally rejected here: a broken source is
 /// visible in profile.list but can never be edited into a new empty profile.
@@ -75,6 +148,8 @@ pub async fn dispatch(
                     name: "Default".to_string(),
                     is_default: true,
                     linked_apps: vec![],
+                    bindings: vec![],
+                    order: 0,
                     rules: vec![],
                     layers: vec![],
                     folders: vec![],
@@ -90,6 +165,7 @@ pub async fn dispatch(
                     list.push(prof);
                 }
             }
+            list.sort_by(|a, b| a.order.cmp(&b.order).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase())));
             let active = {
                 let s = state.read().map_err(|_| "Failed to lock state")?;
                 s.active_profile_id.clone()
@@ -99,27 +175,20 @@ pub async fn dispatch(
         "profile.activate" => {
             let id = params
                 .as_ref()
-                .and_then(|v| v.get("id"))
-                .and_then(|i| i.as_str())
-                .unwrap_or("");
+                .and_then(|value| value.get("id"))
+                .and_then(|value| value.as_str())
+                .ok_or("Missing profile id")?;
             let profile = crate::shared::persistence::load_profile_checked(id)?;
 
-            // Persist first. If config.json cannot be updated, do not switch only
-            // the in-memory engine and then silently revert after next restart.
+            // Manual activation owns persistence. Auto-switch changes runtime only.
             let mut config = crate::shared::config::load_config()?;
             config.active_profile_id = id.to_string();
             crate::shared::config::save_config(&config)?;
 
+            crate::daemon::profile_runtime::activate_runtime(state, profile)?;
             {
-                let mut s = state.write().map_err(|_| "Failed to lock state")?;
-                s.active_profile_id = id.to_string();
-                let frontend_config = crate::schemas::frontend::FrontendConfig {
-                    rules: profile.rules.clone(),
-                    layers: profile.layers.clone(),
-                    tap_hold_timeout_ms: current_tap_hold_timeout(),
-                };
-                s.engine_schema = crate::daemon::compiler::compile_schema(&frontend_config);
-                s.active_profile = Some(profile);
+                let mut daemon = state.write().map_err(|_| "Failed to lock state")?;
+                daemon.preferred_profile_id = id.to_string();
             }
             Ok(json!({ "success": true }))
         }
@@ -155,6 +224,8 @@ pub async fn dispatch(
                     name: input.name,
                     is_default: input.is_default,
                     linked_apps: input.linked_apps.unwrap_or_default(),
+                    bindings: vec![],
+                    order: 0,
                     rules: vec![],
                     layers: vec![],
                     folders: vec![],
@@ -244,6 +315,79 @@ pub async fn dispatch(
             crate::shared::persistence::delete_profile(id)?;
             Ok(json!({ "success": true }))
         }
+        "profile.rename" => {
+            let value = params.ok_or("Missing parameters")?;
+            let id = value.get("id").and_then(Value::as_str).ok_or("Missing id")?;
+            let name = value.get("name").and_then(Value::as_str).ok_or("Missing name")?.trim();
+            if name.is_empty() { return Err("Name is empty".into()); }
+            let mut profile = crate::shared::persistence::load_profile_checked(id)?;
+            profile.name = name.to_string();
+            crate::shared::persistence::save_profile(&profile)?;
+            update_active_profile_runtime(profile, state)?;
+            Ok(json!({"success": true}))
+        }
+        "profile.duplicate" => {
+            let value = params.ok_or("Missing parameters")?;
+            let id = value.get("id").and_then(Value::as_str).ok_or("Missing id")?;
+            let mut profile = crate::shared::persistence::load_profile_checked(id)?;
+            let new_id = value
+                .get("newId")
+                .and_then(Value::as_str)
+                .filter(|candidate| !candidate.trim().is_empty() && *candidate != id)
+                .map(str::to_string)
+                .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+            if profile_exists(&new_id)? {
+                return Err("Duplicate target profile id already exists".into());
+            }
+            let name = value
+                .get("name")
+                .and_then(Value::as_str)
+                .filter(|name| !name.trim().is_empty())
+                .map(str::to_string)
+                .unwrap_or_else(|| format!("{} copy", profile.name));
+            regenerate_profile_identity(&mut profile, new_id, name);
+            crate::shared::persistence::save_profile(&profile)?;
+            serde_json::to_value(profile).map_err(|error| error.to_string())
+        }
+        "profile.reorder" => {
+            let value = params.ok_or("Missing parameters")?;
+            let ids = value.get("ids").and_then(Value::as_array).ok_or("Missing ids")?;
+            for (index, id) in ids.iter().filter_map(Value::as_str).enumerate() {
+                if let Ok(mut profile) = crate::shared::persistence::load_profile_checked(id) {
+                    profile.order = index as i32;
+                    crate::shared::persistence::save_profile(&profile)?;
+                }
+            }
+            Ok(json!({"success": true}))
+        }
+        "profile.backups" => {
+            let value = params.ok_or("Missing parameters")?;
+            let id = value.get("id").and_then(Value::as_str).ok_or("Missing id")?;
+            Ok(json!({"backups": crate::shared::persistence::list_profile_backups(id)?}))
+        }
+        "profile.backup.create" => {
+            let value = params.ok_or("Missing parameters")?;
+            let id = value.get("id").and_then(Value::as_str).ok_or("Missing id")?;
+            Ok(json!({"name": crate::shared::persistence::create_profile_backup(id)?}))
+        }
+        "profile.backup.restore" => {
+            let value = params.ok_or("Missing parameters")?;
+            let id = value.get("id").and_then(Value::as_str).ok_or("Missing id")?;
+            let name = value.get("name").and_then(Value::as_str).ok_or("Missing name")?;
+            let profile = crate::shared::persistence::restore_profile_backup(id, name)?;
+            update_active_profile_runtime(profile.clone(), state)?;
+            serde_json::to_value(profile).map_err(|error| error.to_string())
+        }
+        "profile.runtime_status" => {
+            let daemon = state.read().map_err(|_| "Failed to lock state")?;
+            Ok(json!({
+                "active": daemon.active_profile_id,
+                "preferred": daemon.preferred_profile_id,
+                "autoSwitch": daemon.auto_switch_profiles,
+                "manualLock": daemon.manual_profile_lock
+            }))
+        }
+
         "apply_onboarding_example" => {
             if let Some(p) = params {
                 let example_type = p.get("type").and_then(|v| v.as_str()).unwrap_or("");
@@ -561,17 +705,25 @@ pub async fn dispatch(
         }
 
         "get_active_window" => {
-            if let Some(ctx_state) = crate::trackers::context_tracker::get_context() {
-                if let Ok(ctx) = ctx_state.read() {
+            if let Some(context) = crate::trackers::context_tracker::get_context() {
+                if let Ok(context) = context.read() {
                     return Ok(json!({
-                        "process": ctx.active_process,
-                        "title": ctx.active_window_title,
+                        "process": context.active_process,
+                        "path": context.active_process_path,
+                        "title": context.active_window_title,
+                        "className": context.active_window_class,
+                        "width": context.window_width,
+                        "height": context.window_height,
+                        "fullscreen": context.fullscreen,
+                        "monitorId": context.monitor_id,
+                        "virtualDesktopId": context.virtual_desktop_id,
                     }));
                 }
             }
             Ok(json!({
-                "process": "",
-                "title": "",
+                "process": "", "path": "", "title": "", "className": "",
+                "width": 0, "height": 0, "fullscreen": false,
+                "monitorId": "", "virtualDesktopId": ""
             }))
         }
 
@@ -591,5 +743,61 @@ pub async fn dispatch(
         }
 
         _ => Err(format!("Method {} is not supported by the router", method)),
+    }
+}
+
+
+#[cfg(test)]
+mod v032_profile_identity_tests {
+    use super::regenerate_profile_identity;
+    use crate::schemas::frontend::{
+        FrontendAction, FrontendCondition, FrontendRule, FrontendTrigger, KeyChord, LayerMeta,
+        RuleFolder,
+    };
+    use crate::shared::types::Profile;
+
+    #[test]
+    fn duplicate_regenerates_nested_ids_and_references() {
+        let mut profile = Profile {
+            id: "profile-old".into(),
+            name: "Original".into(),
+            is_default: true,
+            linked_apps: vec![],
+            bindings: vec![],
+            order: 4,
+            layers: vec![LayerMeta { id: "layer-old".into(), name: "Layer".into() }],
+            folders: vec![
+                RuleFolder { id: "folder-root".into(), name: "Root".into(), parent_id: None, order: 0 },
+                RuleFolder { id: "folder-child".into(), name: "Child".into(), parent_id: Some("folder-root".into()), order: 1 },
+            ],
+            rules: vec![FrontendRule {
+                id: "rule-old".into(),
+                name: Some("Rule".into()),
+                trigger: FrontendTrigger::KeyDown { chord: KeyChord::single(65) },
+                actions: vec![FrontendAction::ToggleLayer { layer_id: "layer-old".into() }],
+                hold_actions: Some(vec![FrontendAction::HoldLayer { layer_id: "layer-old".into() }]),
+                conditions: vec![FrontendCondition::LayerActive { layer_id: "layer-old".into() }],
+                priority: 0,
+                enabled: true,
+                folder_id: Some("folder-child".into()),
+                order: 0,
+            }],
+        };
+
+        regenerate_profile_identity(&mut profile, "profile-new".into(), "Copy".into());
+        assert_eq!(profile.id, "profile-new");
+        assert_eq!(profile.name, "Copy");
+        assert!(!profile.is_default);
+        assert_ne!(profile.layers[0].id, "layer-old");
+        assert_ne!(profile.folders[0].id, "folder-root");
+        assert_ne!(profile.folders[1].id, "folder-child");
+        assert_eq!(profile.folders[1].parent_id.as_deref(), Some(profile.folders[0].id.as_str()));
+        assert_ne!(profile.rules[0].id, "rule-old");
+        assert_eq!(profile.rules[0].folder_id.as_deref(), Some(profile.folders[1].id.as_str()));
+
+        let layer_id = profile.layers[0].id.as_str();
+        assert!(matches!(&profile.rules[0].conditions[0], FrontendCondition::LayerActive { layer_id: id } if id == layer_id));
+        assert!(matches!(&profile.rules[0].actions[0], FrontendAction::ToggleLayer { layer_id: id } if id == layer_id));
+        assert!(matches!(&profile.rules[0].hold_actions.as_ref().unwrap()[0], FrontendAction::HoldLayer { layer_id: id } if id == layer_id));
     }
 }
