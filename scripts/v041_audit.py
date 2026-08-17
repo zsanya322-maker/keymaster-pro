@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 
 
 def read(path: str) -> str:
@@ -17,6 +18,7 @@ checks = {
     ],
     'src-tauri/src/daemon/compiler.rs': [
         'let macro_library:', 'HashMap<&str, &MacroDefinition>', '.get(macro_id.as_str())',
+        'macro_ids_resolve_only_the_referenced_library_object', 'does-not-exist',
     ],
     'src-tauri/src/daemon/profile_runtime.rs': ['macros: profile.macros.clone()'],
     'src-tauri/src/daemon/router.rs': ['prof.macros.push(MacroDefinition', 'macro_id,'],
@@ -57,10 +59,11 @@ for path, needles in absence.items():
         if needle in content:
             raise SystemExit(f'audit forbidden legacy UX token {needle!r} remains in {path}')
 
-# Rust source must not contain duplicated empty macro fields after fix staging.
+# No adjacent duplicate macros fields are allowed at any indentation.
+duplicate = re.compile(r'(?m)^(?P<indent>[ \t]*)macros: vec!\[\],\r?\n(?P=indent)macros: vec!\[\],\s*$')
 for path in list(Path('src-tauri/src').rglob('*.rs')) + list(Path('src-tauri/tests').rglob('*.rs')):
     content = path.read_text(encoding='utf-8')
-    if 'macros: vec![],\n            macros: vec![],' in content or 'macros: vec![],\n        macros: vec![],' in content:
+    if duplicate.search(content):
         raise SystemExit(f'audit duplicate macros field in {path}')
 
 # Boundary actions carry macroId only, never inline steps.
