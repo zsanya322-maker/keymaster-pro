@@ -1,2 +1,2 @@
-v0.2.4
-persistence migration + lifecycle IPC hardening
+v0.4.1
+UX simplification + first-class Macro Library + schema v7
