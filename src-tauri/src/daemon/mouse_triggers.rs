@@ -151,15 +151,7 @@ mod tests {
     fn double_click_respects_time_and_rectangle_boundaries() {
         let base = Instant::now();
         let mut detector = DoubleClickDetector::default();
-        assert!(!detector.register_down(
-            1,
-            100,
-            100,
-            base,
-            Duration::from_millis(500),
-            4,
-            4,
-        ));
+        assert!(!detector.register_down(1, 100, 100, base, Duration::from_millis(500), 4, 4,));
         assert!(detector.register_down(
             1,
             104,
@@ -206,8 +198,24 @@ mod tests {
         let mut detector = DoubleClickDetector::default();
         assert!(!detector.register_down(1, 0, 0, base, Duration::from_secs(1), 5, 5));
         assert!(!detector.register_down(2, 0, 0, base, Duration::from_secs(1), 5, 5));
-        assert!(detector.register_down(1, 0, 0, base + Duration::from_millis(10), Duration::from_secs(1), 5, 5));
-        assert!(detector.register_down(2, 0, 0, base + Duration::from_millis(20), Duration::from_secs(1), 5, 5));
+        assert!(detector.register_down(
+            1,
+            0,
+            0,
+            base + Duration::from_millis(10),
+            Duration::from_secs(1),
+            5,
+            5
+        ));
+        assert!(detector.register_down(
+            2,
+            0,
+            0,
+            base + Duration::from_millis(20),
+            Duration::from_secs(1),
+            5,
+            5
+        ));
     }
 
     #[test]
@@ -215,9 +223,33 @@ mod tests {
         let base = Instant::now();
         let mut gate = MoveGate::default();
         assert!(!gate.should_fire(0, 0, base, 10, Duration::from_millis(100)));
-        assert!(!gate.should_fire(6, 6, base + Duration::from_millis(1), 10, Duration::from_millis(100)));
-        assert!(gate.should_fire(10, 0, base + Duration::from_millis(2), 10, Duration::from_millis(100)));
-        assert!(!gate.should_fire(20, 0, base + Duration::from_millis(50), 10, Duration::from_millis(100)));
-        assert!(gate.should_fire(20, 0, base + Duration::from_millis(102), 10, Duration::from_millis(100)));
+        assert!(!gate.should_fire(
+            6,
+            6,
+            base + Duration::from_millis(1),
+            10,
+            Duration::from_millis(100)
+        ));
+        assert!(gate.should_fire(
+            10,
+            0,
+            base + Duration::from_millis(2),
+            10,
+            Duration::from_millis(100)
+        ));
+        assert!(!gate.should_fire(
+            20,
+            0,
+            base + Duration::from_millis(50),
+            10,
+            Duration::from_millis(100)
+        ));
+        assert!(gate.should_fire(
+            20,
+            0,
+            base + Duration::from_millis(102),
+            10,
+            Duration::from_millis(100)
+        ));
     }
 }

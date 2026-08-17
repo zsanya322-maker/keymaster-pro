@@ -8,26 +8,42 @@ pub fn modifier_vks(mask: u16) -> Vec<u8> {
     if mask & key_modifiers::CTRL != 0 {
         result.push(0xA2);
     } else {
-        if mask & key_modifiers::LCTRL != 0 { result.push(0xA2); }
-        if mask & key_modifiers::RCTRL != 0 { result.push(0xA3); }
+        if mask & key_modifiers::LCTRL != 0 {
+            result.push(0xA2);
+        }
+        if mask & key_modifiers::RCTRL != 0 {
+            result.push(0xA3);
+        }
     }
     if mask & key_modifiers::ALT != 0 {
         result.push(0xA4);
     } else {
-        if mask & key_modifiers::LALT != 0 { result.push(0xA4); }
-        if mask & key_modifiers::RALT != 0 { result.push(0xA5); }
+        if mask & key_modifiers::LALT != 0 {
+            result.push(0xA4);
+        }
+        if mask & key_modifiers::RALT != 0 {
+            result.push(0xA5);
+        }
     }
     if mask & key_modifiers::SHIFT != 0 {
         result.push(0xA0);
     } else {
-        if mask & key_modifiers::LSHIFT != 0 { result.push(0xA0); }
-        if mask & key_modifiers::RSHIFT != 0 { result.push(0xA1); }
+        if mask & key_modifiers::LSHIFT != 0 {
+            result.push(0xA0);
+        }
+        if mask & key_modifiers::RSHIFT != 0 {
+            result.push(0xA1);
+        }
     }
     if mask & key_modifiers::WIN != 0 {
         result.push(0x5B);
     } else {
-        if mask & key_modifiers::LWIN != 0 { result.push(0x5B); }
-        if mask & key_modifiers::RWIN != 0 { result.push(0x5C); }
+        if mask & key_modifiers::LWIN != 0 {
+            result.push(0x5B);
+        }
+        if mask & key_modifiers::RWIN != 0 {
+            result.push(0x5C);
+        }
     }
     result
 }
@@ -136,11 +152,8 @@ mod tests {
 
     #[test]
     fn win_and_alt_source_get_shell_mask_before_release() {
-        let commands = build_atomic_chord_commands(
-            0x41,
-            0,
-            key_modifiers::LWIN | key_modifiers::LALT,
-        );
+        let commands =
+            build_atomic_chord_commands(0x41, 0, key_modifiers::LWIN | key_modifiers::LALT);
         assert_eq!(commands[0], SimulatorCommand::PressKey(SHELL_MASK_KEY));
         assert_eq!(commands[1], SimulatorCommand::ReleaseKey(SHELL_MASK_KEY));
         assert_eq!(commands[2], SimulatorCommand::ReleaseKey(0x5B));
@@ -150,13 +163,18 @@ mod tests {
     #[test]
     fn macro_restores_only_through_runtime_command() {
         let commands = isolate_macro_commands(
-            vec![SimulatorCommand::PressKey(0x41), SimulatorCommand::ReleaseKey(0x41)],
+            vec![
+                SimulatorCommand::PressKey(0x41),
+                SimulatorCommand::ReleaseKey(0x41),
+            ],
             key_modifiers::CTRL,
         );
         assert_eq!(commands[0], SimulatorCommand::ReleaseKey(0xA2));
         assert_eq!(
             commands.last(),
-            Some(&SimulatorCommand::RestorePhysicalModifiers { mask: key_modifiers::CTRL })
+            Some(&SimulatorCommand::RestorePhysicalModifiers {
+                mask: key_modifiers::CTRL
+            })
         );
     }
 }

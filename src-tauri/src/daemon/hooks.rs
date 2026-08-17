@@ -1,3 +1,4 @@
+use std::sync::OnceLock;
 /// Keyboard & Mouse Low-Level Hooks (SetWindowsHookEx)
 ///
 /// Устанавливает WH_KEYBOARD_LL и WH_MOUSE_LL хуки.
@@ -5,9 +6,7 @@
 ///
 /// Anti-recursion: фильтруем LLKHF_INJECTED (наши же SendInput).
 /// Каждый callback делегирует обработку в engine.
-
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::OnceLock;
 
 use tracing::{error, info};
 
@@ -61,9 +60,7 @@ pub fn install_hooks(state: DaemonStateRef) -> Result<HookHandles, String> {
     // Ждём пока хуки установятся (с таймаутом)
     let timeout = std::time::Instant::now();
     loop {
-        if KB_HOOK_INSTALLED.load(Ordering::SeqCst)
-            && MOUSE_HOOK_INSTALLED.load(Ordering::SeqCst)
-        {
+        if KB_HOOK_INSTALLED.load(Ordering::SeqCst) && MOUSE_HOOK_INSTALLED.load(Ordering::SeqCst) {
             break;
         }
         if timeout.elapsed() > std::time::Duration::from_secs(5) {
@@ -94,14 +91,7 @@ fn run_keyboard_hook(_state: DaemonStateRef) {
     info!("KB hook thread: {}", thread_id);
 
     // Устанавливаем WH_KEYBOARD_LL
-    let hook = unsafe {
-        SetWindowsHookExW(
-            WH_KEYBOARD_LL,
-            Some(keyboard_hook_callback),
-            None,
-            0,
-        )
-    };
+    let hook = unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_hook_callback), None, 0) };
 
     match hook {
         Ok(h) => {
@@ -128,14 +118,7 @@ fn run_mouse_hook(_state: DaemonStateRef) {
     let thread_id = unsafe { GetCurrentThreadId() };
     info!("Mouse hook thread: {}", thread_id);
 
-    let hook = unsafe {
-        SetWindowsHookExW(
-            WH_MOUSE_LL,
-            Some(mouse_hook_callback),
-            None,
-            0,
-        )
-    };
+    let hook = unsafe { SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_hook_callback), None, 0) };
 
     match hook {
         Ok(h) => {
@@ -158,9 +141,7 @@ fn run_mouse_hook(_state: DaemonStateRef) {
 /// Простой message loop для hook thread
 fn run_message_loop(name: &str) {
     let mut msg = MSG::default();
-    while KB_HOOK_INSTALLED.load(Ordering::SeqCst)
-        || MOUSE_HOOK_INSTALLED.load(Ordering::SeqCst)
-    {
+    while KB_HOOK_INSTALLED.load(Ordering::SeqCst) || MOUSE_HOOK_INSTALLED.load(Ordering::SeqCst) {
         unsafe {
             let _ = PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE);
         }
@@ -170,11 +151,7 @@ fn run_message_loop(name: &str) {
 }
 
 /// Keyboard Low-Level Hook callback
-extern "system" fn keyboard_hook_callback(
-    code: i32,
-    wparam: WPARAM,
-    lparam: LPARAM,
-) -> LRESULT {
+extern "system" fn keyboard_hook_callback(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     if code < 0 {
         return unsafe { CallNextHookEx(None, code, wparam, lparam) };
     }
@@ -189,11 +166,15 @@ extern "system" fn keyboard_hook_callback(
 
     let vk_code = kb_struct.vkCode as u8;
     let scan_code = kb_struct.scanCode as u16;
-    let is_key_down = wparam.0 == WM_KEYDOWN as usize
-        || wparam.0 == WM_SYSKEYDOWN as usize;
+    let is_key_down = wparam.0 == WM_KEYDOWN as usize || wparam.0 == WM_SYSKEYDOWN as usize;
     let event_modifiers = engine::update_modifier_state(vk_code, is_key_down);
 
-    tracing::debug!("Keyboard hook: vkCode={}, scanCode={}, is_key_down={}", vk_code, scan_code, is_key_down);
+    tracing::debug!(
+        "Keyboard hook: vkCode={}, scanCode={}, is_key_down={}",
+        vk_code,
+        scan_code,
+        is_key_down
+    );
 
     let state_ref = GLOBAL_STATE.get();
 
@@ -222,9 +203,7 @@ extern "system" fn keyboard_hook_callback(
             // Emergency stop is handled before recording/rule dispatch. It is a
             // constant-time atomic/mutex signal into macro-player; no macro work
             // happens inside the LL hook callback. 0 disables the hotkey.
-            if is_key_down
-                && s.macro_emergency_stop_vk != 0
-                && vk_code == s.macro_emergency_stop_vk
+            if is_key_down && s.macro_emergency_stop_vk != 0 && vk_code == s.macro_emergency_stop_vk
             {
                 if let Some(simulator) = &s.simulator {
                     simulator.cancel_all_macros();
@@ -234,11 +213,16 @@ extern "system" fn keyboard_hook_callback(
             }
 
             // Перехват F12 для запуска / остановки записи макроса
-            if vk_code == 0x7B { // F12
+            if vk_code == 0x7B {
+                // F12
                 if is_key_down {
                     if s.is_recording.load(Ordering::Relaxed) {
                         s.is_recording.store(false, Ordering::Relaxed);
-                        crate::gui::events::broadcast_event(crate::gui::events::DaemonEvent::MacroRecordingStopped { macro_id: "".to_string() });
+                        crate::gui::events::broadcast_event(
+                            crate::gui::events::DaemonEvent::MacroRecordingStopped {
+                                macro_id: "".to_string(),
+                            },
+                        );
                         tracing::info!("Запись макроса остановлена по нажатию F12");
                     } else if s.record_ready.load(Ordering::Relaxed) {
                         s.is_recording.store(true, Ordering::Relaxed);
@@ -272,17 +256,14 @@ extern "system" fn keyboard_hook_callback(
                         crate::schemas::frontend::MacroAction::KeyUp { code: vk_code }
                     };
 
-                    let step = crate::schemas::frontend::MacroStep {
-                        action,
-                        delay_ms,
-                    };
+                    let step = crate::schemas::frontend::MacroStep { action, delay_ms };
                     if let Ok(mut steps) = s.recorded_steps.lock() {
                         steps.push(step.clone());
                     }
                     if let Ok(step_json) = serde_json::to_value(&step) {
-                        crate::gui::events::broadcast_event(crate::gui::events::DaemonEvent::MacroRecordingStep {
-                            step: step_json,
-                        });
+                        crate::gui::events::broadcast_event(
+                            crate::gui::events::DaemonEvent::MacroRecordingStep { step: step_json },
+                        );
                     }
                 }
             }
@@ -311,21 +292,13 @@ extern "system" fn keyboard_hook_callback(
     }
 
     match action {
-        engine::EventAction::PassThrough => {
-            unsafe { CallNextHookEx(None, code, wparam, lparam) }
-        }
-        engine::EventAction::Block => {
-            LRESULT(1)
-        }
+        engine::EventAction::PassThrough => unsafe { CallNextHookEx(None, code, wparam, lparam) },
+        engine::EventAction::Block => LRESULT(1),
     }
 }
 
 /// Mouse Low-Level Hook callback
-extern "system" fn mouse_hook_callback(
-    code: i32,
-    wparam: WPARAM,
-    lparam: LPARAM,
-) -> LRESULT {
+extern "system" fn mouse_hook_callback(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     if code < 0 {
         return unsafe { CallNextHookEx(None, code, wparam, lparam) };
     }
@@ -369,7 +342,15 @@ extern "system" fn mouse_hook_callback(
     // Логируем только значимые события мыши (клики/скролл),
     // но НЕ каждый WM_MOUSEMOVE — иначе лог раздувается до сотен МБ.
     if button != 255 || is_mouse_down || delta != 0 {
-        tracing::debug!("Хук мыши: msg_type={}, button={}, x={}, y={}, delta={}, is_mouse_down={}", msg_type, button, x, y, delta, is_mouse_down);
+        tracing::debug!(
+            "Хук мыши: msg_type={}, button={}, x={}, y={}, delta={}, is_mouse_down={}",
+            msg_type,
+            button,
+            x,
+            y,
+            delta,
+            is_mouse_down
+        );
     }
 
     let state_ref = GLOBAL_STATE.get();
@@ -451,15 +432,28 @@ extern "system" fn mouse_hook_callback(
                     });
                 } else if msg_type == WM_MOUSEMOVE as u32 {
                     let record_mouse_moves = s.record_mouse_moves.load(Ordering::Relaxed);
-                    let record_mouse_drag_drop_only = s.record_mouse_drag_drop_only.load(Ordering::Relaxed);
+                    let record_mouse_drag_drop_only =
+                        s.record_mouse_drag_drop_only.load(Ordering::Relaxed);
 
                     let mut should_record = false;
 
                     if record_mouse_moves {
                         let is_drag = if record_mouse_drag_drop_only {
-                            let is_left_down = (unsafe { windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(0x01) } as u16 & 0x8000) != 0;
-                            let is_right_down = (unsafe { windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(0x02) } as u16 & 0x8000) != 0;
-                            let is_middle_down = (unsafe { windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(0x04) } as u16 & 0x8000) != 0;
+                            let is_left_down = (unsafe {
+                                windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(0x01)
+                            } as u16
+                                & 0x8000)
+                                != 0;
+                            let is_right_down = (unsafe {
+                                windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(0x02)
+                            } as u16
+                                & 0x8000)
+                                != 0;
+                            let is_middle_down = (unsafe {
+                                windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(0x04)
+                            } as u16
+                                & 0x8000)
+                                != 0;
                             is_left_down || is_right_down || is_middle_down
                         } else {
                             true
@@ -472,10 +466,14 @@ extern "system" fn mouse_hook_callback(
                                         // Порог 15 пикселей для сглаживания мелких движений
                                         if (x - lx).abs() > 15 || (y - ly).abs() > 15 {
                                             // Троттлинг 100 мс для предотвращения генерации сотен шагов
-                                            if let Ok(last_time_guard) = LAST_RECORDED_MOUSE_TIME.lock() {
+                                            if let Ok(last_time_guard) =
+                                                LAST_RECORDED_MOUSE_TIME.lock()
+                                            {
                                                 match *last_time_guard {
                                                     Some(last_t) => {
-                                                        if now.duration_since(last_t).as_millis() >= 100 {
+                                                        if now.duration_since(last_t).as_millis()
+                                                            >= 100
+                                                        {
                                                             should_record = true;
                                                         }
                                                     }
@@ -502,7 +500,8 @@ extern "system" fn mouse_hook_callback(
                         if let Ok(mut last_mouse_time) = LAST_RECORDED_MOUSE_TIME.lock() {
                             *last_mouse_time = Some(now);
                         }
-                        action_to_record = Some(crate::schemas::frontend::MacroAction::MouseToAbsolute { x, y });
+                        action_to_record =
+                            Some(crate::schemas::frontend::MacroAction::MouseToAbsolute { x, y });
                     }
                 }
 
@@ -518,7 +517,7 @@ extern "system" fn mouse_hook_callback(
                     if let Ok(mut last_time_lock) = s.last_record_time.lock() {
                         *last_time_lock = Some(now);
                     }
-                    
+
                     if let Ok(mut steps) = s.recorded_steps.lock() {
                         for step in &steps_to_record {
                             steps.push(step.clone());
@@ -526,9 +525,11 @@ extern "system" fn mouse_hook_callback(
                     }
                     for step in steps_to_record {
                         if let Ok(step_json) = serde_json::to_value(&step) {
-                            crate::gui::events::broadcast_event(crate::gui::events::DaemonEvent::MacroRecordingStep {
-                                step: step_json,
-                            });
+                            crate::gui::events::broadcast_event(
+                                crate::gui::events::DaemonEvent::MacroRecordingStep {
+                                    step: step_json,
+                                },
+                            );
                         }
                     }
                 }
@@ -557,11 +558,7 @@ extern "system" fn mouse_hook_callback(
     }
 
     match action {
-        engine::EventAction::PassThrough => {
-            unsafe { CallNextHookEx(None, code, wparam, lparam) }
-        }
-        engine::EventAction::Block => {
-            LRESULT(1)
-        }
+        engine::EventAction::PassThrough => unsafe { CallNextHookEx(None, code, wparam, lparam) },
+        engine::EventAction::Block => LRESULT(1),
     }
 }

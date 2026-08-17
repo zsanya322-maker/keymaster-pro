@@ -1,8 +1,8 @@
+pub mod config;
+pub mod constants;
+pub mod persistence;
 /// Общий код между GUI и Daemon процессами
 pub mod types;
-pub mod config;
-pub mod persistence;
-pub mod constants;
 
 pub fn calculate_hash<T: std::hash::Hash>(t: &T) -> u64 {
     use std::collections::hash_map::DefaultHasher;

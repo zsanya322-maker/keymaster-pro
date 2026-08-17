@@ -1,8 +1,8 @@
 /// System Tray setup
 use tauri::{
+    App, Emitter, Manager,
     menu::{MenuBuilder, MenuItemBuilder},
     tray::TrayIconBuilder,
-    App, Emitter, Manager,
 };
 
 pub const MENU_SHOW: &str = "show";
@@ -29,7 +29,10 @@ fn switch_profile(direction: isize) {
         if profiles.is_empty() {
             return;
         }
-        let active = value.get("active").and_then(|value| value.as_str()).unwrap_or("");
+        let active = value
+            .get("active")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
         let current = profiles
             .iter()
             .position(|profile| profile.get("id").and_then(|value| value.as_str()) == Some(active))
@@ -54,7 +57,7 @@ pub fn setup_tray(app: &App) -> Result<(), Box<dyn std::error::Error>> {
         #[cfg(target_os = "windows")]
         {
             use windows::Win32::Security::{
-                GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY,
+                GetTokenInformation, TOKEN_ELEVATION, TOKEN_QUERY, TokenElevation,
             };
             use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
             unsafe {

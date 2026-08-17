@@ -1,3 +1,4 @@
+use std::sync::OnceLock;
 /// Daemon main loop
 ///
 /// Точка входа daemon-процесса. Запускает IPC сервер, hook manager,
@@ -7,9 +8,7 @@
 /// - Main Thread: Windows Message Loop (для SetWindowsHookEx)
 /// - Tokio Runtime: IPC Server, Persistence, Layer Watcher
 /// - State: Arc<RwLock<DaemonState>>
-
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-use std::sync::OnceLock;
 
 use tracing::{error, info, warn};
 
@@ -126,7 +125,7 @@ fn resolve_startup_profile(
 
 #[cfg(target_os = "windows")]
 fn prepare_main_thread_message_queue() {
-    use windows::Win32::UI::WindowsAndMessaging::{PeekMessageW, MSG, PM_NOREMOVE};
+    use windows::Win32::UI::WindowsAndMessaging::{MSG, PM_NOREMOVE, PeekMessageW};
 
     // PostThreadMessageW работает только после создания message queue у потока.
     // Создаём её ДО запуска фоновых задач, чтобы ранний IPC/watchdog shutdown не
@@ -174,9 +173,8 @@ pub fn run_daemon(parent_pid: Option<u32>) -> Result<(), String> {
         .build()
         .map_err(|e| format!("Failed to create tokio runtime: {}", e))?;
 
-    let first_ipc_server = tokio_rt.block_on(async {
-        crate::daemon::ipc::reserve_first_pipe_instance()
-    })?;
+    let first_ipc_server =
+        tokio_rt.block_on(async { crate::daemon::ipc::reserve_first_pipe_instance() })?;
 
     // load_config сам безопасно восстанавливает повреждённый legacy config, но
     // future schema / I/O failure считаются fatal: старый daemon не имеет права
@@ -343,10 +341,16 @@ pub fn run_daemon(parent_pid: Option<u32>) -> Result<(), String> {
                     .into_iter()
                     .filter_map(|id| crate::shared::persistence::load_profile_checked(&id).ok())
                     .collect::<Vec<_>>();
-                profiles.sort_by(|a, b| a.order.cmp(&b.order).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase())));
+                profiles.sort_by(|a, b| {
+                    a.order
+                        .cmp(&b.order)
+                        .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+                });
                 profiles
                     .into_iter()
-                    .find(|profile| crate::daemon::profile_runtime::profile_matches(profile, &context))
+                    .find(|profile| {
+                        crate::daemon::profile_runtime::profile_matches(profile, &context)
+                    })
                     .or_else(|| crate::shared::persistence::load_profile_checked(&preferred).ok())
             } else {
                 crate::shared::persistence::load_profile_checked(&preferred).ok()
@@ -354,14 +358,16 @@ pub fn run_daemon(parent_pid: Option<u32>) -> Result<(), String> {
 
             if let Some(profile) = target {
                 if profile.id != current {
-                    if let Err(error) = crate::daemon::profile_runtime::activate_runtime(&profile_switch_state, profile) {
+                    if let Err(error) = crate::daemon::profile_runtime::activate_runtime(
+                        &profile_switch_state,
+                        profile,
+                    ) {
                         warn!("Profile auto-switch failed: {}", error);
                     }
                 }
             }
         }
     });
-
 
     let taphold_state = state.clone();
     tokio_rt.spawn(async move {
@@ -528,9 +534,9 @@ fn is_process_alive(pid: u32) -> bool {
 pub fn is_daemon_running() -> bool {
     #[cfg(target_os = "windows")]
     {
-        use windows::core::HSTRING;
-        use windows::Win32::Foundation::{GetLastError, ERROR_PIPE_BUSY, ERROR_SEM_TIMEOUT};
+        use windows::Win32::Foundation::{ERROR_PIPE_BUSY, ERROR_SEM_TIMEOUT, GetLastError};
         use windows::Win32::System::Pipes::WaitNamedPipeW;
+        use windows::core::HSTRING;
 
         let pipe_name = HSTRING::from(constants::IPC_PIPE_NAME);
         unsafe {

@@ -95,10 +95,12 @@ async fn profile_save_rejects_nonexistent_profile() {
     .await;
 
     assert!(result.is_err());
-    assert!(!persistence::list_profiles()
-        .unwrap()
-        .iter()
-        .any(|existing| existing == &id));
+    assert!(
+        !persistence::list_profiles()
+            .unwrap()
+            .iter()
+            .any(|existing| existing == &id)
+    );
 }
 
 #[tokio::test]
@@ -152,10 +154,12 @@ async fn profile_create_rejects_second_default_profile() {
     .await;
 
     assert!(result.is_err());
-    assert!(!persistence::list_profiles()
-        .unwrap()
-        .iter()
-        .any(|id| id == &new_id));
+    assert!(
+        !persistence::list_profiles()
+            .unwrap()
+            .iter()
+            .any(|id| id == &new_id)
+    );
     let _ = persistence::delete_profile(&existing_id);
 }
 

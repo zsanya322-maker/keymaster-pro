@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use crate::shared::types::MatchMode;
+use serde::{Deserialize, Serialize};
 
 pub mod key_modifiers {
     pub const CTRL: u16 = 1 << 0;
@@ -92,6 +92,41 @@ pub enum MouseWheelDirection {
     Right,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum TextExpansionMode {
+    #[default]
+    Instant,
+    Delimiter,
+}
+
+fn default_text_delimiters() -> String {
+    " \t\n.,;:!?".to_string()
+}
+
+fn default_case_sensitive() -> bool {
+    // v0.3.2 used String::ends_with, so legacy rules were case-sensitive.
+    true
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum TextDateFormat {
+    #[default]
+    Dmy,
+    Ymd,
+    Mdy,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum TextTimeFormat {
+    #[default]
+    Hm24,
+    Hms24,
+    Hm12,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum FrontendTrigger {
@@ -103,18 +138,37 @@ pub enum FrontendTrigger {
         #[serde(flatten)]
         chord: KeyChord,
     },
-    MouseDown { code: u8 },
-    MouseUp { code: u8 },
-    MouseWheel { direction: MouseWheelDirection },
-    MouseDoubleClick { code: u8 },
+    MouseDown {
+        code: u8,
+    },
+    MouseUp {
+        code: u8,
+    },
+    MouseWheel {
+        direction: MouseWheelDirection,
+    },
+    MouseDoubleClick {
+        code: u8,
+    },
     MouseMove {
         #[serde(default = "default_mouse_move_distance")]
         min_distance: u16,
         #[serde(default = "default_mouse_move_cooldown")]
         cooldown_ms: u32,
     },
-    TapHoldKeyDown { code: u8, timeout_ms: u32 },
-    TypedText { sequence: String },
+    TapHoldKeyDown {
+        code: u8,
+        timeout_ms: u32,
+    },
+    TypedText {
+        sequence: String,
+        #[serde(default)]
+        mode: TextExpansionMode,
+        #[serde(default = "default_text_delimiters")]
+        delimiters: String,
+        #[serde(rename = "caseSensitive", default = "default_case_sensitive")]
+        case_sensitive: bool,
+    },
 }
 
 fn default_mouse_move_distance() -> u16 {
@@ -150,15 +204,39 @@ pub enum FrontendAction {
         #[serde(flatten)]
         chord: KeyChord,
     },
-    RemapMouse { code: u8 },
-    TypeText { text: String },
-    RunMacro { steps: Vec<MacroStep>, #[serde(default)] playback: MacroPlayback },
-    ToggleLayer { layer_id: String },
-    HoldLayer { layer_id: String },
-    SystemVolume { action: String },
-    MediaKey { key: String },
-    WindowAction { action: String },
-    LaunchApp { path: String },
+    RemapMouse {
+        code: u8,
+    },
+    TypeText {
+        text: String,
+        #[serde(rename = "dateFormat", default)]
+        date_format: TextDateFormat,
+        #[serde(rename = "timeFormat", default)]
+        time_format: TextTimeFormat,
+    },
+    RunMacro {
+        steps: Vec<MacroStep>,
+        #[serde(default)]
+        playback: MacroPlayback,
+    },
+    ToggleLayer {
+        layer_id: String,
+    },
+    HoldLayer {
+        layer_id: String,
+    },
+    SystemVolume {
+        action: String,
+    },
+    MediaKey {
+        key: String,
+    },
+    WindowAction {
+        action: String,
+    },
+    LaunchApp {
+        path: String,
+    },
     /// Поднять окно указанного процесса/заголовка поверх всех окон.
     /// Поиск по ИЛИ: если заполнены оба поля — поднимает первое окно,
     /// где совпал процесс ИЛИ заголовок (содержит). Достаточно одного.
@@ -195,18 +273,40 @@ pub struct MacroStep {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum FrontendCondition {
-    LayerActive { layer_id: String },
-    VirtualDesktop { id: u32 },
+    LayerActive {
+        layer_id: String,
+    },
+    VirtualDesktop {
+        id: u32,
+    },
     /// Объединённое условие «Активное окно»: срабатывает, если совпал процесс ИЛИ заголовок.
     /// process и title оба опциональны, но хотя бы один должен быть заполнен.
     /// Срабатывает по ИЛИ: достаточно совпадения любого из указанных полей.
     ContextMatch {
-        #[serde(default)] process: Option<String>, #[serde(default)] path: Option<String>,
-        #[serde(default)] title: Option<String>, #[serde(default)] class_name: Option<String>,
-        #[serde(default)] virtual_desktop_id: Option<String>, #[serde(default)] monitor_id: Option<String>,
-        #[serde(default)] min_width: Option<i32>, #[serde(default)] max_width: Option<i32>,
-        #[serde(default)] min_height: Option<i32>, #[serde(default)] max_height: Option<i32>,
-        #[serde(default)] fullscreen: Option<bool>, #[serde(default)] mode: MatchMode,
+        #[serde(default)]
+        process: Option<String>,
+        #[serde(default)]
+        path: Option<String>,
+        #[serde(default)]
+        title: Option<String>,
+        #[serde(default)]
+        class_name: Option<String>,
+        #[serde(default)]
+        virtual_desktop_id: Option<String>,
+        #[serde(default)]
+        monitor_id: Option<String>,
+        #[serde(default)]
+        min_width: Option<i32>,
+        #[serde(default)]
+        max_width: Option<i32>,
+        #[serde(default)]
+        min_height: Option<i32>,
+        #[serde(default)]
+        max_height: Option<i32>,
+        #[serde(default)]
+        fullscreen: Option<bool>,
+        #[serde(default)]
+        mode: MatchMode,
     },
     WindowMatch {
         #[serde(default)]

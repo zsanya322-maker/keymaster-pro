@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 
 use crate::schemas::engine::{
-    CompiledMouseMoveRule, CompiledRule, CompiledTapHoldRule, EngineAction, EngineCondition,
-    EngineSchema, MacroPlaybackConfig, SimulatorCommand,
+    CompiledMouseMoveRule, CompiledRule, CompiledTapHoldRule, CompiledTextExpansionRule,
+    EngineAction, EngineCondition, EngineSchema, MacroPlaybackConfig, SimulatorCommand,
 };
 use crate::schemas::frontend::{
-    FrontendAction, FrontendCondition, FrontendConfig, FrontendRule, FrontendTrigger,
-    MacroAction, MacroPlayback, MacroStep, MouseWheelDirection,
+    FrontendAction, FrontendCondition, FrontendConfig, FrontendRule, FrontendTrigger, MacroAction,
+    MacroPlayback, MacroStep, MouseWheelDirection,
 };
 use crate::shared::calculate_hash;
 
@@ -26,7 +26,7 @@ pub fn compile_schema(frontend: &FrontendConfig) -> EngineSchema {
     let mut mouse_double_click_map: HashMap<u8, Vec<CompiledRule>> = HashMap::new();
     let mut mouse_move_rules: Vec<CompiledMouseMoveRule> = Vec::new();
     let mut tap_hold_map: HashMap<u8, Vec<CompiledTapHoldRule>> = HashMap::new();
-    let mut text_expansion_map: HashMap<String, Vec<CompiledRule>> = HashMap::new();
+    let mut text_expansion_rules: Vec<CompiledTextExpansionRule> = Vec::new();
 
     for rule in frontend.rules.iter().filter(|rule| rule.enabled) {
         match &rule.trigger {
@@ -70,11 +70,7 @@ pub fn compile_schema(frontend: &FrontendConfig) -> EngineSchema {
                 min_distance,
                 cooldown_ms,
             } => {
-                mouse_move_rules.push(compile_mouse_move_rule(
-                    rule,
-                    *min_distance,
-                    *cooldown_ms,
-                ));
+                mouse_move_rules.push(compile_mouse_move_rule(rule, *min_distance, *cooldown_ms));
             }
             FrontendTrigger::TapHoldKeyDown { code, timeout_ms } => {
                 tap_hold_map
@@ -82,11 +78,21 @@ pub fn compile_schema(frontend: &FrontendConfig) -> EngineSchema {
                     .or_default()
                     .push(compile_tap_hold_rule(rule, *timeout_ms));
             }
-            FrontendTrigger::TypedText { sequence } => {
-                text_expansion_map
-                    .entry(sequence.clone())
-                    .or_default()
-                    .push(compile_rule(rule, 0, true));
+            FrontendTrigger::TypedText {
+                sequence,
+                mode,
+                delimiters,
+                case_sensitive,
+            } => {
+                if !sequence.is_empty() {
+                    text_expansion_rules.push(CompiledTextExpansionRule {
+                        sequence: sequence.clone(),
+                        mode: *mode,
+                        delimiters: delimiters.clone(),
+                        case_sensitive: *case_sensitive,
+                        rule: compile_rule(rule, 0, true),
+                    });
+                }
             }
         }
     }
@@ -107,9 +113,13 @@ pub fn compile_schema(frontend: &FrontendConfig) -> EngineSchema {
     for rules in tap_hold_map.values_mut() {
         rules.sort_by(|a, b| b.priority.cmp(&a.priority));
     }
-    for rules in text_expansion_map.values_mut() {
-        rules.sort_by(|a, b| b.priority.cmp(&a.priority));
-    }
+    text_expansion_rules.sort_by(|a, b| {
+        b.rule
+            .priority
+            .cmp(&a.rule.priority)
+            .then_with(|| b.sequence.chars().count().cmp(&a.sequence.chars().count()))
+            .then_with(|| a.sequence.cmp(&b.sequence))
+    });
 
     EngineSchema {
         keyboard_map,
@@ -118,7 +128,7 @@ pub fn compile_schema(frontend: &FrontendConfig) -> EngineSchema {
         mouse_double_click_map,
         mouse_move_rules,
         tap_hold_map,
-        text_expansion_map,
+        text_expansion_rules,
     }
 }
 
@@ -135,14 +145,44 @@ fn compile_condition(condition: &FrontendCondition) -> EngineCondition {
                 title_contains: Some("\0".to_string()),
             }
         }
-        FrontendCondition::ContextMatch { process, path, title, class_name, virtual_desktop_id, monitor_id, min_width, max_width, min_height, max_height, fullscreen, mode } => EngineCondition::ContextMatch {
-            process: process.as_ref().filter(|v| !v.trim().is_empty()).map(|v| v.trim().to_lowercase()),
-            path: path.as_ref().filter(|v| !v.trim().is_empty()).map(|v| v.trim().to_lowercase()),
-            title: title.as_ref().filter(|v| !v.trim().is_empty()).map(|v| v.trim().to_lowercase()),
-            class_name: class_name.as_ref().filter(|v| !v.trim().is_empty()).map(|v| v.trim().to_lowercase()),
-            virtual_desktop_id: virtual_desktop_id.clone(), monitor_id: monitor_id.clone(),
-            min_width: *min_width, max_width: *max_width, min_height: *min_height, max_height: *max_height,
-            fullscreen: *fullscreen, mode: *mode,
+        FrontendCondition::ContextMatch {
+            process,
+            path,
+            title,
+            class_name,
+            virtual_desktop_id,
+            monitor_id,
+            min_width,
+            max_width,
+            min_height,
+            max_height,
+            fullscreen,
+            mode,
+        } => EngineCondition::ContextMatch {
+            process: process
+                .as_ref()
+                .filter(|v| !v.trim().is_empty())
+                .map(|v| v.trim().to_lowercase()),
+            path: path
+                .as_ref()
+                .filter(|v| !v.trim().is_empty())
+                .map(|v| v.trim().to_lowercase()),
+            title: title
+                .as_ref()
+                .filter(|v| !v.trim().is_empty())
+                .map(|v| v.trim().to_lowercase()),
+            class_name: class_name
+                .as_ref()
+                .filter(|v| !v.trim().is_empty())
+                .map(|v| v.trim().to_lowercase()),
+            virtual_desktop_id: virtual_desktop_id.clone(),
+            monitor_id: monitor_id.clone(),
+            min_width: *min_width,
+            max_width: *max_width,
+            min_height: *min_height,
+            max_height: *max_height,
+            fullscreen: *fullscreen,
+            mode: *mode,
         },
         FrontendCondition::WindowMatch { process, title } => EngineCondition::WindowMatch {
             process_hash: process
@@ -214,7 +254,9 @@ fn compile_tap_hold_rule(rule: &FrontendRule, timeout_ms: u32) -> CompiledTapHol
             actions
                 .iter()
                 .enumerate()
-                .map(|(index, action)| compile_action(action, macro_action_key(&rule.id, true, index)))
+                .map(|(index, action)| {
+                    compile_action(action, macro_action_key(&rule.id, true, index))
+                })
                 .collect()
         })
         .unwrap_or_default();
@@ -229,7 +271,12 @@ fn compile_tap_hold_rule(rule: &FrontendRule, timeout_ms: u32) -> CompiledTapHol
 }
 
 fn macro_action_key(rule_id: &str, hold: bool, index: usize) -> u64 {
-    calculate_hash(&format!("{}:{}:{}", rule_id, if hold { "hold" } else { "tap" }, index))
+    calculate_hash(&format!(
+        "{}:{}:{}",
+        rule_id,
+        if hold { "hold" } else { "tap" },
+        index
+    ))
 }
 
 pub fn compile_macro_playback(playback: &MacroPlayback) -> MacroPlaybackConfig {
@@ -249,10 +296,18 @@ pub fn compile_macro_commands(steps: &[MacroStep]) -> Vec<SimulatorCommand> {
             MacroAction::KeyUp { code } => commands.push(SimulatorCommand::ReleaseKey(code)),
             MacroAction::MouseDown { code } => commands.push(SimulatorCommand::MousePress(code)),
             MacroAction::MouseUp { code } => commands.push(SimulatorCommand::MouseRelease(code)),
-            MacroAction::MouseMove { dx, dy } => commands.push(SimulatorCommand::MouseMove { dx, dy }),
-            MacroAction::MouseScroll { delta } => commands.push(SimulatorCommand::MouseScroll { delta }),
-            MacroAction::MouseHScroll { delta } => commands.push(SimulatorCommand::MouseHScroll { delta }),
-            MacroAction::MouseToAbsolute { x, y } => commands.push(SimulatorCommand::MouseAbsolute { x, y }),
+            MacroAction::MouseMove { dx, dy } => {
+                commands.push(SimulatorCommand::MouseMove { dx, dy })
+            }
+            MacroAction::MouseScroll { delta } => {
+                commands.push(SimulatorCommand::MouseScroll { delta })
+            }
+            MacroAction::MouseHScroll { delta } => {
+                commands.push(SimulatorCommand::MouseHScroll { delta })
+            }
+            MacroAction::MouseToAbsolute { x, y } => {
+                commands.push(SimulatorCommand::MouseAbsolute { x, y })
+            }
         }
         if step.delay_ms > 0 {
             commands.push(SimulatorCommand::Delay(step.delay_ms));
@@ -268,7 +323,15 @@ fn compile_action(action: &FrontendAction, macro_key: u64) -> EngineAction {
             modifiers: chord.modifiers,
         },
         FrontendAction::RemapMouse { code } => EngineAction::RemapMouse { code: *code },
-        FrontendAction::TypeText { text } => EngineAction::TypeText { text: text.clone() },
+        FrontendAction::TypeText {
+            text,
+            date_format,
+            time_format,
+        } => EngineAction::TypeText {
+            text: text.clone(),
+            date_format: *date_format,
+            time_format: *time_format,
+        },
         FrontendAction::RunMacro { steps, playback } => EngineAction::MacroCommands {
             commands: compile_macro_commands(steps),
             playback: compile_macro_playback(playback),
@@ -280,13 +343,13 @@ fn compile_action(action: &FrontendAction, macro_key: u64) -> EngineAction {
         FrontendAction::HoldLayer { layer_id } => EngineAction::HoldLayerPush {
             layer_id_hash: calculate_hash(layer_id),
         },
-        FrontendAction::SystemVolume { action } => {
-            EngineAction::SystemVolume { action: action.clone() }
-        }
+        FrontendAction::SystemVolume { action } => EngineAction::SystemVolume {
+            action: action.clone(),
+        },
         FrontendAction::MediaKey { key } => EngineAction::MediaKey { key: key.clone() },
-        FrontendAction::WindowAction { action } => {
-            EngineAction::WindowAction { action: action.clone() }
-        }
+        FrontendAction::WindowAction { action } => EngineAction::WindowAction {
+            action: action.clone(),
+        },
         FrontendAction::LaunchApp { path } => EngineAction::LaunchApp { path: path.clone() },
         FrontendAction::FocusProcess { process, title } => {
             let clean_process = process
@@ -311,11 +374,16 @@ fn compile_action(action: &FrontendAction, macro_key: u64) -> EngineAction {
 mod tests {
     use super::*;
     use crate::schemas::frontend::{
-        key_modifiers, FrontendAction, FrontendConfig, FrontendRule, FrontendTrigger,
-        KeyChord, MouseWheelDirection,
+        FrontendAction, FrontendConfig, FrontendRule, FrontendTrigger, KeyChord,
+        MouseWheelDirection, key_modifiers,
     };
 
-    fn rule(id: &str, priority: i32, trigger: FrontendTrigger, action: FrontendAction) -> FrontendRule {
+    fn rule(
+        id: &str,
+        priority: i32,
+        trigger: FrontendTrigger,
+        action: FrontendAction,
+    ) -> FrontendRule {
         FrontendRule {
             id: id.into(),
             name: None,
@@ -386,9 +454,14 @@ mod tests {
                 1,
                 FrontendTrigger::TypedText {
                     sequence: "test".into(),
+                    mode: crate::schemas::frontend::TextExpansionMode::Instant,
+                    delimiters: " \t\n.,;:!?".into(),
+                    case_sensitive: true,
                 },
                 FrontendAction::TypeText {
                     text: "result".into(),
+                    date_format: crate::schemas::frontend::TextDateFormat::Dmy,
+                    time_format: crate::schemas::frontend::TextTimeFormat::Hm24,
                 },
             ),
             rule(
@@ -397,13 +470,21 @@ mod tests {
                 FrontendTrigger::MouseWheel {
                     direction: MouseWheelDirection::Up,
                 },
-                FrontendAction::TypeText { text: "up".into() },
+                FrontendAction::TypeText {
+                    text: "up".into(),
+                    date_format: crate::schemas::frontend::TextDateFormat::Dmy,
+                    time_format: crate::schemas::frontend::TextTimeFormat::Hm24,
+                },
             ),
             rule(
                 "7",
                 25,
                 FrontendTrigger::MouseDoubleClick { code: 4 },
-                FrontendAction::TypeText { text: "x1x2".into() },
+                FrontendAction::TypeText {
+                    text: "x1x2".into(),
+                    date_format: crate::schemas::frontend::TextDateFormat::Dmy,
+                    time_format: crate::schemas::frontend::TextTimeFormat::Hm24,
+                },
             ),
             rule(
                 "8",
@@ -412,7 +493,11 @@ mod tests {
                     min_distance: 32,
                     cooldown_ms: 150,
                 },
-                FrontendAction::TypeText { text: "move".into() },
+                FrontendAction::TypeText {
+                    text: "move".into(),
+                    date_format: crate::schemas::frontend::TextDateFormat::Dmy,
+                    time_format: crate::schemas::frontend::TextTimeFormat::Hm24,
+                },
             ),
         ];
 
@@ -429,7 +514,7 @@ mod tests {
         assert_eq!(schema.mouse_double_click_map.len(), 1);
         assert_eq!(schema.mouse_move_rules.len(), 1);
         assert_eq!(schema.tap_hold_map.len(), 1);
-        assert_eq!(schema.text_expansion_map.len(), 1);
+        assert_eq!(schema.text_expansion_rules.len(), 1);
 
         let kb_rules = schema.keyboard_map.get(&0x41).unwrap();
         assert_eq!(kb_rules.len(), 2);
@@ -442,7 +527,10 @@ mod tests {
             key_modifiers::CTRL | key_modifiers::SHIFT
         );
         assert_eq!(schema.mouse_wheel_map.get(&1).unwrap()[0].priority, 30);
-        assert_eq!(schema.mouse_double_click_map.get(&4).unwrap()[0].priority, 25);
+        assert_eq!(
+            schema.mouse_double_click_map.get(&4).unwrap()[0].priority,
+            25
+        );
         assert_eq!(schema.mouse_move_rules[0].min_distance, 32);
         assert_eq!(schema.mouse_move_rules[0].cooldown_ms, 150);
     }

@@ -2,7 +2,6 @@
 ///
 /// Клиент для GUI-процесса. Подключается к Named Pipe daemon'а,
 /// отправляет JSON-RPC 2.0 запросы и получает ответы.
-
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -22,7 +21,10 @@ static NEXT_REQUEST_ID: AtomicU64 = AtomicU64::new(1);
 /// Каждый вызов использует отдельное соединение. Это дороже постоянного socket,
 /// зато исключает смешивание ответов между параллельными UI-командами и делает
 /// reconnect после daemon restart естественным.
-pub async fn call(method: &str, params: Option<serde_json::Value>) -> Result<serde_json::Value, String> {
+pub async fn call(
+    method: &str,
+    params: Option<serde_json::Value>,
+) -> Result<serde_json::Value, String> {
     let pipe_path = constants::IPC_PIPE_NAME;
     debug!("IPC Client → {} {:?}", method, params);
 
@@ -83,12 +85,24 @@ pub async fn call(method: &str, params: Option<serde_json::Value>) -> Result<ser
         Ok::<(), String>(())
     })
     .await
-    .map_err(|_| format!("IPC timeout: не удалось отправить '{}' за {} сек.", method, IPC_IO_TIMEOUT.as_secs()))??;
+    .map_err(|_| {
+        format!(
+            "IPC timeout: не удалось отправить '{}' за {} сек.",
+            method,
+            IPC_IO_TIMEOUT.as_secs()
+        )
+    })??;
 
     let mut lines = BufReader::new(reader).lines();
     let response_line = tokio::time::timeout(IPC_IO_TIMEOUT, lines.next_line())
         .await
-        .map_err(|_| format!("IPC timeout: daemon не ответил на '{}' за {} сек.", method, IPC_IO_TIMEOUT.as_secs()))?
+        .map_err(|_| {
+            format!(
+                "IPC timeout: daemon не ответил на '{}' за {} сек.",
+                method,
+                IPC_IO_TIMEOUT.as_secs()
+            )
+        })?
         .map_err(|e| format!("Ошибка чтения ответа: {}", e))?
         .ok_or("Пустой ответ от daemon")?;
 
@@ -114,5 +128,7 @@ pub async fn call(method: &str, params: Option<serde_json::Value>) -> Result<ser
         return Err(format!("IPC error [{}]: {}", err.code, err.message));
     }
 
-    response.result.ok_or_else(|| "IPC: пустой result".to_string())
+    response
+        .result
+        .ok_or_else(|| "IPC: пустой result".to_string())
 }

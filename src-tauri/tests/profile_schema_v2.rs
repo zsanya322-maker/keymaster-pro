@@ -1,5 +1,7 @@
 use keymaster_pro_lib::schemas::frontend::{FrontendAction, FrontendTrigger};
-use keymaster_pro_lib::shared::persistence::{export_profile_value, import_profile_value, PROFILE_SCHEMA_VERSION};
+use keymaster_pro_lib::shared::persistence::{
+    PROFILE_SCHEMA_VERSION, export_profile_value, import_profile_value,
+};
 use serde_json::json;
 
 #[test]
@@ -49,7 +51,9 @@ fn v1_single_key_profile_migrates_without_behavior_change() {
 
     let exported = export_profile_value(&profile).expect("migrated profile should export");
     assert_eq!(
-        exported.get("schemaVersion").and_then(|value| value.as_u64()),
+        exported
+            .get("schemaVersion")
+            .and_then(|value| value.as_u64()),
         Some(PROFILE_SCHEMA_VERSION as u64)
     );
     assert_eq!(exported["rules"][0]["trigger"]["modifiers"], 0);

@@ -304,6 +304,7 @@ Examples:
 - Clipboard access must occur only when an expansion that requests clipboard data actually fires.
 - Undo state stays in memory and stores only what is necessary to restore the immediately preceding expansion.
 - Preserve the no-input-logging guarantee.
+- v0.3.3 does not claim reliable password/secure-field detection across arbitrary browsers/apps; the buffer is bounded, memory-only, timeout/focus-reset, and never persisted.
 
 ## Acceptance criteria
 

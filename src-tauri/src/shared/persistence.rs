@@ -3,13 +3,12 @@
 /// Профили хранятся в %APPDATA%\KeyMaster Pro\profiles\
 /// Бэкапы в %APPDATA%\KeyMaster Pro\backups\
 /// Конфиг в %APPDATA%\KeyMaster Pro\config.json
-
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tracing::{error, info, warn};
 
 use crate::shared::constants::MAX_BACKUPS;
@@ -20,7 +19,7 @@ use crate::shared::types::Profile;
 /// `schemaVersion` хранится в JSON на границе persistence и не входит в
 /// runtime-структуру `Profile`, поэтому существующий IPC/frontend контракт
 /// остаётся совместимым.
-pub const PROFILE_SCHEMA_VERSION: u32 = 4;
+pub const PROFILE_SCHEMA_VERSION: u32 = 5;
 
 #[derive(Debug, Clone)]
 struct LoadedProfile {
@@ -29,8 +28,8 @@ struct LoadedProfile {
 }
 
 pub fn app_data_dir() -> Result<PathBuf, String> {
-    let app_data = std::env::var("APPDATA")
-        .map_err(|e| format!("Не удалось найти APPDATA: {}", e))?;
+    let app_data =
+        std::env::var("APPDATA").map_err(|e| format!("Не удалось найти APPDATA: {}", e))?;
     let dir = PathBuf::from(app_data).join("KeyMaster Pro");
     fs::create_dir_all(&dir).map_err(|e| format!("Не удалось создать {}: {}", dir.display(), e))?;
     Ok(dir)
@@ -98,33 +97,55 @@ fn migrate_profile_value(mut value: Value) -> Result<(Value, bool), String> {
             1 => {
                 // v1 -> v2: rule model v2. Старые single-key правила остаются
                 // семантически теми же, но получают modifiers=0 и tree metadata.
-                object.entry("folders".to_string()).or_insert_with(|| json!([]));
+                object
+                    .entry("folders".to_string())
+                    .or_insert_with(|| json!([]));
 
                 if let Some(rules) = object.get_mut("rules").and_then(Value::as_array_mut) {
                     for (index, rule) in rules.iter_mut().enumerate() {
-                        let Some(rule_obj) = rule.as_object_mut() else { continue; };
-                        rule_obj.entry("enabled".to_string()).or_insert_with(|| json!(true));
-                        rule_obj.entry("folderId".to_string()).or_insert(Value::Null);
-                        rule_obj.entry("order".to_string()).or_insert_with(|| json!(index as i32));
+                        let Some(rule_obj) = rule.as_object_mut() else {
+                            continue;
+                        };
+                        rule_obj
+                            .entry("enabled".to_string())
+                            .or_insert_with(|| json!(true));
+                        rule_obj
+                            .entry("folderId".to_string())
+                            .or_insert(Value::Null);
+                        rule_obj
+                            .entry("order".to_string())
+                            .or_insert_with(|| json!(index as i32));
 
-                        if let Some(trigger) = rule_obj.get_mut("trigger").and_then(Value::as_object_mut) {
+                        if let Some(trigger) =
+                            rule_obj.get_mut("trigger").and_then(Value::as_object_mut)
+                        {
                             let is_keyboard = matches!(
                                 trigger.get("type").and_then(Value::as_str),
                                 Some("keyDown" | "keyUp")
                             );
                             if is_keyboard {
-                                trigger.entry("modifiers".to_string()).or_insert_with(|| json!(0));
+                                trigger
+                                    .entry("modifiers".to_string())
+                                    .or_insert_with(|| json!(0));
                             }
                         }
 
                         for action_field in ["actions", "holdActions"] {
-                            let Some(actions) = rule_obj.get_mut(action_field).and_then(Value::as_array_mut) else {
+                            let Some(actions) =
+                                rule_obj.get_mut(action_field).and_then(Value::as_array_mut)
+                            else {
                                 continue;
                             };
                             for action in actions {
-                                let Some(action_obj) = action.as_object_mut() else { continue; };
-                                if action_obj.get("type").and_then(Value::as_str) == Some("remapKey") {
-                                    action_obj.entry("modifiers".to_string()).or_insert_with(|| json!(0));
+                                let Some(action_obj) = action.as_object_mut() else {
+                                    continue;
+                                };
+                                if action_obj.get("type").and_then(Value::as_str)
+                                    == Some("remapKey")
+                                {
+                                    action_obj
+                                        .entry("modifiers".to_string())
+                                        .or_insert_with(|| json!(0));
                                 }
                             }
                         }
@@ -139,19 +160,29 @@ fn migrate_profile_value(mut value: Value) -> Result<(Value, bool), String> {
                 // one-shot 1.0x playback exactly.
                 if let Some(rules) = object.get_mut("rules").and_then(Value::as_array_mut) {
                     for rule in rules {
-                        let Some(rule_obj) = rule.as_object_mut() else { continue; };
+                        let Some(rule_obj) = rule.as_object_mut() else {
+                            continue;
+                        };
                         for action_field in ["actions", "holdActions"] {
-                            let Some(actions) = rule_obj.get_mut(action_field).and_then(Value::as_array_mut) else {
+                            let Some(actions) =
+                                rule_obj.get_mut(action_field).and_then(Value::as_array_mut)
+                            else {
                                 continue;
                             };
                             for action in actions {
-                                let Some(action_obj) = action.as_object_mut() else { continue; };
-                                if action_obj.get("type").and_then(Value::as_str) == Some("runMacro") {
-                                    action_obj.entry("playback".to_string()).or_insert_with(|| json!({
-                                        "speed": 1.0,
-                                        "repeatCount": 1,
-                                        "repeatWhileHeld": false
-                                    }));
+                                let Some(action_obj) = action.as_object_mut() else {
+                                    continue;
+                                };
+                                if action_obj.get("type").and_then(Value::as_str)
+                                    == Some("runMacro")
+                                {
+                                    action_obj.entry("playback".to_string()).or_insert_with(|| {
+                                        json!({
+                                            "speed": 1.0,
+                                            "repeatCount": 1,
+                                            "repeatWhileHeld": false
+                                        })
+                                    });
                                 }
                             }
                         }
@@ -164,10 +195,70 @@ fn migrate_profile_value(mut value: Value) -> Result<(Value, bool), String> {
                 // v3 -> v4: structured profile bindings/order while retaining linkedApps.
                 object.entry("order".to_string()).or_insert(json!(0));
                 if !object.contains_key("bindings") {
-                    let bindings=object.get("linkedApps").and_then(Value::as_array).map(|apps| apps.iter().filter_map(Value::as_str).map(|p|json!({"process":p,"mode":"any"})).collect::<Vec<_>>()).unwrap_or_default();
-                    object.insert("bindings".to_string(),json!(bindings));
+                    let bindings = object
+                        .get("linkedApps")
+                        .and_then(Value::as_array)
+                        .map(|apps| {
+                            apps.iter()
+                                .filter_map(Value::as_str)
+                                .map(|p| json!({"process":p,"mode":"any"}))
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default();
+                    object.insert("bindings".to_string(), json!(bindings));
                 }
-                object.insert("schemaVersion".to_string(),json!(4)); version=4;
+                object.insert("schemaVersion".to_string(), json!(4));
+                version = 4;
+            }
+            4 => {
+                // v4 -> v5: explicit text-expansion behavior. `instant` +
+                // caseSensitive=true reproduces the legacy String::ends_with matcher.
+                if let Some(rules) = object.get_mut("rules").and_then(Value::as_array_mut) {
+                    for rule in rules {
+                        let Some(rule_obj) = rule.as_object_mut() else {
+                            continue;
+                        };
+                        if let Some(trigger) =
+                            rule_obj.get_mut("trigger").and_then(Value::as_object_mut)
+                        {
+                            if trigger.get("type").and_then(Value::as_str) == Some("typedText") {
+                                trigger
+                                    .entry("mode".to_string())
+                                    .or_insert(json!("instant"));
+                                trigger
+                                    .entry("delimiters".to_string())
+                                    .or_insert(json!(" \t\n.,;:!?"));
+                                trigger
+                                    .entry("caseSensitive".to_string())
+                                    .or_insert(json!(true));
+                            }
+                        }
+                        for action_field in ["actions", "holdActions"] {
+                            let Some(actions) =
+                                rule_obj.get_mut(action_field).and_then(Value::as_array_mut)
+                            else {
+                                continue;
+                            };
+                            for action in actions {
+                                let Some(action_obj) = action.as_object_mut() else {
+                                    continue;
+                                };
+                                if action_obj.get("type").and_then(Value::as_str)
+                                    == Some("typeText")
+                                {
+                                    action_obj
+                                        .entry("dateFormat".to_string())
+                                        .or_insert(json!("dmy"));
+                                    action_obj
+                                        .entry("timeFormat".to_string())
+                                        .or_insert(json!("hm24"));
+                                }
+                            }
+                        }
+                    }
+                }
+                object.insert("schemaVersion".to_string(), json!(5));
+                version = 5;
             }
             other => return Err(format!("Нет миграции для версии профиля {}", other)),
         }
@@ -187,8 +278,8 @@ fn profile_from_value(value: Value) -> Result<(Profile, Value, bool), String> {
 /// Каноническое представление профиля для диска/export.
 pub fn export_profile_value(profile: &Profile) -> Result<Value, String> {
     profile_path(&profile.id)?;
-    let mut value = serde_json::to_value(profile)
-        .map_err(|e| format!("Ошибка сериализации профиля: {}", e))?;
+    let mut value =
+        serde_json::to_value(profile).map_err(|e| format!("Ошибка сериализации профиля: {}", e))?;
     let object = value
         .as_object_mut()
         .ok_or_else(|| "Сериализованный профиль не является JSON-объектом".to_string())?;
@@ -206,10 +297,10 @@ pub fn import_profile_value(value: Value) -> Result<Profile, String> {
 fn replace_file_atomically(temp_path: &Path, destination: &Path) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
-        use windows::core::HSTRING;
         use windows::Win32::Storage::FileSystem::{
-            MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+            MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
         };
+        use windows::core::HSTRING;
 
         let source = HSTRING::from(temp_path.to_string_lossy().as_ref());
         let target = HSTRING::from(destination.to_string_lossy().as_ref());
@@ -274,7 +365,11 @@ fn recovery_profile(id: &str) -> Profile {
 fn protect_invalid_source(path: &Path, reason: &str) {
     error!("{}. Файл НЕ перезаписывается: {}", reason, path.display());
     if let Err(backup_err) = backup_file(path) {
-        warn!("Не удалось создать защитный backup {}: {}", path.display(), backup_err);
+        warn!(
+            "Не удалось создать защитный backup {}: {}",
+            path.display(),
+            backup_err
+        );
     }
 }
 
@@ -302,7 +397,10 @@ fn load_profile_state(id: &str) -> Result<LoadedProfile, String> {
     let (profile, migrated_value, was_migrated) = match profile_from_value(raw_value) {
         Ok(result) => result,
         Err(e) => {
-            protect_invalid_source(&path, &format!("Не удалось прочитать/мигрировать профиль: {}", e));
+            protect_invalid_source(
+                &path,
+                &format!("Не удалось прочитать/мигрировать профиль: {}", e),
+            );
             return Ok(LoadedProfile {
                 profile: recovery_profile(id),
                 healthy: false,
@@ -349,8 +447,7 @@ fn load_profile_state(id: &str) -> Result<LoadedProfile, String> {
                 // Никогда не переписываем legacy source без подтверждённого backup.
                 warn!(
                     "Не удалось создать backup перед миграцией профиля '{}': {}. Исходный файл НЕ переписывается; используем мигрированную модель только в памяти.",
-                    id,
-                    e
+                    id, e
                 );
             }
         }
@@ -392,8 +489,8 @@ fn existing_profile_is_safe(path: &Path) -> Result<bool, String> {
         .file_stem()
         .and_then(|value| value.to_str())
         .ok_or_else(|| format!("Не удалось определить ID из {}", path.display()))?;
-    let data = fs::read_to_string(path)
-        .map_err(|e| format!("Ошибка чтения {}: {}", path.display(), e))?;
+    let data =
+        fs::read_to_string(path).map_err(|e| format!("Ошибка чтения {}: {}", path.display(), e))?;
     let raw: Value = match serde_json::from_str(&data) {
         Ok(value) => value,
         Err(_) => return Ok(false),
@@ -427,7 +524,11 @@ pub fn save_profile(profile: &Profile) -> Result<(), String> {
                 profile.id, e
             )
         })?;
-        info!("Backup перед сохранением '{}': {}", profile.id, backup_path.display());
+        info!(
+            "Backup перед сохранением '{}': {}",
+            profile.id,
+            backup_path.display()
+        );
     }
 
     let value = export_profile_value(profile)?;
@@ -443,7 +544,9 @@ pub fn list_profiles() -> Result<Vec<String>, String> {
     }
 
     let mut profiles = Vec::new();
-    for entry in fs::read_dir(&dir).map_err(|e| format!("Ошибка чтения {}: {}", dir.display(), e))? {
+    for entry in
+        fs::read_dir(&dir).map_err(|e| format!("Ошибка чтения {}: {}", dir.display(), e))?
+    {
         let entry = entry.map_err(|e| format!("Ошибка entry: {}", e))?;
         if let Some(name) = entry.file_name().to_str() {
             if name.ends_with(".json") {
@@ -471,8 +574,7 @@ pub fn delete_profile(id: &str) -> Result<(), String> {
         )
     })?;
 
-    fs::remove_file(&path)
-        .map_err(|e| format!("Ошибка удаления {}: {}", path.display(), e))?;
+    fs::remove_file(&path).map_err(|e| format!("Ошибка удаления {}: {}", path.display(), e))?;
 
     info!(
         "Профиль '{}' удалён; backup сохранён: {}",
@@ -482,9 +584,54 @@ pub fn delete_profile(id: &str) -> Result<(), String> {
     Ok(())
 }
 
-pub fn list_profile_backups(id:&str)->Result<Vec<String>,String>{profile_path(id)?;let dir=backups_dir()?;let prefix=format!("{}_",id);let mut out=Vec::new();for e in fs::read_dir(&dir).map_err(|e|e.to_string())?{let e=e.map_err(|e|e.to_string())?;let n=e.file_name().to_string_lossy().to_string();if n.starts_with(&prefix)&&n.ends_with(".json"){out.push(n)}}out.sort_by(|a,b|b.cmp(a));Ok(out)}
-pub fn create_profile_backup(id:&str)->Result<String,String>{let path=profile_path(id)?;if !path.exists(){return Err("Profile not found".into())}Ok(backup_file(&path)?.file_name().unwrap_or_default().to_string_lossy().to_string())}
-pub fn restore_profile_backup(id:&str,name:&str)->Result<Profile,String>{let target=profile_path(id)?;if name.contains('/')||name.contains('\\')||!name.starts_with(&format!("{}_",id))||!name.ends_with(".json"){return Err("Invalid backup name".into())}let src=backups_dir()?.join(name);let data=fs::read_to_string(&src).map_err(|e|e.to_string())?;let value:Value=serde_json::from_str(&data).map_err(|e|e.to_string())?;let(profile,_,_)=profile_from_value(value)?;if profile.id!=id{return Err("Backup profile id mismatch".into())}if target.exists(){let _=backup_file(&target)?;}write_profile_value(&target,&export_profile_value(&profile)?)?;Ok(profile)}
+pub fn list_profile_backups(id: &str) -> Result<Vec<String>, String> {
+    profile_path(id)?;
+    let dir = backups_dir()?;
+    let prefix = format!("{}_", id);
+    let mut out = Vec::new();
+    for e in fs::read_dir(&dir).map_err(|e| e.to_string())? {
+        let e = e.map_err(|e| e.to_string())?;
+        let n = e.file_name().to_string_lossy().to_string();
+        if n.starts_with(&prefix) && n.ends_with(".json") {
+            out.push(n)
+        }
+    }
+    out.sort_by(|a, b| b.cmp(a));
+    Ok(out)
+}
+pub fn create_profile_backup(id: &str) -> Result<String, String> {
+    let path = profile_path(id)?;
+    if !path.exists() {
+        return Err("Profile not found".into());
+    }
+    Ok(backup_file(&path)?
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string())
+}
+pub fn restore_profile_backup(id: &str, name: &str) -> Result<Profile, String> {
+    let target = profile_path(id)?;
+    if name.contains('/')
+        || name.contains('\\')
+        || !name.starts_with(&format!("{}_", id))
+        || !name.ends_with(".json")
+    {
+        return Err("Invalid backup name".into());
+    }
+    let src = backups_dir()?.join(name);
+    let data = fs::read_to_string(&src).map_err(|e| e.to_string())?;
+    let value: Value = serde_json::from_str(&data).map_err(|e| e.to_string())?;
+    let (profile, _, _) = profile_from_value(value)?;
+    if profile.id != id {
+        return Err("Backup profile id mismatch".into());
+    }
+    if target.exists() {
+        let _ = backup_file(&target)?;
+    }
+    write_profile_value(&target, &export_profile_value(&profile)?)?;
+    Ok(profile)
+}
 
 fn backup_file(path: &Path) -> Result<PathBuf, String> {
     let dir = backups_dir()?;
@@ -497,8 +644,7 @@ fn backup_file(path: &Path) -> Result<PathBuf, String> {
     let backup_name = format!("{}_{}.json", filename, timestamp);
     let backup_path = dir.join(&backup_name);
 
-    fs::copy(path, &backup_path)
-        .map_err(|e| format!("Ошибка копирования backup: {}", e))?;
+    fs::copy(path, &backup_path).map_err(|e| format!("Ошибка копирования backup: {}", e))?;
 
     // Ошибка rotation не отменяет уже успешно созданный backup и не должна
     // превращать безопасную операцию в ложный failure.
@@ -514,7 +660,8 @@ fn rotate_backups(profile_id: &str) -> Result<(), String> {
     let prefix = format!("{}_", profile_id);
     let mut backups: Vec<(String, std::time::SystemTime)> = Vec::new();
 
-    for entry in fs::read_dir(&dir).map_err(|e| format!("Ошибка чтения backup: {}", e))? {
+    for entry in fs::read_dir(&dir).map_err(|e| format!("Ошибка чтения backup: {}", e))?
+    {
         let entry = entry.map_err(|e| format!("Ошибка entry: {}", e))?;
         let name = entry.file_name();
         let name_str = name.to_string_lossy();
@@ -591,7 +738,10 @@ mod tests {
         assert_eq!(profile.name, "Legacy");
 
         let migrated: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
-        assert_eq!(migrated.get("schemaVersion").and_then(Value::as_u64), Some(PROFILE_SCHEMA_VERSION as u64));
+        assert_eq!(
+            migrated.get("schemaVersion").and_then(Value::as_u64),
+            Some(PROFILE_SCHEMA_VERSION as u64)
+        );
         assert_eq!(migrated.get("name").and_then(Value::as_str), Some("Legacy"));
 
         let _ = fs::remove_file(&path);
@@ -618,7 +768,10 @@ mod tests {
 
         let path = profiles_dir().unwrap().join("test_rt.json");
         let saved: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
-        assert_eq!(saved.get("schemaVersion").and_then(Value::as_u64), Some(PROFILE_SCHEMA_VERSION as u64));
+        assert_eq!(
+            saved.get("schemaVersion").and_then(Value::as_u64),
+            Some(PROFILE_SCHEMA_VERSION as u64)
+        );
 
         let _ = delete_profile("test_rt");
     }

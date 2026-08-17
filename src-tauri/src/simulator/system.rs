@@ -1,16 +1,15 @@
 #[cfg(target_os = "windows")]
-use windows::core::{w, HSTRING, BOOL};
-#[cfg(target_os = "windows")]
-use windows::Win32::Foundation::{LPARAM, WPARAM, HWND};
-#[cfg(target_os = "windows")]
-use windows::Win32::UI::WindowsAndMessaging::{
-    GetForegroundWindow, SetWindowPos, GetSystemMetrics, GetWindowRect,
-    SendMessageW, ShowWindow, HWND_BROADCAST, WM_SYSCOMMAND, WM_CLOSE,
-    SW_MINIMIZE, SW_MAXIMIZE, SW_SHOWNORMAL, SWP_NOZORDER, SWP_NOACTIVATE,
-    SM_CXSCREEN, SM_CYSCREEN,
-};
+use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 #[cfg(target_os = "windows")]
 use windows::Win32::UI::Shell::ShellExecuteW;
+#[cfg(target_os = "windows")]
+use windows::Win32::UI::WindowsAndMessaging::{
+    GetForegroundWindow, GetSystemMetrics, GetWindowRect, HWND_BROADCAST, SM_CXSCREEN, SM_CYSCREEN,
+    SW_MAXIMIZE, SW_MINIMIZE, SW_SHOWNORMAL, SWP_NOACTIVATE, SWP_NOZORDER, SendMessageW,
+    SetWindowPos, ShowWindow, WM_CLOSE, WM_SYSCOMMAND,
+};
+#[cfg(target_os = "windows")]
+use windows::core::{BOOL, HSTRING, w};
 
 pub fn execute_window_action(action: &str) {
     #[cfg(target_os = "windows")]
@@ -106,9 +105,8 @@ pub fn focus_process(process: Option<&str>, title: Option<&str>) {
     #[cfg(target_os = "windows")]
     unsafe {
         use windows::Win32::UI::WindowsAndMessaging::{
-            EnumWindows, IsWindowVisible, GetWindowThreadProcessId, GetWindowTextW,
-            GetWindowTextLengthW, ShowWindow, SetForegroundWindow,
-            AllowSetForegroundWindow, SW_RESTORE,
+            AllowSetForegroundWindow, EnumWindows, GetWindowTextLengthW, GetWindowTextW,
+            GetWindowThreadProcessId, IsWindowVisible, SW_RESTORE, SetForegroundWindow, ShowWindow,
         };
 
         // Чистим входные данные: process → clean lowercase, title → trimmed lowercase.
@@ -174,8 +172,8 @@ pub fn focus_process(process: Option<&str>, title: Option<&str>) {
                         if written <= 0 {
                             return false;
                         }
-                        let title = String::from_utf16_lossy(&buf[..written as usize])
-                            .to_lowercase();
+                        let title =
+                            String::from_utf16_lossy(&buf[..written as usize]).to_lowercase();
                         title.contains(target.as_str())
                     } else {
                         false
@@ -207,10 +205,11 @@ pub fn focus_process(process: Option<&str>, title: Option<&str>) {
 /// Получить имя исполняемого файла процесса по PID (без пути, с .exe).
 #[cfg(target_os = "windows")]
 fn process_name_by_pid(pid: u32) -> Option<String> {
-    use windows::Win32::System::Diagnostics::ToolHelp::{
-        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
-    };
     use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW,
+        TH32CS_SNAPPROCESS,
+    };
 
     unsafe {
         let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0).ok()?;
@@ -221,7 +220,11 @@ fn process_name_by_pid(pid: u32) -> Option<String> {
         if Process32FirstW(snapshot, &mut entry).is_ok() {
             loop {
                 if entry.th32ProcessID == pid {
-                    let len = entry.szExeFile.iter().position(|&c| c == 0).unwrap_or(entry.szExeFile.len());
+                    let len = entry
+                        .szExeFile
+                        .iter()
+                        .position(|&c| c == 0)
+                        .unwrap_or(entry.szExeFile.len());
                     result = Some(String::from_utf16_lossy(&entry.szExeFile[..len]));
                     break;
                 }

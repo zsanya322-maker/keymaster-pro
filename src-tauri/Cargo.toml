@@ -1,6 +1,6 @@
 [package]
 name = "keymaster-pro"
-version = "0.3.2"
+version = "0.3.3"
 description = "KeyMaster Pro — Desktop Keyboard Automation Utility"
 authors = ["KeyMaster Pro Team"]
 edition = "2024"
@@ -70,6 +70,7 @@ windows = { version = "0.62", features = [
   "Win32_Storage_FileSystem",
   "Win32_System_Memory",
   "Win32_System_DataExchange",
+  "Win32_System_Ole",
   "Win32_System_SystemServices",
   "Win32_System_SystemInformation",
   "Win32_System_Diagnostics_ToolHelp",

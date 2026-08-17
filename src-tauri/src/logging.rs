@@ -1,33 +1,36 @@
+use std::fs;
+use std::path::PathBuf;
 /// Logging setup — tracing subscriber
 ///
 /// Логирование в файл %APPDATA%\KeyMaster Pro\logs\
 /// Каждый запуск daemon создаёт новый файл daemon-YYYY-MM-DD_HH-MM-SS.log,
 /// чтобы было удобно отлаживать конкретную сессию без 700к-строчного монолита.
 /// Старые файлы не удаляются автоматически (чистка ручная).
-
-use tracing_subscriber::{fmt, EnvFilter};
-use std::fs;
-use std::path::PathBuf;
+use tracing_subscriber::{EnvFilter, fmt};
 
 /// Инициализировать логгер
 pub fn init_logging() -> Result<(), String> {
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| {
-            if cfg!(debug_assertions) {
-                EnvFilter::new("debug")
-            } else {
-                EnvFilter::new("info")
-            }
-        });
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        if cfg!(debug_assertions) {
+            EnvFilter::new("debug")
+        } else {
+            EnvFilter::new("info")
+        }
+    });
 
     // Получаем путь к APPDATA/KeyMaster Pro/logs
-    let app_data = std::env::var("APPDATA")
-        .map_err(|e| format!("Не удалось получить APPDATA: {}", e))?;
+    let app_data =
+        std::env::var("APPDATA").map_err(|e| format!("Не удалось получить APPDATA: {}", e))?;
     let log_dir = PathBuf::from(app_data).join("KeyMaster Pro").join("logs");
 
     // Создаем директорию логов
-    fs::create_dir_all(&log_dir)
-        .map_err(|e| format!("Не удалось создать папку логов {}: {}", log_dir.display(), e))?;
+    fs::create_dir_all(&log_dir).map_err(|e| {
+        format!(
+            "Не удалось создать папку логов {}: {}",
+            log_dir.display(),
+            e
+        )
+    })?;
 
     // Имя файла содержит дату/время старта сессии — каждая сессия в свой файл.
     let timestamp = session_timestamp();
@@ -39,7 +42,13 @@ pub fn init_logging() -> Result<(), String> {
         .write(true)
         .truncate(true)
         .open(&log_path)
-        .map_err(|e| format!("Не удалось открыть файл логов {}: {}", log_path.display(), e))?;
+        .map_err(|e| {
+            format!(
+                "Не удалось открыть файл логов {}: {}",
+                log_path.display(),
+                e
+            )
+        })?;
 
     // Инициализируем подписчик с выводом в файл
     fmt()
@@ -52,7 +61,10 @@ pub fn init_logging() -> Result<(), String> {
         .init();
 
     // Печатаем заголовок сессии — удобно искать нужный файл в папке с логами.
-    tracing::info!("=== KeyMaster Pro daemon session started at {} ===", timestamp);
+    tracing::info!(
+        "=== KeyMaster Pro daemon session started at {} ===",
+        timestamp
+    );
     tracing::info!("Log file: {}", log_path.display());
 
     Ok(())
@@ -69,7 +81,10 @@ fn session_timestamp() -> String {
             // зависимостей в этом модуле; точность до секунды, часовой пояс UTC.
             // Локаль не критична — имя файла нужно только для уникальности и сортировки.
             let (year, month, day, hour, minute, second) = secs_to_ymd_hms(secs);
-            format!("{:04}-{:02}-{:02}_{:02}-{:02}-{:02}", year, month, day, hour, minute, second)
+            format!(
+                "{:04}-{:02}-{:02}_{:02}-{:02}-{:02}",
+                year, month, day, hour, minute, second
+            )
         }
         Err(_) => "unknown".to_string(),
     }

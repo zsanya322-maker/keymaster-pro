@@ -2,7 +2,6 @@
 ///
 /// Стандарт: https://www.jsonrpc.org/specification
 /// Используется для общения GUI ↔ Daemon через Named Pipe.
-
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 

@@ -33,7 +33,9 @@ struct MacroControl {
 
 impl MacroControl {
     fn next_id(&self) -> u64 {
-        self.next_job_id.fetch_add(1, Ordering::Relaxed).wrapping_add(1)
+        self.next_job_id
+            .fetch_add(1, Ordering::Relaxed)
+            .wrapping_add(1)
     }
 
     fn key_generation(&self, macro_key: u64) -> u64 {
@@ -97,7 +99,9 @@ impl MacroPlayer {
                         worker_control.finish(&job);
                         continue;
                     }
-                    worker_control.active_job_id.store(job.id, Ordering::Release);
+                    worker_control
+                        .active_job_id
+                        .store(job.id, Ordering::Release);
                     run_job(&job, &worker_control, &executor);
                     worker_control.finish(&job);
                 }
@@ -170,7 +174,9 @@ impl MacroPlayer {
     }
 
     pub fn cancel_all(&self) {
-        self.control.global_generation.fetch_add(1, Ordering::AcqRel);
+        self.control
+            .global_generation
+            .fetch_add(1, Ordering::AcqRel);
         if let Ok(mut pending) = self.control.pending_while_held.lock() {
             pending.clear();
         }
@@ -360,20 +366,26 @@ mod tests {
             repeat_while_held: true,
             ..playback()
         };
-        assert!(player
-            .enqueue(
-                vec![
-                    SimulatorCommand::TypeString("held".to_string()),
-                    SimulatorCommand::Delay(20),
-                ],
-                held,
-                99,
-            )
-            .unwrap()
-            > 0);
+        assert!(
+            player
+                .enqueue(
+                    vec![
+                        SimulatorCommand::TypeString("held".to_string()),
+                        SimulatorCommand::Delay(20),
+                    ],
+                    held,
+                    99,
+                )
+                .unwrap()
+                > 0
+        );
         assert_eq!(
             player
-                .enqueue(vec![SimulatorCommand::TypeString("dup".to_string())], held, 99)
+                .enqueue(
+                    vec![SimulatorCommand::TypeString("dup".to_string())],
+                    held,
+                    99
+                )
                 .unwrap(),
             0
         );

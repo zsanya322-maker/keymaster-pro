@@ -4,7 +4,6 @@
 /// Большинство runtime-команд перенаправляются в Daemon через Named Pipe IPC,
 /// а GUI-конфигурация читается/пишется напрямую, чтобы настройки сохранялись
 /// даже при остановленном демоне.
-
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::State;
 use tracing::{info, warn};
@@ -172,7 +171,10 @@ async fn stop_daemon_before_process_transition(
             .and_then(|v| v.as_str())
             .unwrap_or("daemon did not stop");
         warn!("{}: daemon не подтвердил остановку: {}", reason, message);
-        return Err(format!("Не удалось остановить daemon перед {}: {}", reason, message));
+        return Err(format!(
+            "Не удалось остановить daemon перед {}: {}",
+            reason, message
+        ));
     }
     Ok(())
 }
@@ -251,9 +253,9 @@ pub async fn restart_app(
 pub async fn restart_as_admin(state: State<'_, GuiState>) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
-        use windows::core::HSTRING;
         use windows::Win32::UI::Shell::ShellExecuteW;
         use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+        use windows::core::HSTRING;
 
         let exe_path = state
             .exe_path
@@ -269,9 +271,8 @@ pub async fn restart_as_admin(state: State<'_, GuiState>) -> Result<(), String> 
         // запуска Tauri/single-instance, чтобы старый instance lock успел уйти.
         let parameters = HSTRING::from("--gui-delay-ms 650");
 
-        let launch_result = unsafe {
-            ShellExecuteW(None, &verb, &file, &parameters, None, SW_SHOWNORMAL)
-        };
+        let launch_result =
+            unsafe { ShellExecuteW(None, &verb, &file, &parameters, None, SW_SHOWNORMAL) };
         let launch_code = launch_result.0 as isize;
 
         if launch_code <= 32 {
@@ -283,7 +284,10 @@ pub async fn restart_as_admin(state: State<'_, GuiState>) -> Result<(), String> 
             // оставляем старое GUI открытым и возвращаем ему engine обратно.
             state.spawning.store(false, Ordering::SeqCst);
             if let Err(error) = spawn_daemon(state) {
-                warn!("restart_as_admin: не удалось восстановить daemon: {}", error);
+                warn!(
+                    "restart_as_admin: не удалось восстановить daemon: {}",
+                    error
+                );
             }
             return Err(format!(
                 "Запуск от Администратора отменён или завершился ошибкой (код {})",
@@ -306,7 +310,7 @@ pub fn is_elevated() -> bool {
     #[cfg(target_os = "windows")]
     {
         use windows::Win32::Security::{
-            GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY,
+            GetTokenInformation, TOKEN_ELEVATION, TOKEN_QUERY, TokenElevation,
         };
         use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
         unsafe {

@@ -2,7 +2,6 @@
 ///
 /// Хранит текущий профиль, активные слои, состояние хуков.
 /// Доступно из всех потоков через DaemonStateRef (Arc<RwLock<DaemonState>>).
-
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
@@ -55,8 +54,8 @@ pub struct DaemonState {
     pub record_mouse_drag_drop_only: std::sync::atomic::AtomicBool,
     pub recorded_steps: std::sync::Mutex<Vec<crate::schemas::frontend::MacroStep>>,
     pub last_record_time: std::sync::Mutex<Option<std::time::Instant>>,
-    /// Buffer for tracking rolling text inputs for text expansion
-    pub typed_buffer: std::sync::Mutex<String>,
+    /// Bounded, memory-only text expansion buffer and single undo record.
+    pub text_input: std::sync::Mutex<crate::daemon::text_expansion::TextInputState>,
     /// Режим захвата клавиши/кнопки мыши для KeyPicker.
     /// Keyboard hook в этом режиме сам собирает chord и блокирует его до Windows,
     /// чтобы Win/Alt-комбинации можно было записывать без системного side-effect.
@@ -94,7 +93,9 @@ impl DaemonState {
             record_mouse_drag_drop_only: std::sync::atomic::AtomicBool::new(true),
             recorded_steps: std::sync::Mutex::new(Vec::new()),
             last_record_time: std::sync::Mutex::new(None),
-            typed_buffer: std::sync::Mutex::new(String::new()),
+            text_input: std::sync::Mutex::new(
+                crate::daemon::text_expansion::TextInputState::default(),
+            ),
             key_capture_active: std::sync::atomic::AtomicBool::new(false),
             last_captured_key: std::sync::Mutex::new(None),
             last_captured_mouse: std::sync::Mutex::new(None),
@@ -133,7 +134,9 @@ impl Default for DaemonState {
             record_mouse_drag_drop_only: std::sync::atomic::AtomicBool::new(true),
             recorded_steps: std::sync::Mutex::new(Vec::new()),
             last_record_time: std::sync::Mutex::new(None),
-            typed_buffer: std::sync::Mutex::new(String::new()),
+            text_input: std::sync::Mutex::new(
+                crate::daemon::text_expansion::TextInputState::default(),
+            ),
             key_capture_active: std::sync::atomic::AtomicBool::new(false),
             last_captured_key: std::sync::Mutex::new(None),
             last_captured_mouse: std::sync::Mutex::new(None),

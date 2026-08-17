@@ -103,7 +103,7 @@ function formatTriggerKey(trigger: FrontendTrigger): string {
     case 'mouseMove':
       return 'Mouse move';
     case 'typedText':
-      return `“${trigger.sequence}”`;
+      return `“${trigger.sequence}” · ${trigger.mode === 'delimiter' ? 'delimiter' : 'instant'}`;
   }
 }
 
@@ -198,8 +198,8 @@ function makeNewRule(mode: RulesViewMode, order = 0): FrontendRule {
   if (mode === 'text') {
     return {
       ...baseRule(order),
-      trigger: { type: 'typedText', sequence: '' },
-      actions: [{ type: 'typeText', text: '' }],
+      trigger: { type: 'typedText', sequence: '', mode: 'instant', delimiters: ' \t\n.,;:!?', caseSensitive: true },
+      actions: [{ type: 'typeText', text: '' , dateFormat: 'dmy', timeFormat: 'hm24' }],
     };
   }
 
@@ -212,7 +212,7 @@ function makeNewRule(mode: RulesViewMode, order = 0): FrontendRule {
 
 function changeTriggerType(rule: FrontendRule, type: FrontendTrigger['type']): FrontendRule {
   if (type === 'tapHoldKeyDown') return { ...rule, trigger: { type: 'tapHoldKeyDown', code: 0, timeoutMs: 200 } };
-  if (type === 'typedText') return { ...rule, trigger: { type: 'typedText', sequence: '' } };
+  if (type === 'typedText') return { ...rule, trigger: { type: 'typedText', sequence: '', mode: 'instant', delimiters: ' \t\n.,;:!?', caseSensitive: true } };
   if (type === 'keyDown') return { ...rule, trigger: { type: 'keyDown', code: 0, modifiers: 0 } };
   if (type === 'keyUp') return { ...rule, trigger: { type: 'keyUp', code: 0, modifiers: 0 } };
   if (type === 'mouseDown') return { ...rule, trigger: { type: 'mouseDown', code: 1 } };
@@ -685,14 +685,58 @@ export const RulesPage: React.FC<RulesPageProps> = ({ mode = 'all' }) => {
                     </select>
 
                     {draftRule.trigger.type === 'typedText' && (
-                      <input
-                        type="text"
-                        value={draftRule.trigger.sequence}
-                        disabled={saving}
-                        onChange={(event) => setDraftRule({ ...draftRule, trigger: { type: 'typedText', sequence: event.target.value } })}
-                        placeholder={t('ruleBuilder.placeholders.sequence')}
-                        className={`${inputClass} flex-1 min-w-0 max-w-[520px] disabled:opacity-50`}
-                      />
+                      <>
+                        <input
+                          type="text"
+                          value={draftRule.trigger.sequence}
+                          disabled={saving}
+                          onChange={(event) => { const sequence = event.target.value; setDraftRule((current) => current?.trigger.type === 'typedText' ? { ...current, trigger: { ...current.trigger, sequence } } : current); }}
+                          placeholder={t('ruleBuilder.placeholders.sequence')}
+                          className={`${inputClass} flex-1 min-w-0 max-w-[330px] disabled:opacity-50`}
+                        />
+                        <select
+                          value={draftRule.trigger.mode}
+                          disabled={saving}
+                          onChange={(event) => { const mode = event.target.value as 'instant' | 'delimiter'; setDraftRule((current) => current?.trigger.type === 'typedText' ? { ...current, trigger: { ...current.trigger, mode } } : current); }}
+                          className={`${selectClass} w-[112px] shrink-0 disabled:opacity-50`}
+                        >
+                          <option value="instant">{t('textExpansion.instant', { defaultValue: 'Сразу' })}</option>
+                          <option value="delimiter">{t('textExpansion.delimiter', { defaultValue: 'По разделителю' })}</option>
+                        </select>
+                        <details className="relative shrink-0">
+                          <summary className="list-none h-7 px-2 inline-flex items-center border border-app-border bg-app-bg text-[9px] text-app-muted hover:bg-app-surface cursor-pointer">
+                            {t('common.advanced', { defaultValue: 'Доп.' })}
+                          </summary>
+                          <div className="absolute z-30 right-0 top-8 w-64 border border-app-border bg-app-bg shadow-lg p-2 space-y-2">
+                            <label className="flex items-center gap-2 text-[10px] text-app-text">
+                              <input
+                                type="checkbox"
+                                checked={draftRule.trigger.caseSensitive}
+                                disabled={saving}
+                                onChange={(event) => { const caseSensitive = event.target.checked; setDraftRule((current) => current?.trigger.type === 'typedText' ? { ...current, trigger: { ...current.trigger, caseSensitive } } : current); }}
+                              />
+                              {t('textExpansion.case_sensitive', { defaultValue: 'Учитывать регистр' })}
+                            </label>
+                            {draftRule.trigger.mode === 'delimiter' && (
+                              <label className="block">
+                                <span className="block mb-1 text-[9px] text-app-muted">
+                                  {t('textExpansion.delimiters', { defaultValue: 'Разделители: пробел, \t, \n и знаки' })}
+                                </span>
+                                <input
+                                  type="text"
+                                  value={draftRule.trigger.delimiters}
+                                  disabled={saving}
+                                  onChange={(event) => { const delimiters = event.target.value; setDraftRule((current) => current?.trigger.type === 'typedText' ? { ...current, trigger: { ...current.trigger, delimiters } } : current); }}
+                                  className={`${inputClass} w-full font-mono disabled:opacity-50`}
+                                />
+                              </label>
+                            )}
+                            <div className="text-[9px] leading-4 text-app-muted">
+                              {t('textExpansion.undo_hint', { defaultValue: 'Ctrl+Z отменяет только последнюю текстовую подстановку.' })}
+                            </div>
+                          </div>
+                        </details>
+                      </>
                     )}
 
                     {(draftRule.trigger.type === 'keyDown' || draftRule.trigger.type === 'keyUp') && (
@@ -927,7 +971,7 @@ export const RulesPage: React.FC<RulesPageProps> = ({ mode = 'all' }) => {
                       disabled={saving}
                       onClick={() => setDraftRule({
                         ...draftRule,
-                        actions: [...draftRule.actions, { type: 'typeText', text: '' }],
+                        actions: [...draftRule.actions, { type: 'typeText', text: '' , dateFormat: 'dmy', timeFormat: 'hm24' }],
                       })}
                       className="h-5 px-1.5 text-[9px] text-app-primary hover:bg-app-surface disabled:opacity-40"
                     >

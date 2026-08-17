@@ -1,20 +1,27 @@
 use std::collections::HashMap;
-use std::sync::{atomic::{AtomicU16, Ordering}, LazyLock, Mutex, RwLockReadGuard};
+use std::sync::{
+    LazyLock, Mutex, RwLockReadGuard,
+    atomic::{AtomicU16, Ordering},
+};
 use std::time::{Duration, Instant};
 
 use tracing::error;
 
 use crate::context::AppContext;
-use crate::daemon::state::DaemonStateRef;
-use crate::schemas::engine::{EngineAction, EngineCondition, SimulatorCommand};
-use crate::schemas::frontend::key_modifiers;
 use crate::daemon::chord_output::{
-    build_atomic_chord_commands, isolate_macro_commands, modifier_vks,
-    release_modifier_commands, shell_mask_commands,
+    build_atomic_chord_commands, isolate_macro_commands, modifier_vks, release_modifier_commands,
+    shell_mask_commands,
 };
 use crate::daemon::mouse_triggers::{
-    system_double_click_limits, wheel_key, DoubleClickDetector, MoveGate,
+    DoubleClickDetector, MoveGate, system_double_click_limits, wheel_key,
 };
+use crate::daemon::state::DaemonStateRef;
+use crate::daemon::text_expansion::{
+    TextUndoRecord, backspaces_for, delimiter_contains, materialize_text_actions, suffix_chars,
+    suffix_matches,
+};
+use crate::schemas::engine::{EngineAction, EngineCondition, SimulatorCommand};
+use crate::schemas::frontend::{TextExpansionMode, key_modifiers};
 use crate::shared::calculate_hash;
 
 /// Тип результата обработки события
@@ -30,7 +37,9 @@ pub enum EventAction {
 /// либо если контекст ещё не инициализирован. В callback'ах LL-хуков паника = abort
 /// процесса, поэтому НИКОГДА не используем `.unwrap()` на `ctx_arc.read()` —
 /// только через эту функцию.
-fn try_read_ctx(ctx_arc: &crate::context::AppContextState) -> Option<RwLockReadGuard<'_, AppContext>> {
+fn try_read_ctx(
+    ctx_arc: &crate::context::AppContextState,
+) -> Option<RwLockReadGuard<'_, AppContext>> {
     match ctx_arc.read() {
         Ok(guard) => Some(guard),
         Err(poisoned) => {
@@ -156,10 +165,31 @@ fn family_matches(required: u16, actual: u16, generic: u16, left: u16, right: u1
 fn modifiers_match(required: u16, actual: u16) -> bool {
     let required = required & key_modifiers::ALL;
     let actual = actual & key_modifiers::ALL;
-    family_matches(required, actual, key_modifiers::CTRL, key_modifiers::LCTRL, key_modifiers::RCTRL)
-        && family_matches(required, actual, key_modifiers::ALT, key_modifiers::LALT, key_modifiers::RALT)
-        && family_matches(required, actual, key_modifiers::SHIFT, key_modifiers::LSHIFT, key_modifiers::RSHIFT)
-        && family_matches(required, actual, key_modifiers::WIN, key_modifiers::LWIN, key_modifiers::RWIN)
+    family_matches(
+        required,
+        actual,
+        key_modifiers::CTRL,
+        key_modifiers::LCTRL,
+        key_modifiers::RCTRL,
+    ) && family_matches(
+        required,
+        actual,
+        key_modifiers::ALT,
+        key_modifiers::LALT,
+        key_modifiers::RALT,
+    ) && family_matches(
+        required,
+        actual,
+        key_modifiers::SHIFT,
+        key_modifiers::LSHIFT,
+        key_modifiers::RSHIFT,
+    ) && family_matches(
+        required,
+        actual,
+        key_modifiers::WIN,
+        key_modifiers::LWIN,
+        key_modifiers::RWIN,
+    )
 }
 
 pub(crate) fn currently_held_modifier_vks(mask: u16) -> Vec<u8> {
@@ -193,11 +223,7 @@ fn send_isolated_immediate(
     }
 }
 
-fn send_atomic_chord(
-    simulator: &crate::simulator::SimulatorSender,
-    code: u8,
-    modifiers: u16,
-) {
+fn send_atomic_chord(simulator: &crate::simulator::SimulatorSender, code: u8, modifiers: u16) {
     let physical = current_physical_modifiers();
     send_commands(
         simulator,
@@ -218,18 +244,62 @@ fn check_conditions(conditions: &[EngineCondition], ctx: &crate::context::AppCon
                 // VirtualDesktop conditions to an impossible WindowMatch too.
                 return false;
             }
-            EngineCondition::ContextMatch { process,path,title,class_name,virtual_desktop_id,monitor_id,min_width,max_width,min_height,max_height,fullscreen,mode } => {
-                let mut checks=Vec::new();
-                if let Some(v)=process { checks.push(ctx.active_process.eq_ignore_ascii_case(v)); }
-                if let Some(v)=path { checks.push(ctx.active_process_path.to_lowercase().contains(v)); }
-                if let Some(v)=title { checks.push(ctx.active_window_title.to_lowercase().contains(v)); }
-                if let Some(v)=class_name { checks.push(ctx.active_window_class.eq_ignore_ascii_case(v)); }
-                if let Some(v)=virtual_desktop_id { checks.push(ctx.virtual_desktop_id.eq_ignore_ascii_case(v)); }
-                if let Some(v)=monitor_id { checks.push(ctx.monitor_id==*v); }
-                if let Some(v)=min_width { checks.push(ctx.window_width>=*v); } if let Some(v)=max_width { checks.push(ctx.window_width<=*v); }
-                if let Some(v)=min_height { checks.push(ctx.window_height>=*v); } if let Some(v)=max_height { checks.push(ctx.window_height<=*v); }
-                if let Some(v)=fullscreen { checks.push(ctx.fullscreen==*v); }
-                if checks.is_empty() || match mode { crate::shared::types::MatchMode::Any=>!checks.iter().any(|v|*v), crate::shared::types::MatchMode::All=>!checks.iter().all(|v|*v) } { return false; }
+            EngineCondition::ContextMatch {
+                process,
+                path,
+                title,
+                class_name,
+                virtual_desktop_id,
+                monitor_id,
+                min_width,
+                max_width,
+                min_height,
+                max_height,
+                fullscreen,
+                mode,
+            } => {
+                let mut checks = Vec::new();
+                if let Some(v) = process {
+                    checks.push(ctx.active_process.eq_ignore_ascii_case(v));
+                }
+                if let Some(v) = path {
+                    checks.push(ctx.active_process_path.to_lowercase().contains(v));
+                }
+                if let Some(v) = title {
+                    checks.push(ctx.active_window_title.to_lowercase().contains(v));
+                }
+                if let Some(v) = class_name {
+                    checks.push(ctx.active_window_class.eq_ignore_ascii_case(v));
+                }
+                if let Some(v) = virtual_desktop_id {
+                    checks.push(ctx.virtual_desktop_id.eq_ignore_ascii_case(v));
+                }
+                if let Some(v) = monitor_id {
+                    checks.push(ctx.monitor_id == *v);
+                }
+                if let Some(v) = min_width {
+                    checks.push(ctx.window_width >= *v);
+                }
+                if let Some(v) = max_width {
+                    checks.push(ctx.window_width <= *v);
+                }
+                if let Some(v) = min_height {
+                    checks.push(ctx.window_height >= *v);
+                }
+                if let Some(v) = max_height {
+                    checks.push(ctx.window_height <= *v);
+                }
+                if let Some(v) = fullscreen {
+                    checks.push(ctx.fullscreen == *v);
+                }
+                if checks.is_empty()
+                    || match mode {
+                        crate::shared::types::MatchMode::Any => !checks.iter().any(|v| *v),
+                        crate::shared::types::MatchMode::All => !checks.iter().all(|v| *v),
+                    }
+                {
+                    return false;
+                }
             }
             EngineCondition::WindowMatch {
                 process_hash,
@@ -312,7 +382,10 @@ fn execute_actions(
                     if is_down {
                         send_isolated_immediate(
                             simulator,
-                            [SimulatorCommand::MousePress(*code), SimulatorCommand::MouseRelease(*code)],
+                            [
+                                SimulatorCommand::MousePress(*code),
+                                SimulatorCommand::MouseRelease(*code),
+                            ],
                         );
                     }
                 } else if is_down {
@@ -321,7 +394,28 @@ fn execute_actions(
                     let _ = simulator.send(SimulatorCommand::MouseRelease(*code));
                 }
             }
-            EngineAction::TypeText { text } => {
+            EngineAction::TypeText {
+                text,
+                date_format,
+                time_format,
+            } => {
+                if is_down {
+                    let rendered = crate::daemon::text_expansion::render_template(
+                        text,
+                        *date_format,
+                        *time_format,
+                    );
+                    if trigger_modifiers != 0 {
+                        send_isolated_immediate(
+                            simulator,
+                            [SimulatorCommand::TypeString(rendered)],
+                        );
+                    } else {
+                        let _ = simulator.send(SimulatorCommand::TypeString(rendered));
+                    }
+                }
+            }
+            EngineAction::TypeTextLiteral { text } => {
                 if is_down {
                     if trigger_modifiers != 0 {
                         send_isolated_immediate(
@@ -333,7 +427,11 @@ fn execute_actions(
                     }
                 }
             }
-            EngineAction::MacroCommands { commands, playback, macro_key } => {
+            EngineAction::MacroCommands {
+                commands,
+                playback,
+                macro_key,
+            } => {
                 if is_down {
                     let mut macro_commands = commands.clone();
 
@@ -345,9 +443,13 @@ fn execute_actions(
                         if let Some(state_ref) = state {
                             if let Ok(s) = state_ref.read() {
                                 if s.restore_mouse_after_macro {
-                                    let mut point = windows::Win32::Foundation::POINT { x: 0, y: 0 };
+                                    let mut point =
+                                        windows::Win32::Foundation::POINT { x: 0, y: 0 };
                                     unsafe {
-                                        let _ = windows::Win32::UI::WindowsAndMessaging::GetCursorPos(&mut point);
+                                        let _ =
+                                            windows::Win32::UI::WindowsAndMessaging::GetCursorPos(
+                                                &mut point,
+                                            );
                                     }
                                     macro_commands.push(SimulatorCommand::MouseAbsolute {
                                         x: point.x,
@@ -359,10 +461,8 @@ fn execute_actions(
                     }
 
                     if trigger_modifiers != 0 {
-                        macro_commands = isolate_macro_commands(
-                            macro_commands,
-                            current_physical_modifiers(),
-                        );
+                        macro_commands =
+                            isolate_macro_commands(macro_commands, current_physical_modifiers());
                     }
                     let _ = simulator.send_macro(macro_commands, *playback, *macro_key);
                 } else if playback.repeat_while_held {
@@ -498,7 +598,9 @@ pub fn tick_tap_holds(state: Option<&DaemonStateRef>) {
 
     if let Ok(mut pending) = PENDING_TAP_HOLDS.lock() {
         for info in pending.values_mut() {
-            if !info.is_held && now.duration_since(info.down_time).as_millis() as u32 >= info.timeout_ms {
+            if !info.is_held
+                && now.duration_since(info.down_time).as_millis() as u32 >= info.timeout_ms
+            {
                 info.is_held = true;
                 to_trigger_hold.push(info.hold_actions.clone());
             }
@@ -520,7 +622,7 @@ pub fn tick_tap_holds(state: Option<&DaemonStateRef>) {
 
 pub fn process_keyboard_event(
     vk_code: u8,
-    _scan_code: u16,
+    scan_code: u16,
     is_key_down: bool,
     _flags: u32,
     event_modifiers: u16,
@@ -552,71 +654,169 @@ pub fn process_keyboard_event(
         None => return EventAction::PassThrough,
     };
 
-    // Text expansion matching
+    // Text expansion matching. State is bounded and in-memory only.
     if is_key_down {
-        let is_modifier = matches!(vk_code, 0x11 | 0x12 | 0x5B | 0x5C | 0xA2 | 0xA3 | 0xA4 | 0xA5);
-        if is_modifier {
-            if let Ok(mut buf) = s.typed_buffer.lock() {
-                buf.clear();
+        let now = Instant::now();
+        let window_id = try_read_ctx(&ctx_arc)
+            .map(|ctx| ctx.active_window_id)
+            .unwrap_or(0);
+        let ctrl_mask = key_modifiers::CTRL | key_modifiers::LCTRL | key_modifiers::RCTRL;
+        let alt_win_mask = key_modifiers::ALT
+            | key_modifiers::LALT
+            | key_modifiers::RALT
+            | key_modifiers::WIN
+            | key_modifiers::LWIN
+            | key_modifiers::RWIN;
+        let ctrl_active = event_modifiers & ctrl_mask != 0;
+
+        // Ctrl+Z consumes only our immediately preceding text-only expansion.
+        if vk_code == 0x5A && ctrl_active {
+            let undo = s
+                .text_input
+                .lock()
+                .ok()
+                .and_then(|mut input| input.take_undo(now, window_id));
+            if let Some(undo) = undo {
+                // Ctrl is physically held while this branch handles Ctrl+Z. Ordinary
+                // synthetic Backspace would therefore reach the target as Ctrl+Backspace.
+                // Use the existing modifier-isolation path: release physical modifiers,
+                // emit the undo atomically through the immediate queue, then restore them.
+                let mut commands = Vec::with_capacity(undo.inserted_text.chars().count() * 2 + 1);
+                for _ in 0..undo.inserted_text.chars().count() {
+                    commands.push(SimulatorCommand::PressKey(0x08));
+                    commands.push(SimulatorCommand::ReleaseKey(0x08));
+                }
+                commands.push(SimulatorCommand::TypeString(undo.original_input));
+                send_isolated_immediate(simulator, commands);
+                if let Ok(mut input) = s.text_input.lock() {
+                    input.clear_buffer();
+                }
+                return EventAction::Block;
+            }
+        }
+
+        let hard_modifier_vk = matches!(
+            vk_code,
+            0x11 | 0x12 | 0x5B | 0x5C | 0xA2 | 0xA3 | 0xA4 | 0xA5
+        );
+        let modified_non_modifier =
+            !is_modifier_vk(vk_code) && (event_modifiers & (ctrl_mask | alt_win_mask) != 0);
+        let navigation = matches!(vk_code, 0x21..=0x28 | 0x2D);
+
+        if hard_modifier_vk {
+            // Preserve undo while Ctrl is being pressed so the following Z can consume it.
+            if let Ok(mut input) = s.text_input.lock() {
+                input.prepare(now, window_id);
+                input.clear_buffer();
+            }
+        } else if modified_non_modifier {
+            if let Ok(mut input) = s.text_input.lock() {
+                input.prepare(now, window_id);
+                input.clear_all();
             }
         } else if vk_code == 0x08 {
-            if let Ok(mut buf) = s.typed_buffer.lock() {
-                buf.pop();
+            if let Ok(mut input) = s.text_input.lock() {
+                input.prepare(now, window_id);
+                input.pop_backspace(now);
             }
-        } else {
-            let shift = is_shift_pressed();
-            if let Some(c) = vk_to_char(vk_code, shift) {
-                let mut matched_rule = None;
-                let mut matched_sequence = String::new();
+        } else if vk_code == 0x2E || navigation {
+            if let Ok(mut input) = s.text_input.lock() {
+                input.prepare(now, window_id);
+                input.clear_all();
+            }
+        } else if is_modifier_vk(vk_code) {
+            // Shift is allowed to participate in mixed-case abbreviations.
+            if let Ok(mut input) = s.text_input.lock() {
+                input.prepare(now, window_id);
+            }
+        } else if let Some(c) = vk_to_char(vk_code, scan_code) {
+            let (before, prospective) = match s.text_input.lock() {
+                Ok(mut input) => {
+                    input.prepare(now, window_id);
+                    // Any ordinary edit invalidates the previous undo. A newly fired
+                    // expansion below will install its own record.
+                    input.undo = None;
+                    let before = input.buffer.clone();
+                    let mut prospective = before.clone();
+                    prospective.push(c);
+                    (before, prospective)
+                }
+                Err(_) => (String::new(), c.to_string()),
+            };
 
-                if let Ok(mut buf) = s.typed_buffer.lock() {
-                    buf.push(c);
-                    let char_count = buf.chars().count();
-                    if char_count > 30 {
-                        let skip_chars = char_count - 30;
-                        if let Some((byte_idx, _)) = buf.char_indices().nth(skip_chars) {
-                            buf.drain(0..byte_idx);
+            let mut matched = None;
+            if let Some(ctx) = try_read_ctx(&ctx_arc) {
+                for candidate in &engine_schema.text_expansion_rules {
+                    let source = match candidate.mode {
+                        TextExpansionMode::Instant => prospective.as_str(),
+                        TextExpansionMode::Delimiter
+                            if delimiter_contains(&candidate.delimiters, c) =>
+                        {
+                            before.as_str()
                         }
-                    }
-
-                    let Some(ctx) = try_read_ctx(&ctx_arc) else {
-                        return EventAction::PassThrough;
+                        TextExpansionMode::Delimiter => continue,
                     };
-                    for (seq, rules) in &engine_schema.text_expansion_map {
-                        if buf.ends_with(seq) {
-                            for rule in rules {
-                                if check_conditions(&rule.conditions, &ctx) {
-                                    matched_rule = Some(rule.clone());
-                                    matched_sequence = seq.clone();
-                                    break;
-                                }
-                            }
-                        }
-                        if matched_rule.is_some() {
-                            break;
-                        }
-                    }
-
-                    if matched_rule.is_some() {
-                        buf.clear();
+                    if suffix_matches(source, &candidate.sequence, candidate.case_sensitive)
+                        && check_conditions(&candidate.rule.conditions, &ctx)
+                    {
+                        matched = Some(candidate.clone());
+                        break;
                     }
                 }
-
-                if let Some(rule) = matched_rule {
-                    let backspaces = matched_sequence.chars().count().saturating_sub(1);
-                    for _ in 0..backspaces {
-                        let _ = simulator.send(SimulatorCommand::PressKey(0x08));
-                        let _ = simulator.send(SimulatorCommand::ReleaseKey(0x08));
-                    }
-
-                    execute_actions(&rule.actions, simulator, &ctx_arc, true, state, 0);
-                    execute_actions(&rule.actions, simulator, &ctx_arc, false, state, 0);
-
-                    return EventAction::Block;
-                }
-            } else if let Ok(mut buf) = s.typed_buffer.lock() {
-                buf.clear();
             }
+
+            if let Some(candidate) = matched {
+                let seq_chars = candidate.sequence.chars().count();
+                let (source, delimiter) = match candidate.mode {
+                    TextExpansionMode::Instant => (&prospective, None),
+                    TextExpansionMode::Delimiter => (&before, Some(c)),
+                };
+                let backspaces = backspaces_for(candidate.mode, seq_chars);
+                let actual_sequence = suffix_chars(source, seq_chars);
+                let mut original_input = actual_sequence;
+                if let Some(delimiter) = delimiter {
+                    original_input.push(delimiter);
+                }
+
+                if let Ok(mut input) = s.text_input.lock() {
+                    input.clear_buffer();
+                }
+                for _ in 0..backspaces {
+                    let _ = simulator.send(SimulatorCommand::PressKey(0x08));
+                    let _ = simulator.send(SimulatorCommand::ReleaseKey(0x08));
+                }
+
+                let (actions, rendered_text) = materialize_text_actions(&candidate.rule.actions);
+                execute_actions(&actions, simulator, &ctx_arc, true, state, 0);
+                execute_actions(&actions, simulator, &ctx_arc, false, state, 0);
+
+                if let Some(delimiter) = delimiter {
+                    let _ = simulator.send(SimulatorCommand::TypeString(delimiter.to_string()));
+                }
+
+                if let Some(mut inserted_text) = rendered_text {
+                    if let Some(delimiter) = delimiter {
+                        inserted_text.push(delimiter);
+                    }
+                    if let Ok(mut input) = s.text_input.lock() {
+                        input.set_undo(TextUndoRecord {
+                            original_input,
+                            inserted_text,
+                            chars_removed: backspaces,
+                            timestamp: now,
+                            window_id,
+                        });
+                    }
+                }
+                return EventAction::Block;
+            }
+
+            if let Ok(mut input) = s.text_input.lock() {
+                input.note_printable(prospective, now);
+            }
+        } else if let Ok(mut input) = s.text_input.lock() {
+            input.prepare(now, window_id);
+            input.clear_all();
         }
     }
 
@@ -785,10 +985,7 @@ pub fn process_keyboard_event(
                 // activate exactly once when that same physical press is released.
                 // Mask Alt/Win immediately because their primary key is blocked.
                 if lifecycle.trigger_modifiers != 0 {
-                    send_commands(
-                        simulator,
-                        shell_mask_commands(current_physical_modifiers()),
-                    );
+                    send_commands(simulator, shell_mask_commands(current_physical_modifiers()));
                 }
                 if let Ok(mut pending) = PENDING_KEY_UP_ACTIONS.lock() {
                     pending.insert(vk_code, lifecycle);
@@ -827,8 +1024,8 @@ pub fn process_mouse_event(
     }
 
     if is_down {
-        if let Ok(mut buf) = s.typed_buffer.lock() {
-            buf.clear();
+        if let Ok(mut input) = s.text_input.lock() {
+            input.clear_all();
         }
     }
 
@@ -909,15 +1106,7 @@ pub fn process_mouse_event(
             let is_double = DOUBLE_CLICK_DETECTOR
                 .lock()
                 .map(|mut detector| {
-                    detector.register_down(
-                        button,
-                        x,
-                        y,
-                        Instant::now(),
-                        interval,
-                        max_dx,
-                        max_dy,
-                    )
+                    detector.register_down(button, x, y, Instant::now(), interval, max_dx, max_dy)
                 })
                 .unwrap_or(false);
             if is_double {
@@ -1037,52 +1226,43 @@ pub fn vk_to_key_name(vk: u8) -> String {
 }
 
 #[cfg(target_os = "windows")]
-fn is_shift_pressed() -> bool {
-    unsafe {
-        let state = windows::Win32::UI::Input::KeyboardAndMouse::GetKeyState(0x10);
-        (state & 0x8000u16 as i16) != 0
-    }
-}
-
-#[cfg(not(target_os = "windows"))]
-fn is_shift_pressed() -> bool {
-    false
-}
-
-#[cfg(target_os = "windows")]
-fn vk_to_char(vk: u8, _shift: bool) -> Option<char> {
+fn vk_to_char(vk: u8, hook_scan_code: u16) -> Option<char> {
     use windows::Win32::UI::Input::KeyboardAndMouse::{
-        GetKeyboardLayout, GetKeyboardState, MapVirtualKeyW, ToUnicodeEx, MAPVK_VK_TO_VSC_EX,
+        GetKeyboardLayout, GetKeyboardState, MAPVK_VK_TO_VSC_EX, MapVirtualKeyW, ToUnicodeEx,
     };
+
+    match vk {
+        0x20 => return Some(' '),
+        0x09 => return Some('\t'),
+        0x0D => return Some('\n'),
+        _ => {}
+    }
 
     unsafe {
         let mut key_state = [0u8; 256];
         if GetKeyboardState(&mut key_state).is_err() {
             return None;
         }
-
-        let dwhkl = GetKeyboardLayout(0);
-        let scan_code = MapVirtualKeyW(vk as u32, MAPVK_VK_TO_VSC_EX);
-
+        let layout = GetKeyboardLayout(0);
+        let scan_code = if hook_scan_code == 0 {
+            MapVirtualKeyW(vk as u32, MAPVK_VK_TO_VSC_EX)
+        } else {
+            hook_scan_code as u32
+        };
         let mut buf = [0u16; 4];
-        let result = ToUnicodeEx(vk as u32, scan_code, &key_state, &mut buf, 0, Some(dwhkl));
-
+        let result = ToUnicodeEx(vk as u32, scan_code, &key_state, &mut buf, 0, Some(layout));
         if result > 0 {
-            if let Some(c) = char::from_u32(buf[0] as u32) {
-                if !c.is_control() {
-                    return Some(c);
-                }
-            }
+            char::from_u32(buf[0] as u32).filter(|c| !c.is_control())
+        } else {
+            None
         }
-        None
     }
 }
 
 #[cfg(not(target_os = "windows"))]
-fn vk_to_char(_vk: u8, _shift: bool) -> Option<char> {
+fn vk_to_char(_vk: u8, _scan_code: u16) -> Option<char> {
     None
 }
-
 
 #[cfg(test)]
 mod chord_tests {
@@ -1121,7 +1301,10 @@ mod chord_tests {
     #[test]
     fn lifecycle_keeps_original_modifier_requirement() {
         let lifecycle = InputLifecycle {
-            actions: vec![EngineAction::RemapKey { code: 0x42, modifiers: 0 }],
+            actions: vec![EngineAction::RemapKey {
+                code: 0x42,
+                modifiers: 0,
+            }],
             trigger_modifiers: key_modifiers::CTRL | key_modifiers::SHIFT,
         };
         assert_eq!(

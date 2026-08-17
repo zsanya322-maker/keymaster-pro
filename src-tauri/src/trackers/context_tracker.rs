@@ -26,31 +26,29 @@ pub fn get_context() -> Option<AppContextState> {
 #[cfg(target_os = "windows")]
 mod win {
     use super::*;
-    use windows::core::GUID;
     use windows::Win32::Foundation::{CloseHandle, HWND, LPARAM, RECT, WPARAM};
     use windows::Win32::Graphics::Gdi::{
-        GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST,
+        GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow,
     };
     use windows::Win32::System::Com::{
-        CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
-        COINIT_APARTMENTTHREADED,
+        CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx,
+        CoUninitialize,
     };
     use windows::Win32::System::ProcessStatus::K32GetModuleBaseNameW;
     use windows::Win32::System::Threading::{
-        GetCurrentThreadId, OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32,
-        PROCESS_QUERY_INFORMATION, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_VM_READ,
+        GetCurrentThreadId, OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_INFORMATION,
+        PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_VM_READ, QueryFullProcessImageNameW,
     };
-    use windows::Win32::UI::Accessibility::{SetWinEventHook, UnhookWinEvent, HWINEVENTHOOK};
+    use windows::Win32::UI::Accessibility::{HWINEVENTHOOK, SetWinEventHook, UnhookWinEvent};
     use windows::Win32::UI::Shell::IVirtualDesktopManager;
     use windows::Win32::UI::WindowsAndMessaging::{
-        DispatchMessageW, GetClassNameW, GetForegroundWindow, GetMessageW, GetWindowRect,
-        GetWindowTextW, GetWindowThreadProcessId, PeekMessageW, PostThreadMessageW,
-        TranslateMessage, EVENT_SYSTEM_FOREGROUND, MSG, PM_NOREMOVE, WINEVENT_OUTOFCONTEXT,
-        WM_QUIT,
+        DispatchMessageW, EVENT_SYSTEM_FOREGROUND, GetClassNameW, GetForegroundWindow, GetMessageW,
+        GetWindowRect, GetWindowTextW, GetWindowThreadProcessId, MSG, PM_NOREMOVE, PeekMessageW,
+        PostThreadMessageW, TranslateMessage, WINEVENT_OUTOFCONTEXT, WM_QUIT,
     };
+    use windows::core::GUID;
 
-    const CLSID_VIRTUAL_DESKTOP_MANAGER: GUID =
-        GUID::from_u128(0xaa5090865ca94c258f95589d3c07b48a);
+    const CLSID_VIRTUAL_DESKTOP_MANAGER: GUID = GUID::from_u128(0xaa5090865ca94c258f95589d3c07b48a);
 
     fn process_info(hwnd: HWND) -> (String, String) {
         unsafe {
@@ -83,11 +81,8 @@ mod win {
                 let _ = CloseHandle(handle);
             }
 
-            if let Ok(handle) = OpenProcess(
-                PROCESS_QUERY_INFORMATION | PROCESS_VM_READ,
-                false,
-                pid,
-            ) {
+            if let Ok(handle) = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, false, pid)
+            {
                 let mut buffer = [0u16; 260];
                 let len = K32GetModuleBaseNameW(handle, None, &mut buffer);
                 let _ = CloseHandle(handle);
@@ -188,6 +183,7 @@ mod win {
         let virtual_desktop_id = virtual_desktop(hwnd);
         if let Ok(mut state) = context.write() {
             state.revision = state.revision.wrapping_add(1);
+            state.active_window_id = hwnd.0 as isize;
             state.active_process = process;
             state.active_process_path = path;
             state.active_window_title = window_title;

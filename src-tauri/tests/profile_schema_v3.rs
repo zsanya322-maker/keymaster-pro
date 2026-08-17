@@ -1,6 +1,6 @@
 use keymaster_pro_lib::schemas::frontend::FrontendAction;
 use keymaster_pro_lib::shared::persistence::{
-    export_profile_value, import_profile_value, PROFILE_SCHEMA_VERSION,
+    PROFILE_SCHEMA_VERSION, export_profile_value, import_profile_value,
 };
 use serde_json::json;
 
@@ -35,7 +35,7 @@ fn v2_macro_profile_gets_backward_compatible_playback_defaults() {
     });
 
     let profile = import_profile_value(legacy).expect("v2 macro profile should migrate");
-    assert_eq!(PROFILE_SCHEMA_VERSION, 4);
+    assert_eq!(PROFILE_SCHEMA_VERSION, 5);
     assert_eq!(profile.rules.len(), 1);
 
     match &profile.rules[0].actions[0] {
@@ -49,9 +49,12 @@ fn v2_macro_profile_gets_backward_compatible_playback_defaults() {
     }
 
     let exported = export_profile_value(&profile).expect("migrated profile should export");
-    assert_eq!(exported["schemaVersion"], 4);
+    assert_eq!(exported["schemaVersion"], 5);
     assert_eq!(exported["rules"][0]["actions"][0]["playback"]["speed"], 1.0);
-    assert_eq!(exported["rules"][0]["actions"][0]["playback"]["repeatCount"], 1);
+    assert_eq!(
+        exported["rules"][0]["actions"][0]["playback"]["repeatCount"],
+        1
+    );
     assert_eq!(
         exported["rules"][0]["actions"][0]["playback"]["repeatWhileHeld"],
         false
@@ -93,9 +96,12 @@ fn v3_macro_playback_values_round_trip_without_being_rewritten() {
     let profile = import_profile_value(current).expect("v3 macro profile should parse");
     let exported = export_profile_value(&profile).expect("v3 macro profile should export");
 
-    assert_eq!(exported["schemaVersion"], 4);
+    assert_eq!(exported["schemaVersion"], 5);
     assert_eq!(exported["rules"][0]["actions"][0]["playback"]["speed"], 2.0);
-    assert_eq!(exported["rules"][0]["actions"][0]["playback"]["repeatCount"], 5);
+    assert_eq!(
+        exported["rules"][0]["actions"][0]["playback"]["repeatCount"],
+        5
+    );
     assert_eq!(
         exported["rules"][0]["actions"][0]["playback"]["repeatWhileHeld"],
         false

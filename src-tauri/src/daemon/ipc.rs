@@ -4,7 +4,6 @@
 /// from GUI and routes them to handlers.
 ///
 /// Protocol: Newline-delimited JSON (one JSON line + \n per message).
-
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
 use tracing::{info, warn};
@@ -58,7 +57,10 @@ pub async fn start_ipc_server(
                 match pipe_options(false).create(pipe_path) {
                     Ok(next) => break next,
                     Err(create_error) => {
-                        warn!("Failed to recreate Named Pipe listener: {}. Retrying in 100ms...", create_error);
+                        warn!(
+                            "Failed to recreate Named Pipe listener: {}. Retrying in 100ms...",
+                            create_error
+                        );
                         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                     }
                 }
@@ -78,7 +80,10 @@ pub async fn start_ipc_server(
             match pipe_options(false).create(pipe_path) {
                 Ok(next) => break next,
                 Err(e) => {
-                    warn!("Failed to create next Named Pipe instance: {}. Retrying in 100ms...", e);
+                    warn!(
+                        "Failed to create next Named Pipe instance: {}. Retrying in 100ms...",
+                        e
+                    );
                     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
                 }
             }
@@ -107,10 +112,8 @@ async fn handle_client(pipe: NamedPipeServer, state: DaemonStateRef) -> Result<(
             Ok(req) => {
                 if req.method == "subscribe_events" {
                     let id = req.id.unwrap_or(serde_json::Value::Null);
-                    let response = JsonRpcResponse::success(
-                        serde_json::json!({ "subscribed": true }),
-                        id,
-                    );
+                    let response =
+                        JsonRpcResponse::success(serde_json::json!({ "subscribed": true }), id);
                     let mut response_bytes = serde_json::to_string(&response)
                         .map_err(|e| format!("Serialization error: {}", e))?;
                     response_bytes.push('\n');
@@ -307,9 +310,7 @@ fn get_current_cpu_usage_percent(state: &DaemonStateRef) -> f64 {
 }
 
 fn get_current_ram_usage_mb() -> f64 {
-    use windows::Win32::System::ProcessStatus::{
-        GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS,
-    };
+    use windows::Win32::System::ProcessStatus::{GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS};
     use windows::Win32::System::Threading::GetCurrentProcess;
 
     let mut counters = PROCESS_MEMORY_COUNTERS::default();

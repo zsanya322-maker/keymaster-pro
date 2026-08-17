@@ -31,7 +31,7 @@ export const ActionEditor: React.FC<ActionEditorProps> = ({ action, onChange, on
     } else if (type === 'remapMouse') {
       onChange({ type: 'remapMouse', code: 1 });
     } else if (type === 'typeText') {
-      onChange({ type, text: '' });
+      onChange({ type, text: '', dateFormat: 'dmy', timeFormat: 'hm24' });
     } else if (type === 'runMacro') {
       onChange({ type, steps: [], playback: { speed: 1, repeatCount: 1, repeatWhileHeld: false } });
     } else if (type === 'toggleLayer' || type === 'holdLayer') {
@@ -77,13 +77,66 @@ export const ActionEditor: React.FC<ActionEditorProps> = ({ action, onChange, on
         {!showContentBelow && (
           <div className="flex-1 min-w-0 flex items-center gap-1.5">
             {action.type === 'typeText' && (
-              <input
-                type="text"
-                value={action.text}
-                onChange={(event) => onChange({ ...action, text: event.target.value })}
-                placeholder={t('ruleBuilder.placeholders.text_to_type')}
-                className={`${controlClass} flex-1 min-w-0`}
-              />
+              <>
+                <input
+                  type="text"
+                  value={action.text}
+                  onChange={(event) => onChange({ ...action, text: event.target.value })}
+                  placeholder={t('ruleBuilder.placeholders.text_to_type')}
+                  className={`${controlClass} flex-1 min-w-0`}
+                />
+                <div className="shrink-0 flex items-center gap-0.5">
+                  {([
+                    ['{{date}}', 'Дата'],
+                    ['{{time}}', 'Время'],
+                    ['{{clipboard}}', 'Буфер'],
+                  ] as const).map(([token, label]) => (
+                    <button
+                      key={token}
+                      type="button"
+                      onClick={() => onChange({ ...action, text: `${action.text}${token}` })}
+                      className="h-7 px-1.5 border border-app-border bg-app-bg text-[9px] text-app-muted hover:bg-app-surface hover:text-app-text"
+                      title={token}
+                    >
+                      {t(`textExpansion.token_${label}`, { defaultValue: label })}
+                    </button>
+                  ))}
+                </div>
+                <details className="relative shrink-0">
+                  <summary className="list-none h-7 px-2 inline-flex items-center border border-app-border bg-app-bg text-[9px] text-app-muted hover:bg-app-surface cursor-pointer">
+                    {t('common.advanced', { defaultValue: 'Доп.' })}
+                  </summary>
+                  <div className="absolute z-40 right-0 top-8 w-56 border border-app-border bg-app-bg shadow-lg p-2 space-y-2">
+                    <label className="block">
+                      <span className="block mb-1 text-[9px] text-app-muted">{t('textExpansion.date_format', { defaultValue: 'Формат даты' })}</span>
+                      <select
+                        value={action.dateFormat}
+                        onChange={(event) => onChange({ ...action, dateFormat: event.target.value as 'dmy' | 'ymd' | 'mdy' })}
+                        className={`${selectClass} w-full`}
+                      >
+                        <option value="dmy">DD.MM.YYYY</option>
+                        <option value="ymd">YYYY-MM-DD</option>
+                        <option value="mdy">MM/DD/YYYY</option>
+                      </select>
+                    </label>
+                    <label className="block">
+                      <span className="block mb-1 text-[9px] text-app-muted">{t('textExpansion.time_format', { defaultValue: 'Формат времени' })}</span>
+                      <select
+                        value={action.timeFormat}
+                        onChange={(event) => onChange({ ...action, timeFormat: event.target.value as 'hm24' | 'hms24' | 'hm12' })}
+                        className={`${selectClass} w-full`}
+                      >
+                        <option value="hm24">24h · HH:mm</option>
+                        <option value="hms24">24h · HH:mm:ss</option>
+                        <option value="hm12">12h · h:mm AM/PM</option>
+                      </select>
+                    </label>
+                    <div className="text-[9px] leading-4 text-app-muted">
+                      {t('textExpansion.clipboard_lazy', { defaultValue: 'Буфер обмена читается только если сработал шаблон с {{clipboard}}.' })}
+                    </div>
+                  </div>
+                </details>
+              </>
             )}
 
             {action.type === 'remapKey' && (

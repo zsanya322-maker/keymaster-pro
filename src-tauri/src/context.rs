@@ -5,6 +5,8 @@ use std::sync::{Arc, RwLock};
 pub struct AppContext {
     /// Monotonic foreground-context revision. Layer changes do not increment it.
     pub revision: u64,
+    /// Opaque HWND identity used only for in-memory input lifecycle resets.
+    pub active_window_id: isize,
     pub active_process: String,
     pub active_process_path: String,
     pub active_window_title: String,

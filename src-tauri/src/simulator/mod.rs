@@ -1,22 +1,22 @@
-use std::sync::mpsc::{self, Receiver, SendError, Sender};
 use std::sync::Arc;
+use std::sync::mpsc::{self, Receiver, SendError, Sender};
 use std::thread;
 use std::time::Duration;
 use tracing::info;
 
-pub mod system;
 pub mod macro_player;
+pub mod system;
 
-use crate::schemas::engine::{MacroPlaybackConfig, SimulatorCommand};
 use self::macro_player::{MacroExecutor, MacroPlayer};
+use crate::schemas::engine::{MacroPlaybackConfig, SimulatorCommand};
 
 #[cfg(target_os = "windows")]
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT, MOUSEINPUT,
-    KEYEVENTF_KEYUP, KEYEVENTF_UNICODE,
-    MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP,
-    MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP, MOUSEEVENTF_XDOWN, MOUSEEVENTF_XUP,
-    MOUSEEVENTF_MOVE, MOUSEEVENTF_WHEEL, MOUSEEVENTF_HWHEEL, MOUSEEVENTF_ABSOLUTE,
+    INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE,
+    MOUSEEVENTF_ABSOLUTE, MOUSEEVENTF_HWHEEL, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP,
+    MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP, MOUSEEVENTF_MOVE, MOUSEEVENTF_RIGHTDOWN,
+    MOUSEEVENTF_RIGHTUP, MOUSEEVENTF_WHEEL, MOUSEEVENTF_XDOWN, MOUSEEVENTF_XUP, MOUSEINPUT,
+    SendInput,
 };
 
 /// Два независимых канала симуляции.
@@ -73,7 +73,8 @@ impl SimulatorSender {
 /// детерминированный наблюдатель и проверить именно архитектуру очередей, не
 /// генерируя реальные нажатия клавиш на CI-машине.
 fn spawn_simulator_with_executor(executor: MacroExecutor) -> SimulatorSender {
-    let (immediate_tx, immediate_rx): (Sender<SimulatorCommand>, Receiver<SimulatorCommand>) = mpsc::channel();
+    let (immediate_tx, immediate_rx): (Sender<SimulatorCommand>, Receiver<SimulatorCommand>) =
+        mpsc::channel();
     let macro_player = MacroPlayer::spawn(Arc::clone(&executor));
 
     let immediate_executor = Arc::clone(&executor);
@@ -126,7 +127,11 @@ fn send_key(vk: u8, is_keyup: bool) {
             ki: KEYBDINPUT {
                 wVk: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY(vk as u16),
                 wScan: 0,
-                dwFlags: if is_keyup { KEYEVENTF_KEYUP } else { Default::default() },
+                dwFlags: if is_keyup {
+                    KEYEVENTF_KEYUP
+                } else {
+                    Default::default()
+                },
                 time: 0,
                 dwExtraInfo: 0,
             },
@@ -147,15 +152,41 @@ fn send_mouse(button: u8, is_keyup: bool) {
     let mut mouse_data = 0;
 
     match button {
-        1 => flags = if is_keyup { MOUSEEVENTF_LEFTUP } else { MOUSEEVENTF_LEFTDOWN },
-        2 => flags = if is_keyup { MOUSEEVENTF_RIGHTUP } else { MOUSEEVENTF_RIGHTDOWN },
-        3 => flags = if is_keyup { MOUSEEVENTF_MIDDLEUP } else { MOUSEEVENTF_MIDDLEDOWN },
+        1 => {
+            flags = if is_keyup {
+                MOUSEEVENTF_LEFTUP
+            } else {
+                MOUSEEVENTF_LEFTDOWN
+            }
+        }
+        2 => {
+            flags = if is_keyup {
+                MOUSEEVENTF_RIGHTUP
+            } else {
+                MOUSEEVENTF_RIGHTDOWN
+            }
+        }
+        3 => {
+            flags = if is_keyup {
+                MOUSEEVENTF_MIDDLEUP
+            } else {
+                MOUSEEVENTF_MIDDLEDOWN
+            }
+        }
         4 => {
-            flags = if is_keyup { MOUSEEVENTF_XUP } else { MOUSEEVENTF_XDOWN };
+            flags = if is_keyup {
+                MOUSEEVENTF_XUP
+            } else {
+                MOUSEEVENTF_XDOWN
+            };
             mouse_data = 1;
         }
         5 => {
-            flags = if is_keyup { MOUSEEVENTF_XUP } else { MOUSEEVENTF_XDOWN };
+            flags = if is_keyup {
+                MOUSEEVENTF_XUP
+            } else {
+                MOUSEEVENTF_XDOWN
+            };
             mouse_data = 2;
         }
         _ => return,
@@ -257,7 +288,11 @@ fn scroll_mouse(delta: i32, horizontal: bool) {
                 dx: 0,
                 dy: 0,
                 mouseData: delta as u32,
-                dwFlags: if horizontal { MOUSEEVENTF_HWHEEL } else { MOUSEEVENTF_WHEEL },
+                dwFlags: if horizontal {
+                    MOUSEEVENTF_HWHEEL
+                } else {
+                    MOUSEEVENTF_WHEEL
+                },
                 time: 0,
                 dwExtraInfo: 0,
             },
@@ -278,8 +313,16 @@ fn move_mouse_absolute(x: i32, y: i32) {
     unsafe {
         let screen_width = GetSystemMetrics(SM_CXSCREEN);
         let screen_height = GetSystemMetrics(SM_CYSCREEN);
-        let normalized_x = if screen_width > 0 { (x * 65535) / screen_width } else { 0 };
-        let normalized_y = if screen_height > 0 { (y * 65535) / screen_height } else { 0 };
+        let normalized_x = if screen_width > 0 {
+            (x * 65535) / screen_width
+        } else {
+            0
+        };
+        let normalized_y = if screen_height > 0 {
+            (y * 65535) / screen_height
+        } else {
+            0
+        };
 
         let input = INPUT {
             r#type: INPUT_MOUSE,

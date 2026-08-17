@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tracing::info;
 
 use crate::daemon::state::DaemonStateRef;
@@ -95,7 +95,8 @@ fn regenerate_profile_identity(
             }
         }
         for condition in &mut rule.conditions {
-            if let crate::schemas::frontend::FrontendCondition::LayerActive { layer_id } = condition {
+            if let crate::schemas::frontend::FrontendCondition::LayerActive { layer_id } = condition
+            {
                 if let Some(new_id) = layer_ids.get(layer_id) {
                     *layer_id = new_id.clone();
                 }
@@ -165,7 +166,11 @@ pub async fn dispatch(
                     list.push(prof);
                 }
             }
-            list.sort_by(|a, b| a.order.cmp(&b.order).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase())));
+            list.sort_by(|a, b| {
+                a.order
+                    .cmp(&b.order)
+                    .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+            });
             let active = {
                 let s = state.read().map_err(|_| "Failed to lock state")?;
                 s.active_profile_id.clone()
@@ -317,9 +322,18 @@ pub async fn dispatch(
         }
         "profile.rename" => {
             let value = params.ok_or("Missing parameters")?;
-            let id = value.get("id").and_then(Value::as_str).ok_or("Missing id")?;
-            let name = value.get("name").and_then(Value::as_str).ok_or("Missing name")?.trim();
-            if name.is_empty() { return Err("Name is empty".into()); }
+            let id = value
+                .get("id")
+                .and_then(Value::as_str)
+                .ok_or("Missing id")?;
+            let name = value
+                .get("name")
+                .and_then(Value::as_str)
+                .ok_or("Missing name")?
+                .trim();
+            if name.is_empty() {
+                return Err("Name is empty".into());
+            }
             let mut profile = crate::shared::persistence::load_profile_checked(id)?;
             profile.name = name.to_string();
             crate::shared::persistence::save_profile(&profile)?;
@@ -328,7 +342,10 @@ pub async fn dispatch(
         }
         "profile.duplicate" => {
             let value = params.ok_or("Missing parameters")?;
-            let id = value.get("id").and_then(Value::as_str).ok_or("Missing id")?;
+            let id = value
+                .get("id")
+                .and_then(Value::as_str)
+                .ok_or("Missing id")?;
             let mut profile = crate::shared::persistence::load_profile_checked(id)?;
             let new_id = value
                 .get("newId")
@@ -351,7 +368,10 @@ pub async fn dispatch(
         }
         "profile.reorder" => {
             let value = params.ok_or("Missing parameters")?;
-            let ids = value.get("ids").and_then(Value::as_array).ok_or("Missing ids")?;
+            let ids = value
+                .get("ids")
+                .and_then(Value::as_array)
+                .ok_or("Missing ids")?;
             for (index, id) in ids.iter().filter_map(Value::as_str).enumerate() {
                 if let Ok(mut profile) = crate::shared::persistence::load_profile_checked(id) {
                     profile.order = index as i32;
@@ -362,18 +382,30 @@ pub async fn dispatch(
         }
         "profile.backups" => {
             let value = params.ok_or("Missing parameters")?;
-            let id = value.get("id").and_then(Value::as_str).ok_or("Missing id")?;
+            let id = value
+                .get("id")
+                .and_then(Value::as_str)
+                .ok_or("Missing id")?;
             Ok(json!({"backups": crate::shared::persistence::list_profile_backups(id)?}))
         }
         "profile.backup.create" => {
             let value = params.ok_or("Missing parameters")?;
-            let id = value.get("id").and_then(Value::as_str).ok_or("Missing id")?;
+            let id = value
+                .get("id")
+                .and_then(Value::as_str)
+                .ok_or("Missing id")?;
             Ok(json!({"name": crate::shared::persistence::create_profile_backup(id)?}))
         }
         "profile.backup.restore" => {
             let value = params.ok_or("Missing parameters")?;
-            let id = value.get("id").and_then(Value::as_str).ok_or("Missing id")?;
-            let name = value.get("name").and_then(Value::as_str).ok_or("Missing name")?;
+            let id = value
+                .get("id")
+                .and_then(Value::as_str)
+                .ok_or("Missing id")?;
+            let name = value
+                .get("name")
+                .and_then(Value::as_str)
+                .ok_or("Missing name")?;
             let profile = crate::shared::persistence::restore_profile_backup(id, name)?;
             update_active_profile_runtime(profile.clone(), state)?;
             serde_json::to_value(profile).map_err(|error| error.to_string())
@@ -392,7 +424,10 @@ pub async fn dispatch(
             if let Some(p) = params {
                 let example_type = p.get("type").and_then(|v| v.as_str()).unwrap_or("");
                 if !matches!(example_type, "remap" | "expansion" | "macro") {
-                    return Err(format!("Неизвестный тип onboarding-примера: {}", example_type));
+                    return Err(format!(
+                        "Неизвестный тип onboarding-примера: {}",
+                        example_type
+                    ));
                 }
 
                 let active_id = {
@@ -409,8 +444,12 @@ pub async fn dispatch(
                         "remap" => FrontendRule {
                             id: uuid::Uuid::new_v4().to_string(),
                             name: Some("Caps Lock -> Backspace".to_string()),
-                            trigger: FrontendTrigger::KeyDown { chord: KeyChord::single(20) }, // VK_CAPITAL
-                            actions: vec![FrontendAction::RemapKey { chord: KeyChord::single(8) }], // VK_BACK
+                            trigger: FrontendTrigger::KeyDown {
+                                chord: KeyChord::single(20),
+                            }, // VK_CAPITAL
+                            actions: vec![FrontendAction::RemapKey {
+                                chord: KeyChord::single(8),
+                            }], // VK_BACK
                             hold_actions: None,
                             conditions: vec![],
                             priority: 10,
@@ -423,9 +462,14 @@ pub async fn dispatch(
                             name: Some("Email Expansion".to_string()),
                             trigger: FrontendTrigger::TypedText {
                                 sequence: "@@".to_string(),
+                                mode: crate::schemas::frontend::TextExpansionMode::Instant,
+                                delimiters: " \t\n.,;:!?".into(),
+                                case_sensitive: true,
                             },
                             actions: vec![FrontendAction::TypeText {
                                 text: "user@example.com".to_string(),
+                                date_format: crate::schemas::frontend::TextDateFormat::Dmy,
+                                time_format: crate::schemas::frontend::TextTimeFormat::Hm24,
                             }],
                             hold_actions: None,
                             conditions: vec![],
@@ -437,7 +481,9 @@ pub async fn dispatch(
                         "macro" => FrontendRule {
                             id: uuid::Uuid::new_v4().to_string(),
                             name: Some("Demo Macro".to_string()),
-                            trigger: FrontendTrigger::KeyDown { chord: KeyChord::single(123) }, // F12
+                            trigger: FrontendTrigger::KeyDown {
+                                chord: KeyChord::single(123),
+                            }, // F12
                             actions: vec![FrontendAction::RunMacro {
                                 steps: vec![
                                     MacroStep {
@@ -487,9 +533,9 @@ pub async fn dispatch(
                 playback: crate::schemas::frontend::MacroPlayback,
             }
 
-            let input: MacroPreviewInput = serde_json::from_value(
-                params.ok_or_else(|| "Missing parameters".to_string())?
-            ).map_err(|e| e.to_string())?;
+            let input: MacroPreviewInput =
+                serde_json::from_value(params.ok_or_else(|| "Missing parameters".to_string())?)
+                    .map_err(|e| e.to_string())?;
             let commands = crate::daemon::compiler::compile_macro_commands(&input.steps);
             let mut playback = crate::daemon::compiler::compile_macro_playback(&input.playback);
             // A preview must always be bounded. Repeat count/speed are preserved,
@@ -497,7 +543,9 @@ pub async fn dispatch(
             playback.repeat_while_held = false;
             let simulator = {
                 let s = state.read().map_err(|_| "Failed to lock state")?;
-                s.simulator.clone().ok_or_else(|| "Simulator is not ready".to_string())?
+                s.simulator
+                    .clone()
+                    .ok_or_else(|| "Simulator is not ready".to_string())?
             };
             let job_id = simulator.send_macro(
                 commands,
@@ -509,7 +557,9 @@ pub async fn dispatch(
         "macro.stop_playback" => {
             let simulator = {
                 let s = state.read().map_err(|_| "Failed to lock state")?;
-                s.simulator.clone().ok_or_else(|| "Simulator is not ready".to_string())?
+                s.simulator
+                    .clone()
+                    .ok_or_else(|| "Simulator is not ready".to_string())?
             };
             simulator.cancel_current_macro();
             Ok(json!({ "success": true }))
@@ -517,7 +567,9 @@ pub async fn dispatch(
         "macro.emergency_stop" => {
             let simulator = {
                 let s = state.read().map_err(|_| "Failed to lock state")?;
-                s.simulator.clone().ok_or_else(|| "Simulator is not ready".to_string())?
+                s.simulator
+                    .clone()
+                    .ok_or_else(|| "Simulator is not ready".to_string())?
             };
             simulator.cancel_all_macros();
             Ok(json!({ "success": true }))
@@ -587,9 +639,7 @@ pub async fn dispatch(
         }
         "macro.get_recording_status" => {
             let s = state.read().map_err(|_| "Failed to lock state")?;
-            let is_recording = s
-                .is_recording
-                .load(std::sync::atomic::Ordering::Relaxed);
+            let is_recording = s.is_recording.load(std::sync::atomic::Ordering::Relaxed);
             let count = s.recorded_steps.lock().map(|g| g.len()).unwrap_or(0);
             Ok(json!({
                 "isRecording": is_recording,
@@ -644,10 +694,7 @@ pub async fn dispatch(
             // Когда active=true, оба LL-хука пропускают события мимо engine —
             // GUI может записать любую клавишу, даже заблокированную правилом.
             if let Some(p) = params {
-                let active = p
-                    .get("active")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false);
+                let active = p.get("active").and_then(|v| v.as_bool()).unwrap_or(false);
                 let s = state.write().map_err(|_| "Failed to lock state")?;
                 s.key_capture_active
                     .store(active, std::sync::atomic::Ordering::Relaxed);
@@ -668,7 +715,10 @@ pub async fn dispatch(
         "keycapture.get_captured_key" => {
             let chord = {
                 let s = state.read().map_err(|_| "Failed to lock state")?;
-                if !s.key_capture_active.load(std::sync::atomic::Ordering::Relaxed) {
+                if !s
+                    .key_capture_active
+                    .load(std::sync::atomic::Ordering::Relaxed)
+                {
                     return Ok(json!({ "code": 0, "modifiers": 0 }));
                 }
                 let mut captured = s
@@ -746,7 +796,6 @@ pub async fn dispatch(
     }
 }
 
-
 #[cfg(test)]
 mod v032_profile_identity_tests {
     use super::regenerate_profile_identity;
@@ -765,18 +814,39 @@ mod v032_profile_identity_tests {
             linked_apps: vec![],
             bindings: vec![],
             order: 4,
-            layers: vec![LayerMeta { id: "layer-old".into(), name: "Layer".into() }],
+            layers: vec![LayerMeta {
+                id: "layer-old".into(),
+                name: "Layer".into(),
+            }],
             folders: vec![
-                RuleFolder { id: "folder-root".into(), name: "Root".into(), parent_id: None, order: 0 },
-                RuleFolder { id: "folder-child".into(), name: "Child".into(), parent_id: Some("folder-root".into()), order: 1 },
+                RuleFolder {
+                    id: "folder-root".into(),
+                    name: "Root".into(),
+                    parent_id: None,
+                    order: 0,
+                },
+                RuleFolder {
+                    id: "folder-child".into(),
+                    name: "Child".into(),
+                    parent_id: Some("folder-root".into()),
+                    order: 1,
+                },
             ],
             rules: vec![FrontendRule {
                 id: "rule-old".into(),
                 name: Some("Rule".into()),
-                trigger: FrontendTrigger::KeyDown { chord: KeyChord::single(65) },
-                actions: vec![FrontendAction::ToggleLayer { layer_id: "layer-old".into() }],
-                hold_actions: Some(vec![FrontendAction::HoldLayer { layer_id: "layer-old".into() }]),
-                conditions: vec![FrontendCondition::LayerActive { layer_id: "layer-old".into() }],
+                trigger: FrontendTrigger::KeyDown {
+                    chord: KeyChord::single(65),
+                },
+                actions: vec![FrontendAction::ToggleLayer {
+                    layer_id: "layer-old".into(),
+                }],
+                hold_actions: Some(vec![FrontendAction::HoldLayer {
+                    layer_id: "layer-old".into(),
+                }]),
+                conditions: vec![FrontendCondition::LayerActive {
+                    layer_id: "layer-old".into(),
+                }],
                 priority: 0,
                 enabled: true,
                 folder_id: Some("folder-child".into()),
@@ -791,13 +861,25 @@ mod v032_profile_identity_tests {
         assert_ne!(profile.layers[0].id, "layer-old");
         assert_ne!(profile.folders[0].id, "folder-root");
         assert_ne!(profile.folders[1].id, "folder-child");
-        assert_eq!(profile.folders[1].parent_id.as_deref(), Some(profile.folders[0].id.as_str()));
+        assert_eq!(
+            profile.folders[1].parent_id.as_deref(),
+            Some(profile.folders[0].id.as_str())
+        );
         assert_ne!(profile.rules[0].id, "rule-old");
-        assert_eq!(profile.rules[0].folder_id.as_deref(), Some(profile.folders[1].id.as_str()));
+        assert_eq!(
+            profile.rules[0].folder_id.as_deref(),
+            Some(profile.folders[1].id.as_str())
+        );
 
         let layer_id = profile.layers[0].id.as_str();
-        assert!(matches!(&profile.rules[0].conditions[0], FrontendCondition::LayerActive { layer_id: id } if id == layer_id));
-        assert!(matches!(&profile.rules[0].actions[0], FrontendAction::ToggleLayer { layer_id: id } if id == layer_id));
-        assert!(matches!(&profile.rules[0].hold_actions.as_ref().unwrap()[0], FrontendAction::HoldLayer { layer_id: id } if id == layer_id));
+        assert!(
+            matches!(&profile.rules[0].conditions[0], FrontendCondition::LayerActive { layer_id: id } if id == layer_id)
+        );
+        assert!(
+            matches!(&profile.rules[0].actions[0], FrontendAction::ToggleLayer { layer_id: id } if id == layer_id)
+        );
+        assert!(
+            matches!(&profile.rules[0].hold_actions.as_ref().unwrap()[0], FrontendAction::HoldLayer { layer_id: id } if id == layer_id)
+        );
     }
 }

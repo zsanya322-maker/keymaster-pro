@@ -50,6 +50,9 @@ export interface FrontendRule {
 }
 
 export type MouseWheelDirection = 'up' | 'down' | 'left' | 'right'
+export type TextExpansionMode = 'instant' | 'delimiter'
+export type TextDateFormat = 'dmy' | 'ymd' | 'mdy'
+export type TextTimeFormat = 'hm24' | 'hms24' | 'hm12'
 
 export type FrontendTrigger =
   | { type: 'keyDown'; code: number; modifiers: number }
@@ -60,7 +63,7 @@ export type FrontendTrigger =
   | { type: 'mouseDoubleClick'; code: number }
   | { type: 'mouseMove'; minDistance: number; cooldownMs: number }
   | { type: 'tapHoldKeyDown'; code: number; timeoutMs: number }
-  | { type: 'typedText'; sequence: string }
+  | { type: 'typedText'; sequence: string; mode: TextExpansionMode; delimiters: string; caseSensitive: boolean }
 
 export interface MacroPlayback {
   speed: number
@@ -71,7 +74,7 @@ export interface MacroPlayback {
 export type FrontendAction =
   | { type: 'remapKey'; code: number; modifiers: number }
   | { type: 'remapMouse'; code: number }
-  | { type: 'typeText'; text: string }
+  | { type: 'typeText'; text: string; dateFormat: TextDateFormat; timeFormat: TextTimeFormat }
   | { type: 'runMacro'; steps: MacroStep[]; playback: MacroPlayback }
   | { type: 'toggleLayer'; layerId: string }
   | { type: 'holdLayer'; layerId: string }

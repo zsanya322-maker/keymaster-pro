@@ -1,5 +1,6 @@
-use std::collections::HashMap;
+use crate::schemas::frontend::{TextDateFormat, TextExpansionMode, TextTimeFormat};
 use crate::shared::types::MatchMode;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub struct EngineSchema {
@@ -10,7 +11,7 @@ pub struct EngineSchema {
     pub mouse_double_click_map: HashMap<u8, Vec<CompiledRule>>,
     pub mouse_move_rules: Vec<CompiledMouseMoveRule>,
     pub tap_hold_map: HashMap<u8, Vec<CompiledTapHoldRule>>,
-    pub text_expansion_map: HashMap<String, Vec<CompiledRule>>,
+    pub text_expansion_rules: Vec<CompiledTextExpansionRule>,
 }
 
 impl Default for EngineSchema {
@@ -22,7 +23,7 @@ impl Default for EngineSchema {
             mouse_double_click_map: HashMap::new(),
             mouse_move_rules: Vec::new(),
             tap_hold_map: HashMap::new(),
-            text_expansion_map: HashMap::new(),
+            text_expansion_rules: Vec::new(),
         }
     }
 }
@@ -38,6 +39,15 @@ pub struct CompiledRule {
     pub trigger_on_down: bool,
     pub conditions: Vec<EngineCondition>,
     pub actions: Vec<EngineAction>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CompiledTextExpansionRule {
+    pub sequence: String,
+    pub mode: TextExpansionMode,
+    pub delimiters: String,
+    pub case_sensitive: bool,
+    pub rule: CompiledRule,
 }
 
 #[derive(Debug, Clone)]
@@ -61,15 +71,27 @@ pub struct CompiledTapHoldRule {
 
 #[derive(Debug, Clone)]
 pub enum EngineCondition {
-    LayerActive { layer_id_hash: u64 },
-    VirtualDesktop { id: u32 },
+    LayerActive {
+        layer_id_hash: u64,
+    },
+    VirtualDesktop {
+        id: u32,
+    },
     /// Объединённое условие «Активное окно»: срабатывает по ИЛИ.
     /// Хотя бы одно поле должно быть Some. None = не проверяется.
     ContextMatch {
-        process: Option<String>, path: Option<String>, title: Option<String>, class_name: Option<String>,
-        virtual_desktop_id: Option<String>, monitor_id: Option<String>,
-        min_width: Option<i32>, max_width: Option<i32>, min_height: Option<i32>, max_height: Option<i32>,
-        fullscreen: Option<bool>, mode: MatchMode,
+        process: Option<String>,
+        path: Option<String>,
+        title: Option<String>,
+        class_name: Option<String>,
+        virtual_desktop_id: Option<String>,
+        monitor_id: Option<String>,
+        min_width: Option<i32>,
+        max_width: Option<i32>,
+        min_height: Option<i32>,
+        max_height: Option<i32>,
+        fullscreen: Option<bool>,
+        mode: MatchMode,
     },
     WindowMatch {
         process_hash: Option<u64>,
@@ -97,7 +119,11 @@ impl Default for MacroPlaybackConfig {
 impl MacroPlaybackConfig {
     pub fn normalized(self) -> Self {
         Self {
-            speed: if self.speed.is_finite() { self.speed.clamp(0.1, 10.0) } else { 1.0 },
+            speed: if self.speed.is_finite() {
+                self.speed.clamp(0.1, 10.0)
+            } else {
+                1.0
+            },
             repeat_count: self.repeat_count.clamp(1, 10_000),
             repeat_while_held: self.repeat_while_held,
         }
@@ -112,32 +138,70 @@ pub enum SimulatorCommand {
     MouseRelease(u8),
     TypeString(String),
     Delay(u32),
-    MouseMove { dx: i32, dy: i32 },
-    MouseScroll { delta: i32 },
-    MouseHScroll { delta: i32 },
-    MouseAbsolute { x: i32, y: i32 },
+    MouseMove {
+        dx: i32,
+        dy: i32,
+    },
+    MouseScroll {
+        delta: i32,
+    },
+    MouseHScroll {
+        delta: i32,
+    },
+    MouseAbsolute {
+        x: i32,
+        y: i32,
+    },
     /// Re-assert only source modifiers that are still physically held when the
     /// command executes. Used at the end of asynchronous macro jobs.
-    RestorePhysicalModifiers { mask: u16 },
+    RestorePhysicalModifiers {
+        mask: u16,
+    },
 }
 
 #[derive(Debug, Clone)]
 pub enum EngineAction {
-    RemapKey { code: u8, modifiers: u16 },
-    RemapMouse { code: u8 },
-    TypeText { text: String },
+    RemapKey {
+        code: u8,
+        modifiers: u16,
+    },
+    RemapMouse {
+        code: u8,
+    },
+    TypeText {
+        text: String,
+        date_format: TextDateFormat,
+        time_format: TextTimeFormat,
+    },
+    TypeTextLiteral {
+        text: String,
+    },
     MacroCommands {
         commands: Vec<SimulatorCommand>,
         playback: MacroPlaybackConfig,
         macro_key: u64,
     },
-    ToggleLayer { layer_id_hash: u64 },
-    HoldLayerPush { layer_id_hash: u64 },
-    HoldLayerPop { layer_id_hash: u64 },
-    SystemVolume { action: String },
-    MediaKey { key: String },
-    WindowAction { action: String },
-    LaunchApp { path: String },
+    ToggleLayer {
+        layer_id_hash: u64,
+    },
+    HoldLayerPush {
+        layer_id_hash: u64,
+    },
+    HoldLayerPop {
+        layer_id_hash: u64,
+    },
+    SystemVolume {
+        action: String,
+    },
+    MediaKey {
+        key: String,
+    },
+    WindowAction {
+        action: String,
+    },
+    LaunchApp {
+        path: String,
+    },
     /// Поднять окно указанного процесса/заголовка поверх всех окон.
     /// Поиск по ИЛИ: process (точное совпадение clean-имени) ИЛИ title (содержит).
     FocusProcess {

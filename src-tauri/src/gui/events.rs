@@ -2,8 +2,7 @@
 ///
 /// Daemon отправляет уведомления через Named Pipe,
 /// GUI преобразует их в Tauri events для React.
-
-use std::sync::{Mutex, LazyLock};
+use std::sync::{LazyLock, Mutex};
 use tokio::sync::mpsc;
 
 pub static EVENT_LISTENERS: LazyLock<Mutex<Vec<mpsc::UnboundedSender<String>>>> =
@@ -29,7 +28,10 @@ pub fn broadcast_event(event: DaemonEvent) {
 #[serde(tag = "type")]
 pub enum DaemonEvent {
     /// Слой активирован
-    LayerActivated { layer_id: String, layer_name: String },
+    LayerActivated {
+        layer_id: String,
+        layer_name: String,
+    },
     /// Слой деактивирован
     LayerDeactivated { layer_id: String },
     /// Шаг макроса записан
@@ -39,5 +41,8 @@ pub enum DaemonEvent {
     /// Профиль переключён
     ProfileSwitched { profile_id: String },
     /// Статус хуков изменён
-    HooksStatusChanged { kb_enabled: bool, mouse_enabled: bool },
+    HooksStatusChanged {
+        kb_enabled: bool,
+        mouse_enabled: bool,
+    },
 }

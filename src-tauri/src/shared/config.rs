@@ -3,13 +3,12 @@
 /// Чтение/запись настроек в %APPDATA%\KeyMaster Pro\config.json.
 /// Повреждённый файл не теряется: перед восстановлением дефолта он копируется
 /// в backups/. Валидные legacy-конфиги мигрируются только после backup.
-
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tracing::{info, warn};
 
 use crate::shared::types::AppConfig;
@@ -65,17 +64,26 @@ fn validate_config(config: &AppConfig) -> Result<(), String> {
 }
 
 fn migrate_config_value(mut value: Value) -> Result<(Value, bool), ConfigDecodeError> {
-    let object = value
-        .as_object_mut()
-        .ok_or_else(|| ConfigDecodeError::Invalid("Корень config.json должен быть JSON-объектом".to_string()))?;
+    let object = value.as_object_mut().ok_or_else(|| {
+        ConfigDecodeError::Invalid("Корень config.json должен быть JSON-объектом".to_string())
+    })?;
 
     let mut version = match object.get("schemaVersion") {
         None => 0,
         Some(value) => value
             .as_u64()
-            .ok_or_else(|| ConfigDecodeError::Invalid("schemaVersion config.json должна быть целым неотрицательным числом".to_string()))?
+            .ok_or_else(|| {
+                ConfigDecodeError::Invalid(
+                    "schemaVersion config.json должна быть целым неотрицательным числом"
+                        .to_string(),
+                )
+            })?
             .try_into()
-            .map_err(|_| ConfigDecodeError::Invalid("schemaVersion config.json выходит за диапазон u32".to_string()))?,
+            .map_err(|_| {
+                ConfigDecodeError::Invalid(
+                    "schemaVersion config.json выходит за диапазон u32".to_string(),
+                )
+            })?,
     };
 
     if version > CONFIG_SCHEMA_VERSION {
@@ -96,7 +104,7 @@ fn migrate_config_value(mut value: Value) -> Result<(Value, bool), ConfigDecodeE
                 return Err(ConfigDecodeError::Invalid(format!(
                     "Нет миграции config.json для schemaVersion={}",
                     other
-                )))
+                )));
             }
         }
     }
@@ -120,8 +128,8 @@ fn parse_config(data: &str) -> Result<(AppConfig, Value, bool), ConfigDecodeErro
 
 fn config_to_value(config: &AppConfig) -> Result<Value, String> {
     validate_config(config)?;
-    let mut value = serde_json::to_value(config)
-        .map_err(|e| format!("Ошибка сериализации config: {}", e))?;
+    let mut value =
+        serde_json::to_value(config).map_err(|e| format!("Ошибка сериализации config: {}", e))?;
     let object = value
         .as_object_mut()
         .ok_or_else(|| "Сериализованный config не является JSON-объектом".to_string())?;
@@ -148,10 +156,10 @@ fn backup_config(path: &Path, reason: &str) -> Result<PathBuf, String> {
 fn replace_file_atomically(temp_path: &Path, destination: &Path) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
-        use windows::core::HSTRING;
         use windows::Win32::Storage::FileSystem::{
-            MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+            MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
         };
+        use windows::core::HSTRING;
 
         let source = HSTRING::from(temp_path.to_string_lossy().as_ref());
         let target = HSTRING::from(destination.to_string_lossy().as_ref());
@@ -239,8 +247,8 @@ pub fn load_config() -> Result<AppConfig, String> {
         return Ok(config);
     }
 
-    let data = fs::read_to_string(&path)
-        .map_err(|e| format!("Ошибка чтения config.json: {}", e))?;
+    let data =
+        fs::read_to_string(&path).map_err(|e| format!("Ошибка чтения config.json: {}", e))?;
 
     match parse_config(&data) {
         Ok((config, migrated_value, was_migrated)) => {
@@ -273,13 +281,13 @@ pub fn load_config() -> Result<AppConfig, String> {
             }
             Ok(config)
         }
-        Err(ConfigDecodeError::FutureSchema(version)) => {
-            Err(format!(
-                "config.json использует более новую schemaVersion={} (поддерживается до {}). Файл оставлен без изменений; обновите KeyMaster Pro.",
-                version, CONFIG_SCHEMA_VERSION
-            ))
+        Err(ConfigDecodeError::FutureSchema(version)) => Err(format!(
+            "config.json использует более новую schemaVersion={} (поддерживается до {}). Файл оставлен без изменений; обновите KeyMaster Pro.",
+            version, CONFIG_SCHEMA_VERSION
+        )),
+        Err(error @ ConfigDecodeError::Invalid(_)) => {
+            recover_invalid_config(&path, &error.message())
         }
-        Err(error @ ConfigDecodeError::Invalid(_)) => recover_invalid_config(&path, &error.message()),
     }
 }
 
@@ -297,11 +305,14 @@ mod tests {
 
     #[test]
     fn old_config_missing_new_fields_uses_defaults_and_migrates() {
-        let (parsed, value, migrated) = parse_config(r#"{
+        let (parsed, value, migrated) = parse_config(
+            r#"{
             "language": "ru",
             "theme": "light",
             "activeProfileId": "1"
-        }"#).unwrap();
+        }"#,
+        )
+        .unwrap();
 
         assert!(migrated);
         assert_eq!(parsed.language, "ru");

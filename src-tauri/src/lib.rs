@@ -1,15 +1,14 @@
+pub mod context;
 /// KeyMaster Pro Library
 ///
 /// Handles Tauri GUI initialization, plugin registration, and commands.
-
 pub mod daemon;
 pub mod gui;
-pub mod shared;
 pub mod logging;
 pub mod schemas;
-pub mod context;
-pub mod trackers;
+pub mod shared;
 pub mod simulator;
+pub mod trackers;
 
 use gui::commands::GuiState;
 use tauri::{Emitter, Manager};
