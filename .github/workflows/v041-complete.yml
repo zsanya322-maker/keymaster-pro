@@ -1,0 +1,104 @@
+name: v0.4.1 UX Macro Library
+
+on:
+  push:
+    branches:
+      - dev/v0.4.1-ux-macro-library
+    paths:
+      - .github/workflows/v041-complete.yml
+      - scripts/v041_*.py
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  complete:
+    runs-on: windows-2025
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: dev/v0.4.1-ux-macro-library
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri -> target
+
+      - name: Apply v0.4.1 implementation
+        shell: pwsh
+        run: |
+          python scripts/v041_schema.py
+          python scripts/v041_ui.py
+          python scripts/v041_audit.py
+          Get-ChildItem scripts/v041_fix*.py -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object { python $_.FullName; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } }
+          cargo fmt --manifest-path src-tauri/Cargo.toml --all
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Frontend build
+        run: pnpm build
+
+      - name: Rust check
+        working-directory: src-tauri
+        run: cargo check --all-targets
+
+      - name: Rust tests
+        working-directory: src-tauri
+        run: cargo test --all-targets
+
+      - name: ESLint
+        run: pnpm lint
+
+      - name: Build unsigned dev NSIS
+        shell: pwsh
+        run: |
+          $config = "src-tauri/tauri.conf.json"
+          $json = Get-Content $config -Raw | ConvertFrom-Json
+          $original = $json.bundle.createUpdaterArtifacts
+          $json.bundle.createUpdaterArtifacts = $false
+          $json | ConvertTo-Json -Depth 100 | Set-Content $config -Encoding utf8
+          try {
+            pnpm tauri build --bundles nsis
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          finally {
+            $json.bundle.createUpdaterArtifacts = $original
+            $json | ConvertTo-Json -Depth 100 | Set-Content $config -Encoding utf8
+          }
+
+      - name: Commit validated v0.4.1
+        shell: pwsh
+        run: |
+          git config user.name "AlexB322"
+          git config user.email "264132173+zsanya322-maker@users.noreply.github.com"
+          Get-ChildItem scripts/v041_*.py -ErrorAction SilentlyContinue | ForEach-Object { git rm -f -- $_.FullName }
+          git rm -f .github/workflows/v041-complete.yml
+          git add -A
+          git commit -m "feat(0.4.1): simplify rule UX and add macro library"
+          git push origin HEAD:dev/v0.4.1-ux-macro-library
+
+      - name: Upload v0.4.1 NSIS
+        uses: actions/upload-artifact@v4
+        with:
+          name: KeyMaster-Pro-v0.4.1-Windows
+          path: src-tauri/target/release/bundle/nsis/*
+          if-no-files-found: error
