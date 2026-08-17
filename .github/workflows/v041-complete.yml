@@ -45,11 +45,19 @@ jobs:
       - name: Apply v0.4.1 implementation
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
           python scripts/v041_schema.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python scripts/v041_ui.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-ChildItem scripts/v041_fix*.py -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object {
+            python $_.FullName
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
           python scripts/v041_audit.py
-          Get-ChildItem scripts/v041_fix*.py -ErrorAction SilentlyContinue | Sort-Object Name | ForEach-Object { python $_.FullName; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE } }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo fmt --manifest-path src-tauri/Cargo.toml --all
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
