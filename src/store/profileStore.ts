@@ -31,7 +31,7 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
     try {
       const res = await invoke<{ profiles: Profile[], active: string }>('ipc_call', { method: 'profile.list' })
       set({
-        profiles: res.profiles.map(profile => ({ ...profile, bindings: profile.bindings ?? [], order: profile.order ?? 0 })),
+        profiles: res.profiles.map(profile => ({ ...profile, bindings: profile.bindings ?? [], macros: profile.macros ?? [], order: profile.order ?? 0 })),
         activeProfileId: res.active,
       })
       return true
@@ -74,6 +74,7 @@ export const useProfileStore = create<ProfileState>((set, get) => ({
         bindings: [],
         order: 0,
         rules: [],
+        macros: [],
         layers: [],
         folders: [],
         ...partial,

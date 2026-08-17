@@ -27,6 +27,7 @@ export interface Profile {
   bindings: ProfileBinding[]
   order: number
   rules: FrontendRule[]
+  macros: MacroDefinition[]
   layers: LayerMeta[]
   folders: RuleFolder[]
 }
@@ -80,7 +81,7 @@ export type FrontendAction =
   | { type: 'remapKey'; code: number; modifiers: number }
   | { type: 'remapMouse'; code: number }
   | { type: 'typeText'; text: string; dateFormat: TextDateFormat; timeFormat: TextTimeFormat }
-  | { type: 'runMacro'; steps: MacroStep[]; playback: MacroPlayback }
+  | { type: 'runMacro'; macroId: string; playback: MacroPlayback }
   | { type: 'toggleLayer'; layerId: string }
   | { type: 'holdLayer'; layerId: string }
   | { type: 'systemVolume'; action: 'mute' | 'up' | 'down' }
@@ -104,6 +105,12 @@ export type MacroAction =
 export interface MacroStep {
   action: MacroAction
   delayMs: number
+}
+
+export interface MacroDefinition {
+  id: Uuid
+  name: string
+  steps: MacroStep[]
 }
 
 export type FrontendCondition =

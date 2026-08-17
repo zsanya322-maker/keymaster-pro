@@ -38,7 +38,7 @@ fn v5_profiles_migrate_to_v6_without_rewriting_old_rules() {
         )
     ]));
     let profile = import_profile_value(source).expect("v5 should migrate to v6");
-    assert_eq!(PROFILE_SCHEMA_VERSION, 6);
+    assert_eq!(PROFILE_SCHEMA_VERSION, 7);
     assert!(matches!(
         profile.rules[0].trigger,
         FrontendTrigger::KeyDown { .. }
@@ -48,7 +48,7 @@ fn v5_profiles_migrate_to_v6_without_rewriting_old_rules() {
         FrontendTrigger::TypedText { .. }
     ));
     let exported = export_profile_value(&profile).unwrap();
-    assert_eq!(exported["schemaVersion"], 6);
+    assert_eq!(exported["schemaVersion"], 7);
     assert_eq!(exported["rules"][0]["trigger"]["type"], "keyDown");
     assert_eq!(exported["rules"][1]["trigger"]["caseSensitive"], true);
 }
@@ -137,7 +137,7 @@ fn frontend_advanced_trigger_contract_round_trips_all_variants() {
     }
 
     let exported = export_profile_value(&profile).unwrap();
-    assert_eq!(exported["schemaVersion"], 6);
+    assert_eq!(exported["schemaVersion"], 7);
     assert_eq!(exported["rules"][0]["trigger"]["timeoutMs"], 900);
     assert_eq!(exported["rules"][2]["trigger"]["maxSkewMs"], 75);
     assert_eq!(exported["rules"][3]["trigger"]["minDistance"], 30);

@@ -103,6 +103,7 @@ fn resolve_startup_profile(
             bindings: vec![],
             order: 0,
             rules: vec![],
+            macros: vec![],
             layers: vec![],
             folders: vec![],
         };
@@ -389,6 +390,7 @@ pub fn run_daemon(parent_pid: Option<u32>) -> Result<(), String> {
         if let Ok(mut s) = state.write() {
             let frontend_config = crate::schemas::frontend::FrontendConfig {
                 rules: loaded_profile.rules.clone(),
+                macros: vec![],
                 layers: loaded_profile.layers.clone(),
                 tap_hold_timeout_ms: app_config.tap_hold_timeout_ms,
             };

@@ -13,6 +13,7 @@ import { ActionEditor } from '../components/ruleBuilder/ActionEditor';
 import { ConditionEditor } from '../components/ruleBuilder/ConditionEditor';
 import { KeyPicker } from '../components/ruleBuilder/KeyPicker';
 import { AdvancedTriggerEditor } from '../components/ruleBuilder/AdvancedTriggerEditor';
+import { TriggerTypePicker } from '../components/ruleBuilder/RuleTypePickers';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { TextPromptDialog } from '../components/TextPromptDialog';
 import { RuleTreePanel, type FolderMoveTarget, type RuleMoveTarget } from '../components/rules/RuleTreePanel';
@@ -149,7 +150,7 @@ function formatConditionLabel(condition: FrontendCondition, t: TFunction): strin
         : ''
       if (geometry) parts.push(geometry)
       if (condition.fullscreen !== undefined) parts.push(condition.fullscreen ? 'fullscreen' : 'windowed')
-      return `Context (${condition.mode.toUpperCase()}): ${parts.length ? parts.join(' / ') : '—'}`
+      return `Приложение / окно: ${parts.length ? parts.join(' / ') : '—'}`
     }
     case 'windowMatch': {
       const parts: string[] = [];
@@ -166,7 +167,7 @@ function formatActionLabel(action: FrontendAction, t: TFunction): string {
       return `${t('ruleBuilder.action_types.remapKey')} → ${formatKeyChord({ code: action.code, modifiers: action.modifiers })}`;
     case 'remapMouse': return `${t('ruleBuilder.action_types.remapMouse')} → ${vkToName(action.code)}`;
     case 'typeText': return `${t('ruleBuilder.action_types.typeText')}: “${action.text}”`;
-    case 'runMacro': return `${t('ruleBuilder.action_types.runMacro')} (${action.steps.length})`;
+    case 'runMacro': return t('ruleBuilder.action_types.runMacro');
     case 'toggleLayer': return t('ruleBuilder.action_types.toggleLayer');
     case 'holdLayer': return t('ruleBuilder.action_types.holdLayer');
     case 'systemVolume': return `${t('ruleBuilder.action_types.systemVolume')}: ${action.action}`;
@@ -188,6 +189,16 @@ function matchesMode(rule: FrontendRule, mode: RulesViewMode): boolean {
   return rule.trigger.type === 'typedText' || rule.actions.some((action) => action.type === 'typeText');
 }
 
+type RuleKindFilter = 'all' | 'keyboard' | 'mouse' | 'text' | 'macro';
+
+function matchesKind(rule: FrontendRule, kind: RuleKindFilter): boolean {
+  if (kind === 'all') return true;
+  if (kind === 'text') return rule.trigger.type === 'typedText' || rule.actions.some((action) => action.type === 'typeText');
+  if (kind === 'macro') return [...rule.actions, ...(rule.holdActions ?? [])].some((action) => action.type === 'runMacro');
+  if (kind === 'mouse') return ['mouseDown', 'mouseUp', 'mouseWheel', 'mouseDoubleClick', 'mouseMove', 'mouseGesture'].includes(rule.trigger.type);
+  return ['keyDown', 'keyUp', 'tapHoldKeyDown', 'leaderSequence', 'keySequence', 'keyChordSet'].includes(rule.trigger.type);
+}
+
 function baseRule(order = 0): Pick<FrontendRule, 'id' | 'name' | 'holdActions' | 'conditions' | 'priority' | 'enabled' | 'folderId' | 'order'> {
   return {
     id: crypto.randomUUID(),
@@ -206,7 +217,7 @@ function makeNewRule(mode: RulesViewMode, order = 0): FrontendRule {
     return {
       ...baseRule(order),
       trigger: { type: 'keyDown', code: 0, modifiers: 0 },
-      actions: [{ type: 'runMacro', steps: [], playback: { speed: 1, repeatCount: 1, repeatWhileHeld: false } }],
+      actions: [{ type: 'runMacro', macroId: '', playback: { speed: 1, repeatCount: 1, repeatWhileHeld: false } }],
     };
   }
 
@@ -253,6 +264,7 @@ export const RulesPage: React.FC<RulesPageProps> = ({ mode = 'all' }) => {
   const [baseline, setBaseline] = useState('');
   const [isNewRule, setIsNewRule] = useState(false);
   const [query, setQuery] = useState('');
+  const [ruleKind, setRuleKind] = useState<RuleKindFilter>('all');
   const [pendingIntent, setPendingIntent] = useState<EditorIntent | null>(null);
   const [ruleToDelete, setRuleToDelete] = useState<FrontendRule | null>(null);
   const [folderPrompt, setFolderPrompt] = useState<FolderPrompt>(null);
@@ -266,9 +278,10 @@ export const RulesPage: React.FC<RulesPageProps> = ({ mode = 'all' }) => {
 
   const filteredRules = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase();
-    if (!needle) return modeRules;
+    const kindRules = modeRules.filter((rule) => matchesKind(rule, ruleKind));
+    if (!needle) return kindRules;
 
-    return modeRules.filter((rule) => {
+    return kindRules.filter((rule) => {
       const haystack = [
         rule.name ?? '',
         formatTriggerKey(rule.trigger),
@@ -278,7 +291,7 @@ export const RulesPage: React.FC<RulesPageProps> = ({ mode = 'all' }) => {
       ].join(' ').toLocaleLowerCase();
       return haystack.includes(needle);
     });
-  }, [modeRules, query, t]);
+  }, [modeRules, query, ruleKind, t]);
 
   const isDirty = Boolean(draftRule) && JSON.stringify(draftRule) !== baseline;
 
@@ -626,6 +639,13 @@ export const RulesPage: React.FC<RulesPageProps> = ({ mode = 'all' }) => {
             <h2 className="text-[11px] font-semibold text-app-text">
               {isNewRule ? t('ruleBuilder.modal.create_title') : t('rules.editor_title')}
             </h2>
+            <div className="ml-3 flex items-center gap-0.5">
+              {([
+                ['all', 'Все'], ['keyboard', 'Клавиши'], ['mouse', 'Мышь'], ['text', 'Текст'], ['macro', 'Макросы'],
+              ] as const).map(([value, label]) => (
+                <button key={value} type="button" onClick={() => setRuleKind(value)} className={`h-5 px-1.5 text-[8px] border ${ruleKind === value ? 'border-app-primary bg-app-primary/10 text-app-primary' : 'border-app-border bg-app-bg text-app-muted hover:text-app-text'}`}>{label}</button>
+              ))}
+            </div>
             {isDirty && <span className="ml-2 text-[9px] text-app-warning">● {t('rules.unsaved')}</span>}
             {saving && <span className="ml-2 text-[9px] text-app-primary">{t('common.saving', { defaultValue: 'Сохранение…' })}</span>}
 
@@ -684,28 +704,24 @@ export const RulesPage: React.FC<RulesPageProps> = ({ mode = 'all' }) => {
                   </PropertyRow>
                 </EditorSection>
 
-                <EditorSection title={t('ruleBuilder.tabs.trigger')}>
+                {isNewRule && (
+                  <EditorSection title="Быстрый старт">
+                    <div className="p-1.5 flex flex-wrap gap-1">
+                      <button type="button" onClick={() => setDraftRule({ ...draftRule, trigger: { type: 'keyDown', code: 0, modifiers: 0 }, actions: [{ type: 'remapKey', code: 0, modifiers: 0 }], conditions: [] })} className="h-7 px-2 border border-app-border bg-app-bg text-[9px] text-app-text hover:bg-app-surface">Переназначить клавишу</button>
+                      <button type="button" onClick={() => setDraftRule({ ...draftRule, trigger: { type: 'typedText', sequence: '', mode: 'instant', delimiters: ' \\t\\n.,;:!?', caseSensitive: true }, actions: [{ type: 'typeText', text: '', dateFormat: 'dmy', timeFormat: 'hm24' }], conditions: [] })} className="h-7 px-2 border border-app-border bg-app-bg text-[9px] text-app-text hover:bg-app-surface">Текстовая замена</button>
+                      <button type="button" onClick={() => setDraftRule({ ...draftRule, trigger: { type: 'keyDown', code: 0, modifiers: 0 }, actions: [{ type: 'runMacro', macroId: activeProfile.macros[0]?.id ?? '', playback: { speed: 1, repeatCount: 1, repeatWhileHeld: false } }], conditions: [] })} className="h-7 px-2 border border-app-border bg-app-bg text-[9px] text-app-text hover:bg-app-surface">Запуск макроса</button>
+                      <span className="h-7 px-2 inline-flex items-center text-[9px] text-app-muted">Или настройте пустое правило вручную ниже.</span>
+                    </div>
+                  </EditorSection>
+                )}
+
+                <EditorSection title="КОГДА">
                   <div className="p-1.5 flex items-center gap-1.5 min-w-0">
-                    <select
+                    <TriggerTypePicker
                       value={draftRule.trigger.type}
                       disabled={saving}
-                      onChange={(event) => setDraftRule(changeTriggerType(draftRule, event.target.value as FrontendTrigger['type']))}
-                      className={`${selectClass} w-[190px] shrink-0 bg-app-surface/35 disabled:opacity-50`}
-                    >
-                      <option value="keyDown">{t('ruleBuilder.trigger_types.keyDown')}</option>
-                      <option value="keyUp">{t('ruleBuilder.trigger_types.keyUp')}</option>
-                      <option value="mouseDown">{t('ruleBuilder.trigger_types.mouseDown')}</option>
-                      <option value="mouseUp">{t('ruleBuilder.trigger_types.mouseUp')}</option>
-                      <option value="mouseWheel">{t('ruleBuilder.trigger_types.mouseWheel')}</option>
-                      <option value="mouseDoubleClick">{t('ruleBuilder.trigger_types.mouseDoubleClick')}</option>
-                      <option value="mouseMove">{t('ruleBuilder.trigger_types.mouseMove')}</option>
-                      <option value="leaderSequence">{t('ruleBuilder.trigger_types.leaderSequence', { defaultValue: 'Лидер + последовательность' })}</option>
-                      <option value="keySequence">{t('ruleBuilder.trigger_types.keySequence', { defaultValue: 'Последовательность клавиш' })}</option>
-                      <option value="keyChordSet">{t('ruleBuilder.trigger_types.keyChordSet', { defaultValue: 'Аккорд клавиш' })}</option>
-                      <option value="mouseGesture">{t('ruleBuilder.trigger_types.mouseGesture', { defaultValue: 'Жест мышью' })}</option>
-                      <option value="tapHoldKeyDown">{t('ruleBuilder.trigger_types.tapHoldKeyDown')}</option>
-                      <option value="typedText">{t('ruleBuilder.trigger_types.typedText')}</option>
-                    </select>
+                      onChange={(type) => setDraftRule(changeTriggerType(draftRule, type))}
+                    />
 
                     {draftRule.trigger.type === 'typedText' && (
                       <>
@@ -922,78 +938,58 @@ export const RulesPage: React.FC<RulesPageProps> = ({ mode = 'all' }) => {
                   </div>
                 </EditorSection>
 
+                <EditorSection
+                  title="ЕСЛИ · Ограничения"
+                  action={(
+                    <button
+                      type="button"
+                      disabled={saving}
+                      onClick={() => setDraftRule({ ...draftRule, conditions: [...draftRule.conditions, { type: 'contextMatch', mode: 'all' }] })}
+                      className="h-5 px-1.5 text-[9px] text-app-primary hover:bg-app-surface disabled:opacity-40"
+                    >
+                      + Добавить ограничение
+                    </button>
+                  )}
+                >
+                  <div className="p-1.5">
+                    {draftRule.conditions.length === 0 ? (
+                      <div className="h-7 px-1 flex items-center text-[10px] text-app-muted">Без ограничений — правило работает везде.</div>
+                    ) : (
+                      <div className={`space-y-1 ${saving ? 'pointer-events-none opacity-60' : ''}`}>
+                        {draftRule.conditions.map((condition, index) => (
+                          <ConditionEditor
+                            key={index}
+                            condition={condition}
+                            onChange={(nextCondition) => {
+                              const conditions = [...draftRule.conditions];
+                              conditions[index] = nextCondition;
+                              setDraftRule({ ...draftRule, conditions });
+                            }}
+                            onRemove={() => setDraftRule({ ...draftRule, conditions: draftRule.conditions.filter((_, itemIndex) => itemIndex !== index) })}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </EditorSection>
+
                 <details className="border border-app-border bg-app-bg group">
                   <summary className="h-7 px-2 flex items-center cursor-pointer select-none bg-app-surface/25 text-[10px] text-app-muted hover:text-app-text">
-                    {t('common.advanced', { defaultValue: 'Дополнительно' })}
-                    <span className="ml-auto text-[9px] font-mono">
-                      {draftRule.conditions.length > 0 ? `${draftRule.conditions.length} cond.` : ''}
-                    </span>
+                    Дополнительно
+                    <span className="ml-auto text-[9px]">приоритет · вкл/выкл</span>
                   </summary>
                   <div className="border-t border-app-border">
                     <PropertyRow label={t('ruleBuilder.priority')} hint={t('ruleBuilder.priority_hint')}>
-                      <input
-                        type="number"
-                        value={draftRule.priority}
-                        disabled={saving}
-                        onChange={(event) => setDraftRule({ ...draftRule, priority: Number.parseInt(event.target.value, 10) || 0 })}
-                        className={`${inputClass} w-24 font-mono disabled:opacity-50`}
-                      />
+                      <input type="number" value={draftRule.priority} disabled={saving} onChange={(event) => setDraftRule({ ...draftRule, priority: Number.parseInt(event.target.value, 10) || 0 })} className={`${inputClass} w-24 font-mono disabled:opacity-50`} />
                     </PropertyRow>
                     <PropertyRow label={t('common.enabled', { defaultValue: 'Включено' })} last>
-                      <input
-                        type="checkbox"
-                        checked={draftRule.enabled}
-                        disabled={saving}
-                        onChange={(event) => setDraftRule({ ...draftRule, enabled: event.target.checked })}
-                      />
+                      <input type="checkbox" checked={draftRule.enabled} disabled={saving} onChange={(event) => setDraftRule({ ...draftRule, enabled: event.target.checked })} />
                     </PropertyRow>
-
-                    <div className="border-t border-app-border">
-                      <div className="h-7 px-2 flex items-center bg-app-surface/15 text-[10px] text-app-muted">
-                        {t('ruleBuilder.tabs.conditions')}
-                        <button
-                          type="button"
-                          disabled={saving}
-                          onClick={() => setDraftRule({
-                            ...draftRule,
-                            conditions: [...draftRule.conditions, { type: 'windowMatch', process: '', title: '' }],
-                          })}
-                          className="ml-auto h-5 px-1.5 text-[9px] text-app-primary hover:bg-app-surface disabled:opacity-40"
-                        >
-                          + {t('ruleBuilder.buttons.add_condition')}
-                        </button>
-                      </div>
-                      <div className="p-1.5">
-                        {draftRule.conditions.length === 0 ? (
-                          <div className="h-7 px-1 flex items-center text-[10px] text-app-muted">
-                            {t('ruleBuilder.hints.no_conditions_global')}
-                          </div>
-                        ) : (
-                          <div className={`space-y-1 ${saving ? 'pointer-events-none opacity-60' : ''}`}>
-                            {draftRule.conditions.map((condition, index) => (
-                              <ConditionEditor
-                                key={index}
-                                condition={condition}
-                                onChange={(nextCondition) => {
-                                  const conditions = [...draftRule.conditions];
-                                  conditions[index] = nextCondition;
-                                  setDraftRule({ ...draftRule, conditions });
-                                }}
-                                onRemove={() => setDraftRule({
-                                  ...draftRule,
-                                  conditions: draftRule.conditions.filter((_, itemIndex) => itemIndex !== index),
-                                })}
-                              />
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    </div>
                   </div>
                 </details>
 
                 <EditorSection
-                  title={isTapHold ? t('ruleBuilder.tabs.tap_actions') : t('ruleBuilder.tabs.actions')}
+                  title={isTapHold ? 'СДЕЛАТЬ · короткое нажатие' : 'СДЕЛАТЬ'}
                   action={(
                     <button
                       type="button"
@@ -1037,7 +1033,7 @@ export const RulesPage: React.FC<RulesPageProps> = ({ mode = 'all' }) => {
 
                 {isTapHold && (
                   <EditorSection
-                    title={t('ruleBuilder.tabs.hold_actions')}
+                    title="СДЕЛАТЬ · удержание"
                     action={(
                       <button
                         type="button"

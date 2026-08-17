@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { Crosshair, Trash2 } from 'lucide-react';
 import type { FrontendCondition } from '../../lib/types';
 import { useProfileStore } from '../../store/profileStore';
+import { ConditionTypePicker } from './RuleTypePickers';
 
 interface ConditionEditorProps {
   condition: FrontendCondition;
@@ -104,20 +105,13 @@ export const ConditionEditor: React.FC<ConditionEditorProps> = ({ condition, onC
   return (
     <div className="border border-app-border/70 bg-app-bg">
       <div className="min-h-9 px-1.5 py-1 flex items-start gap-1.5">
-        <select
+        <ConditionTypePicker
           value={condition.type}
-          onChange={(event) => {
-            const type = event.target.value;
+          onChange={(type) => {
             if (type === 'layerActive') onChange({ type: 'layerActive', layerId: '' });
-            else if (type === 'contextMatch') onChange({ type: 'contextMatch', mode: 'all' });
-            else onChange({ type: 'windowMatch', process: '', title: '' });
+            else onChange({ type: 'contextMatch', mode: 'all' });
           }}
-          className={`${controlClass} w-[154px] shrink-0 cursor-pointer bg-app-surface/35`}
-        >
-          <option value="windowMatch">{t('ruleBuilder.condition_types.windowMatch')}</option>
-          <option value="contextMatch">Context Match</option>
-          <option value="layerActive">{t('ruleBuilder.condition_types.layerActive')}</option>
-        </select>
+        />
 
         <div className="flex-1 min-w-0">
           {condition.type === 'windowMatch' && (
@@ -132,26 +126,26 @@ export const ConditionEditor: React.FC<ConditionEditorProps> = ({ condition, onC
           {condition.type === 'contextMatch' && (
             <div className="space-y-1.5">
               <div className="grid grid-cols-[minmax(105px,1fr)_minmax(105px,1fr)_76px_auto] gap-1.5 items-start">
-                <input className={controlClass} placeholder="process.exe" value={condition.process || ''} onChange={(event) => onChange({ ...condition, process: event.target.value || undefined })} />
-                <input className={controlClass} placeholder="title contains" value={condition.title || ''} onChange={(event) => onChange({ ...condition, title: event.target.value || undefined })} />
+                <input className={controlClass} placeholder="Процесс, например chrome.exe" value={condition.process || ''} onChange={(event) => onChange({ ...condition, process: event.target.value || undefined })} />
+                <input className={controlClass} placeholder="Заголовок содержит…" value={condition.title || ''} onChange={(event) => onChange({ ...condition, title: event.target.value || undefined })} />
                 <select className={controlClass} value={condition.mode} onChange={(event) => onChange({ ...condition, mode: event.target.value as 'any' | 'all' })}>
-                  <option value="all">ALL</option><option value="any">ANY</option>
+                  <option value="all">Все поля</option><option value="any">Любое поле</option>
                 </select>
                 {captureButton}
               </div>
               <details className="border border-app-border/60 bg-app-surface/20">
                 <summary className="h-6 px-2 flex items-center cursor-pointer select-none text-[10px] text-app-muted">Дополнительно</summary>
                 <div className="grid grid-cols-2 gap-1.5 p-1.5 border-t border-app-border/60">
-                  <input className={controlClass} placeholder="path contains" value={condition.path || ''} onChange={(event) => onChange({ ...condition, path: event.target.value || undefined })} />
-                  <input className={controlClass} placeholder="window class" value={condition.className || ''} onChange={(event) => onChange({ ...condition, className: event.target.value || undefined })} />
-                  <input className={controlClass} placeholder="virtual desktop GUID" value={condition.virtualDesktopId || ''} onChange={(event) => onChange({ ...condition, virtualDesktopId: event.target.value || undefined })} />
-                  <input className={controlClass} placeholder="monitor id" value={condition.monitorId || ''} onChange={(event) => onChange({ ...condition, monitorId: event.target.value || undefined })} />
+                  <input className={controlClass} placeholder="Путь содержит…" value={condition.path || ''} onChange={(event) => onChange({ ...condition, path: event.target.value || undefined })} />
+                  <input className={controlClass} placeholder="Класс окна" value={condition.className || ''} onChange={(event) => onChange({ ...condition, className: event.target.value || undefined })} />
+                  <input className={controlClass} placeholder="ID рабочего стола" value={condition.virtualDesktopId || ''} onChange={(event) => onChange({ ...condition, virtualDesktopId: event.target.value || undefined })} />
+                  <input className={controlClass} placeholder="ID монитора" value={condition.monitorId || ''} onChange={(event) => onChange({ ...condition, monitorId: event.target.value || undefined })} />
                   <input className={controlClass} type="number" placeholder="min width" value={condition.minWidth ?? ''} onChange={(event) => onChange({ ...condition, minWidth: event.target.value ? Number(event.target.value) : undefined })} />
                   <input className={controlClass} type="number" placeholder="max width" value={condition.maxWidth ?? ''} onChange={(event) => onChange({ ...condition, maxWidth: event.target.value ? Number(event.target.value) : undefined })} />
                   <input className={controlClass} type="number" placeholder="min height" value={condition.minHeight ?? ''} onChange={(event) => onChange({ ...condition, minHeight: event.target.value ? Number(event.target.value) : undefined })} />
                   <input className={controlClass} type="number" placeholder="max height" value={condition.maxHeight ?? ''} onChange={(event) => onChange({ ...condition, maxHeight: event.target.value ? Number(event.target.value) : undefined })} />
                   <select className={`${controlClass} col-span-2`} value={condition.fullscreen === undefined ? 'any' : condition.fullscreen ? 'true' : 'false'} onChange={(event) => onChange({ ...condition, fullscreen: event.target.value === 'any' ? undefined : event.target.value === 'true' })}>
-                    <option value="any">Window mode: any</option><option value="true">Fullscreen</option><option value="false">Windowed</option>
+                    <option value="any">Режим окна: любой</option><option value="true">Полный экран</option><option value="false">Оконный режим</option>
                   </select>
                 </div>
               </details>

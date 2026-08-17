@@ -20,7 +20,7 @@ fn v4_typed_text_migrates_without_behavior_change() {
         }]
     });
     let profile = import_profile_value(legacy).expect("v4 text profile migrates");
-    assert_eq!(PROFILE_SCHEMA_VERSION, 6);
+    assert_eq!(PROFILE_SCHEMA_VERSION, 7);
     match &profile.rules[0].trigger {
         FrontendTrigger::TypedText {
             sequence,
@@ -47,7 +47,7 @@ fn v4_typed_text_migrates_without_behavior_change() {
         other => panic!("unexpected action: {other:?}"),
     }
     let exported = export_profile_value(&profile).unwrap();
-    assert_eq!(exported["schemaVersion"], 6);
+    assert_eq!(exported["schemaVersion"], 7);
     assert_eq!(exported["rules"][0]["trigger"]["mode"], "instant");
     assert_eq!(exported["rules"][0]["trigger"]["caseSensitive"], true);
     assert_eq!(exported["rules"][0]["actions"][0]["dateFormat"], "dmy");

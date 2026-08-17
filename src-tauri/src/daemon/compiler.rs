@@ -8,7 +8,7 @@ use crate::schemas::engine::{
 };
 use crate::schemas::frontend::{
     FrontendAction, FrontendCondition, FrontendConfig, FrontendRule, FrontendTrigger, MacroAction,
-    MacroPlayback, MacroStep, MouseWheelDirection,
+    MacroDefinition, MacroPlayback, MacroStep, MouseWheelDirection,
 };
 use crate::shared::calculate_hash;
 
@@ -33,6 +33,11 @@ pub fn compile_schema(frontend: &FrontendConfig) -> EngineSchema {
     let mut key_sequence_rules: Vec<CompiledKeySequenceRule> = Vec::new();
     let mut key_chord_set_rules: Vec<CompiledKeyChordSetRule> = Vec::new();
     let mut mouse_gesture_rules: Vec<CompiledMouseGestureRule> = Vec::new();
+    let macro_library: HashMap<&str, &MacroDefinition> = frontend
+        .macros
+        .iter()
+        .map(|macro_def| (macro_def.id.as_str(), macro_def))
+        .collect();
 
     for rule in frontend.rules.iter().filter(|rule| rule.enabled) {
         match &rule.trigger {
@@ -40,43 +45,52 @@ pub fn compile_schema(frontend: &FrontendConfig) -> EngineSchema {
                 keyboard_map
                     .entry(chord.code)
                     .or_default()
-                    .push(compile_rule(rule, chord.modifiers, true));
+                    .push(compile_rule(rule, chord.modifiers, true, &macro_library));
             }
             FrontendTrigger::KeyUp { chord } => {
                 keyboard_map
                     .entry(chord.code)
                     .or_default()
-                    .push(compile_rule(rule, chord.modifiers, false));
+                    .push(compile_rule(rule, chord.modifiers, false, &macro_library));
             }
             FrontendTrigger::MouseDown { code } => {
-                mouse_map
-                    .entry(*code)
-                    .or_default()
-                    .push(compile_rule(rule, 0, true));
+                mouse_map.entry(*code).or_default().push(compile_rule(
+                    rule,
+                    0,
+                    true,
+                    &macro_library,
+                ));
             }
             FrontendTrigger::MouseUp { code } => {
-                mouse_map
-                    .entry(*code)
-                    .or_default()
-                    .push(compile_rule(rule, 0, false));
+                mouse_map.entry(*code).or_default().push(compile_rule(
+                    rule,
+                    0,
+                    false,
+                    &macro_library,
+                ));
             }
             FrontendTrigger::MouseWheel { direction } => {
                 mouse_wheel_map
                     .entry(wheel_key(*direction))
                     .or_default()
-                    .push(compile_rule(rule, 0, true));
+                    .push(compile_rule(rule, 0, true, &macro_library));
             }
             FrontendTrigger::MouseDoubleClick { code } => {
                 mouse_double_click_map
                     .entry(*code)
                     .or_default()
-                    .push(compile_rule(rule, 0, true));
+                    .push(compile_rule(rule, 0, true, &macro_library));
             }
             FrontendTrigger::MouseMove {
                 min_distance,
                 cooldown_ms,
             } => {
-                mouse_move_rules.push(compile_mouse_move_rule(rule, *min_distance, *cooldown_ms));
+                mouse_move_rules.push(compile_mouse_move_rule(
+                    rule,
+                    *min_distance,
+                    *cooldown_ms,
+                    &macro_library,
+                ));
             }
             FrontendTrigger::LeaderSequence {
                 leader,
@@ -95,7 +109,7 @@ pub fn compile_schema(frontend: &FrontendConfig) -> EngineSchema {
                         leader: *leader,
                         sequence,
                         timeout_ms: (*timeout_ms).clamp(100, 10_000),
-                        rule: compile_rule(rule, 0, true),
+                        rule: compile_rule(rule, 0, true, &macro_library),
                     });
                 }
             }
@@ -114,7 +128,7 @@ pub fn compile_schema(frontend: &FrontendConfig) -> EngineSchema {
                         rule_id_hash: calculate_hash(&rule.id),
                         sequence,
                         timeout_ms: (*timeout_ms).clamp(100, 10_000),
-                        rule: compile_rule(rule, 0, true),
+                        rule: compile_rule(rule, 0, true, &macro_library),
                     });
                 }
             }
@@ -132,7 +146,7 @@ pub fn compile_schema(frontend: &FrontendConfig) -> EngineSchema {
                         rule_id_hash: calculate_hash(&rule.id),
                         codes,
                         max_skew_ms: (*max_skew_ms).clamp(10, 1_000),
-                        rule: compile_rule(rule, 0, true),
+                        rule: compile_rule(rule, 0, true, &macro_library),
                     });
                 }
             }
@@ -148,7 +162,7 @@ pub fn compile_schema(frontend: &FrontendConfig) -> EngineSchema {
                         code: *code,
                         directions,
                         min_distance: (*min_distance).clamp(4, 500),
-                        rule: compile_rule(rule, 0, true),
+                        rule: compile_rule(rule, 0, true, &macro_library),
                     });
                 }
             }
@@ -156,7 +170,7 @@ pub fn compile_schema(frontend: &FrontendConfig) -> EngineSchema {
                 tap_hold_map
                     .entry(*code)
                     .or_default()
-                    .push(compile_tap_hold_rule(rule, *timeout_ms));
+                    .push(compile_tap_hold_rule(rule, *timeout_ms, &macro_library));
             }
             FrontendTrigger::TypedText {
                 sequence,
@@ -170,7 +184,7 @@ pub fn compile_schema(frontend: &FrontendConfig) -> EngineSchema {
                         mode: *mode,
                         delimiters: delimiters.clone(),
                         case_sensitive: *case_sensitive,
-                        rule: compile_rule(rule, 0, true),
+                        rule: compile_rule(rule, 0, true, &macro_library),
                     });
                 }
             }
@@ -309,13 +323,20 @@ fn compile_rule(
     rule: &FrontendRule,
     required_modifiers: u16,
     trigger_on_down: bool,
+    macro_library: &HashMap<&str, &MacroDefinition>,
 ) -> CompiledRule {
     let conditions = rule.conditions.iter().map(compile_condition).collect();
     let actions = rule
         .actions
         .iter()
         .enumerate()
-        .map(|(index, action)| compile_action(action, macro_action_key(&rule.id, false, index)))
+        .map(|(index, action)| {
+            compile_action(
+                action,
+                macro_action_key(&rule.id, false, index),
+                macro_library,
+            )
+        })
         .collect();
 
     CompiledRule {
@@ -331,6 +352,7 @@ fn compile_mouse_move_rule(
     rule: &FrontendRule,
     min_distance: u16,
     cooldown_ms: u32,
+    macro_library: &HashMap<&str, &MacroDefinition>,
 ) -> CompiledMouseMoveRule {
     CompiledMouseMoveRule {
         rule_id_hash: calculate_hash(&rule.id),
@@ -342,18 +364,34 @@ fn compile_mouse_move_rule(
             .actions
             .iter()
             .enumerate()
-            .map(|(index, action)| compile_action(action, macro_action_key(&rule.id, false, index)))
+            .map(|(index, action)| {
+                compile_action(
+                    action,
+                    macro_action_key(&rule.id, false, index),
+                    macro_library,
+                )
+            })
             .collect(),
     }
 }
 
-fn compile_tap_hold_rule(rule: &FrontendRule, timeout_ms: u32) -> CompiledTapHoldRule {
+fn compile_tap_hold_rule(
+    rule: &FrontendRule,
+    timeout_ms: u32,
+    macro_library: &HashMap<&str, &MacroDefinition>,
+) -> CompiledTapHoldRule {
     let conditions = rule.conditions.iter().map(compile_condition).collect();
     let tap_actions = rule
         .actions
         .iter()
         .enumerate()
-        .map(|(index, action)| compile_action(action, macro_action_key(&rule.id, false, index)))
+        .map(|(index, action)| {
+            compile_action(
+                action,
+                macro_action_key(&rule.id, false, index),
+                macro_library,
+            )
+        })
         .collect();
     let hold_actions = rule
         .hold_actions
@@ -363,7 +401,11 @@ fn compile_tap_hold_rule(rule: &FrontendRule, timeout_ms: u32) -> CompiledTapHol
                 .iter()
                 .enumerate()
                 .map(|(index, action)| {
-                    compile_action(action, macro_action_key(&rule.id, true, index))
+                    compile_action(
+                        action,
+                        macro_action_key(&rule.id, true, index),
+                        macro_library,
+                    )
                 })
                 .collect()
         })
@@ -424,7 +466,11 @@ pub fn compile_macro_commands(steps: &[MacroStep]) -> Vec<SimulatorCommand> {
     commands
 }
 
-fn compile_action(action: &FrontendAction, macro_key: u64) -> EngineAction {
+fn compile_action(
+    action: &FrontendAction,
+    macro_key: u64,
+    macro_library: &HashMap<&str, &MacroDefinition>,
+) -> EngineAction {
     match action {
         FrontendAction::RemapKey { chord } => EngineAction::RemapKey {
             code: chord.code,
@@ -440,8 +486,11 @@ fn compile_action(action: &FrontendAction, macro_key: u64) -> EngineAction {
             date_format: *date_format,
             time_format: *time_format,
         },
-        FrontendAction::RunMacro { steps, playback } => EngineAction::MacroCommands {
-            commands: compile_macro_commands(steps),
+        FrontendAction::RunMacro { macro_id, playback } => EngineAction::MacroCommands {
+            commands: macro_library
+                .get(macro_id.as_str())
+                .map(|macro_def| compile_macro_commands(&macro_def.steps))
+                .unwrap_or_default(),
             playback: compile_macro_playback(playback),
             macro_key,
         },
@@ -483,7 +532,7 @@ mod tests {
     use super::*;
     use crate::schemas::frontend::{
         FrontendAction, FrontendConfig, FrontendRule, FrontendTrigger, GestureDirection, KeyChord,
-        MouseWheelDirection, key_modifiers,
+        MacroAction, MacroDefinition, MacroPlayback, MacroStep, MouseWheelDirection, key_modifiers,
     };
 
     fn rule(
@@ -611,6 +660,7 @@ mod tests {
 
         let config = FrontendConfig {
             rules,
+            macros: vec![],
             layers: vec![],
             tap_hold_timeout_ms: 200,
         };
@@ -715,6 +765,7 @@ mod tests {
                     },
                 ),
             ],
+            macros: vec![],
             layers: vec![],
             tap_hold_timeout_ms: 200,
         };
@@ -742,6 +793,73 @@ mod tests {
     }
 
     #[test]
+    fn macro_ids_resolve_only_the_referenced_library_object() {
+        let playback = MacroPlayback::default();
+        let config = FrontendConfig {
+            rules: vec![
+                rule(
+                    "macro-valid",
+                    10,
+                    FrontendTrigger::KeyDown {
+                        chord: KeyChord::single(0x70),
+                    },
+                    FrontendAction::RunMacro {
+                        macro_id: "macro-a".into(),
+                        playback: playback.clone(),
+                    },
+                ),
+                rule(
+                    "macro-missing",
+                    9,
+                    FrontendTrigger::KeyDown {
+                        chord: KeyChord::single(0x71),
+                    },
+                    FrontendAction::RunMacro {
+                        macro_id: "does-not-exist".into(),
+                        playback,
+                    },
+                ),
+            ],
+            macros: vec![MacroDefinition {
+                id: "macro-a".into(),
+                name: "A".into(),
+                steps: vec![
+                    MacroStep {
+                        action: MacroAction::KeyDown { code: 0x41 },
+                        delay_ms: 12,
+                    },
+                    MacroStep {
+                        action: MacroAction::KeyUp { code: 0x41 },
+                        delay_ms: 0,
+                    },
+                ],
+            }],
+            layers: vec![],
+            tap_hold_timeout_ms: 200,
+        };
+
+        let schema = compile_schema(&config);
+        let valid = &schema.keyboard_map.get(&0x70).unwrap()[0].actions[0];
+        match valid {
+            EngineAction::MacroCommands { commands, .. } => assert_eq!(
+                commands,
+                &vec![
+                    SimulatorCommand::PressKey(0x41),
+                    SimulatorCommand::Delay(12),
+                    SimulatorCommand::ReleaseKey(0x41),
+                ]
+            ),
+            other => panic!("expected macro commands, got {other:?}"),
+        }
+
+        let missing = &schema.keyboard_map.get(&0x71).unwrap()[0].actions[0];
+        match missing {
+            EngineAction::MacroCommands { commands, .. } => assert!(commands.is_empty()),
+            other => panic!("expected empty macro commands, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn disabled_rules_are_not_compiled() {
         let mut disabled = rule(
             "disabled",
@@ -757,6 +875,7 @@ mod tests {
 
         let schema = compile_schema(&FrontendConfig {
             rules: vec![disabled],
+            macros: vec![],
             layers: vec![],
             tap_hold_timeout_ms: 200,
         });

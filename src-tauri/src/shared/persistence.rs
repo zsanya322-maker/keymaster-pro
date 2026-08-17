@@ -19,7 +19,7 @@ use crate::shared::types::Profile;
 /// `schemaVersion` хранится в JSON на границе persistence и не входит в
 /// runtime-структуру `Profile`, поэтому существующий IPC/frontend контракт
 /// остаётся совместимым.
-pub const PROFILE_SCHEMA_VERSION: u32 = 6;
+pub const PROFILE_SCHEMA_VERSION: u32 = 7;
 
 #[derive(Debug, Clone)]
 struct LoadedProfile {
@@ -267,6 +267,99 @@ fn migrate_profile_value(mut value: Value) -> Result<(Value, bool), String> {
                 object.insert("schemaVersion".to_string(), json!(6));
                 version = 6;
             }
+            6 => {
+                // v6 -> v7: macros become first-class profile objects. Every legacy
+                // inline runMacro is migrated independently (no automatic deduplication),
+                // then the rule stores only macroId + playback. Legacy WindowMatch is
+                // normalized to ContextMatch(mode=any), preserving its OR semantics.
+                let mut macros = object
+                    .remove("macros")
+                    .and_then(|value| value.as_array().cloned())
+                    .unwrap_or_default();
+                let mut generated_index = macros.len();
+
+                if let Some(rules) = object.get_mut("rules").and_then(Value::as_array_mut) {
+                    for rule in rules {
+                        let Some(rule_obj) = rule.as_object_mut() else {
+                            continue;
+                        };
+                        let rule_id = rule_obj
+                            .get("id")
+                            .and_then(Value::as_str)
+                            .unwrap_or("rule")
+                            .to_string();
+                        let rule_name = rule_obj
+                            .get("name")
+                            .and_then(Value::as_str)
+                            .filter(|name| !name.trim().is_empty())
+                            .unwrap_or("Макрос")
+                            .to_string();
+
+                        if let Some(conditions) =
+                            rule_obj.get_mut("conditions").and_then(Value::as_array_mut)
+                        {
+                            for condition in conditions {
+                                let Some(condition_obj) = condition.as_object_mut() else {
+                                    continue;
+                                };
+                                if condition_obj.get("type").and_then(Value::as_str)
+                                    == Some("windowMatch")
+                                {
+                                    let process =
+                                        condition_obj.remove("process").unwrap_or(Value::Null);
+                                    let title =
+                                        condition_obj.remove("title").unwrap_or(Value::Null);
+                                    *condition = json!({
+                                        "type": "contextMatch",
+                                        "process": process,
+                                        "title": title,
+                                        "mode": "any"
+                                    });
+                                }
+                            }
+                        }
+
+                        for action_field in ["actions", "holdActions"] {
+                            let Some(actions) =
+                                rule_obj.get_mut(action_field).and_then(Value::as_array_mut)
+                            else {
+                                continue;
+                            };
+                            for (action_index, action) in actions.iter_mut().enumerate() {
+                                let Some(action_obj) = action.as_object_mut() else {
+                                    continue;
+                                };
+                                if action_obj.get("type").and_then(Value::as_str)
+                                    != Some("runMacro")
+                                {
+                                    continue;
+                                }
+                                if action_obj.get("macroId").and_then(Value::as_str).is_some() {
+                                    action_obj.remove("steps");
+                                    continue;
+                                }
+
+                                generated_index += 1;
+                                let macro_id = format!(
+                                    "legacy-macro:{}:{}:{}:{}",
+                                    rule_id, action_field, action_index, generated_index
+                                );
+                                let steps = action_obj.remove("steps").unwrap_or_else(|| json!([]));
+                                action_obj.insert("macroId".to_string(), json!(macro_id));
+                                macros.push(json!({
+                                    "id": macro_id,
+                                    "name": format!("{} — макрос {}", rule_name, generated_index),
+                                    "steps": steps
+                                }));
+                            }
+                        }
+                    }
+                }
+
+                object.insert("macros".to_string(), Value::Array(macros));
+                object.insert("schemaVersion".to_string(), json!(7));
+                version = 7;
+            }
             other => return Err(format!("Нет миграции для версии профиля {}", other)),
         }
     }
@@ -364,6 +457,7 @@ fn recovery_profile(id: &str) -> Profile {
         bindings: vec![],
         order: 0,
         rules: vec![],
+        macros: vec![],
         layers: vec![],
         folders: vec![],
     }
@@ -764,6 +858,7 @@ mod tests {
             bindings: vec![],
             order: 0,
             rules: vec![],
+            macros: vec![],
             layers: vec![],
             folders: vec![],
         };
@@ -860,6 +955,7 @@ mod tests {
             bindings: vec![],
             order: 0,
             rules: vec![],
+            macros: vec![],
             layers: vec![],
             folders: vec![],
         };

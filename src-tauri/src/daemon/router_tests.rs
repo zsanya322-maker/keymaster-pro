@@ -14,6 +14,7 @@ fn test_profile(id: String, name: &str, is_default: bool) -> Profile {
         bindings: vec![],
         order: 0,
         rules: vec![],
+        macros: vec![],
         layers: vec![],
         folders: vec![],
     }

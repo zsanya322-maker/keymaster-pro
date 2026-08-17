@@ -561,6 +561,7 @@ async fn handle_update_config(
             if let Some(ref prof) = s.active_profile {
                 let frontend_config = crate::schemas::frontend::FrontendConfig {
                     rules: prof.rules.clone(),
+                    macros: vec![],
                     layers: prof.layers.clone(),
                     tap_hold_timeout_ms: config.tap_hold_timeout_ms,
                 };

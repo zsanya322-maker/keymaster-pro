@@ -35,6 +35,7 @@ fn update_active_profile_runtime(
     if s.active_profile_id == profile.id {
         let frontend_config = crate::schemas::frontend::FrontendConfig {
             rules: profile.rules.clone(),
+            macros: profile.macros.clone(),
             layers: profile.layers.clone(),
             tap_hold_timeout_ms: current_tap_hold_timeout(),
         };
@@ -155,6 +156,7 @@ pub async fn dispatch(
                     bindings: vec![],
                     order: 0,
                     rules: vec![],
+                    macros: vec![],
                     layers: vec![],
                     folders: vec![],
                 };
@@ -235,6 +237,7 @@ pub async fn dispatch(
                     bindings: vec![],
                     order: 0,
                     rules: vec![],
+                    macros: vec![],
                     layers: vec![],
                     folders: vec![],
                 };
@@ -441,7 +444,7 @@ pub async fn dispatch(
                 modify_profile(&active_id, state, |prof| {
                     use crate::schemas::frontend::{
                         FrontendAction, FrontendRule, FrontendTrigger, KeyChord, MacroAction,
-                        MacroPlayback, MacroStep,
+                        MacroDefinition, MacroPlayback, MacroStep,
                     };
                     let new_rule = match example_type {
                         "remap" => FrontendRule {
@@ -481,13 +484,11 @@ pub async fn dispatch(
                             folder_id: None,
                             order: prof.rules.len() as i32,
                         },
-                        "macro" => FrontendRule {
-                            id: uuid::Uuid::new_v4().to_string(),
-                            name: Some("Demo Macro".to_string()),
-                            trigger: FrontendTrigger::KeyDown {
-                                chord: KeyChord::single(123),
-                            }, // F12
-                            actions: vec![FrontendAction::RunMacro {
+                        "macro" => {
+                            let macro_id = uuid::Uuid::new_v4().to_string();
+                            prof.macros.push(MacroDefinition {
+                                id: macro_id.clone(),
+                                name: "Demo Macro".to_string(),
                                 steps: vec![
                                     MacroStep {
                                         action: MacroAction::KeyDown { code: 72 },
@@ -506,15 +507,25 @@ pub async fn dispatch(
                                         delay_ms: 50,
                                     },
                                 ],
-                                playback: MacroPlayback::default(),
-                            }],
-                            hold_actions: None,
-                            conditions: vec![],
-                            priority: 10,
-                            enabled: true,
-                            folder_id: None,
-                            order: prof.rules.len() as i32,
-                        },
+                            });
+                            FrontendRule {
+                                id: uuid::Uuid::new_v4().to_string(),
+                                name: Some("Demo Macro".to_string()),
+                                trigger: FrontendTrigger::KeyDown {
+                                    chord: KeyChord::single(123),
+                                }, // F12
+                                actions: vec![FrontendAction::RunMacro {
+                                    macro_id,
+                                    playback: MacroPlayback::default(),
+                                }],
+                                hold_actions: None,
+                                conditions: vec![],
+                                priority: 10,
+                                enabled: true,
+                                folder_id: None,
+                                order: prof.rules.len() as i32,
+                            }
+                        }
                         _ => unreachable!(),
                     };
                     prof.rules.push(new_rule);
@@ -817,6 +828,7 @@ mod v032_profile_identity_tests {
             linked_apps: vec![],
             bindings: vec![],
             order: 4,
+            macros: vec![],
             layers: vec![LayerMeta {
                 id: "layer-old".into(),
                 name: "Layer".into(),

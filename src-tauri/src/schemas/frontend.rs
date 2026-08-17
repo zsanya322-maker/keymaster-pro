@@ -39,6 +39,7 @@ impl KeyChord {
 #[serde(rename_all = "camelCase")]
 pub struct FrontendConfig {
     pub rules: Vec<FrontendRule>,
+    pub macros: Vec<MacroDefinition>,
     pub layers: Vec<LayerMeta>,
     pub tap_hold_timeout_ms: u64,
 }
@@ -262,7 +263,8 @@ pub enum FrontendAction {
         time_format: TextTimeFormat,
     },
     RunMacro {
-        steps: Vec<MacroStep>,
+        #[serde(rename = "macroId")]
+        macro_id: String,
         #[serde(default)]
         playback: MacroPlayback,
     },
@@ -315,6 +317,15 @@ pub enum MacroAction {
 pub struct MacroStep {
     pub action: MacroAction,
     pub delay_ms: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MacroDefinition {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub steps: Vec<MacroStep>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

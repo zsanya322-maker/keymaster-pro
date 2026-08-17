@@ -35,12 +35,18 @@ fn v2_macro_profile_gets_backward_compatible_playback_defaults() {
     });
 
     let profile = import_profile_value(legacy).expect("v2 macro profile should migrate");
-    assert_eq!(PROFILE_SCHEMA_VERSION, 6);
+    assert_eq!(PROFILE_SCHEMA_VERSION, 7);
     assert_eq!(profile.rules.len(), 1);
 
+    assert_eq!(profile.macros.len(), 1);
     match &profile.rules[0].actions[0] {
-        FrontendAction::RunMacro { steps, playback } => {
-            assert_eq!(steps.len(), 2);
+        FrontendAction::RunMacro { macro_id, playback } => {
+            let macro_def = profile
+                .macros
+                .iter()
+                .find(|item| &item.id == macro_id)
+                .expect("migrated runMacro must reference its library object");
+            assert_eq!(macro_def.steps.len(), 2);
             assert_eq!(playback.speed, 1.0);
             assert_eq!(playback.repeat_count, 1);
             assert!(!playback.repeat_while_held);
@@ -49,7 +55,10 @@ fn v2_macro_profile_gets_backward_compatible_playback_defaults() {
     }
 
     let exported = export_profile_value(&profile).expect("migrated profile should export");
-    assert_eq!(exported["schemaVersion"], 6);
+    assert_eq!(exported["schemaVersion"], 7);
+    assert_eq!(exported["macros"].as_array().unwrap().len(), 1);
+    assert!(exported["rules"][0]["actions"][0]["macroId"].is_string());
+    assert!(exported["rules"][0]["actions"][0].get("steps").is_none());
     assert_eq!(exported["rules"][0]["actions"][0]["playback"]["speed"], 1.0);
     assert_eq!(
         exported["rules"][0]["actions"][0]["playback"]["repeatCount"],
@@ -96,7 +105,10 @@ fn v3_macro_playback_values_round_trip_without_being_rewritten() {
     let profile = import_profile_value(current).expect("v3 macro profile should parse");
     let exported = export_profile_value(&profile).expect("v3 macro profile should export");
 
-    assert_eq!(exported["schemaVersion"], 6);
+    assert_eq!(exported["schemaVersion"], 7);
+    assert_eq!(exported["macros"].as_array().unwrap().len(), 1);
+    assert!(exported["rules"][0]["actions"][0]["macroId"].is_string());
+    assert!(exported["rules"][0]["actions"][0].get("steps").is_none());
     assert_eq!(exported["rules"][0]["actions"][0]["playback"]["speed"], 2.0);
     assert_eq!(
         exported["rules"][0]["actions"][0]["playback"]["repeatCount"],

@@ -60,6 +60,7 @@ pub fn profile_matches(profile: &Profile, ctx: &AppContext) -> bool {
 pub fn activate_runtime(state: &DaemonStateRef, profile: Profile) -> Result<(), String> {
     let schema = crate::daemon::compiler::compile_schema(&FrontendConfig {
         rules: profile.rules.clone(),
+        macros: profile.macros.clone(),
         layers: profile.layers.clone(),
         tap_hold_timeout_ms: 200,
     });

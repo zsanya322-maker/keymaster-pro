@@ -4,8 +4,8 @@ import { invoke } from '@tauri-apps/api/core';
 import { Crosshair, FolderOpen, Play, Square, Trash2 } from 'lucide-react';
 import type { FrontendAction } from '../../lib/types';
 import { KeyPicker } from './KeyPicker';
-import { MacroEditor } from './MacroEditor';
 import { useProfileStore } from '../../store/profileStore';
+import { ActionTypePicker } from './RuleTypePickers';
 
 interface ActionEditorProps {
   action: FrontendAction;
@@ -23,7 +23,9 @@ export const ActionEditor: React.FC<ActionEditorProps> = ({ action, onChange, on
   const { activeProfileId, profiles } = useProfileStore();
   const activeProfile = profiles.find((profile) => profile.id === activeProfileId);
   const layers = activeProfile?.layers || [];
-  const showContentBelow = action.type === 'runMacro';
+  const macros = activeProfile?.macros || [];
+  const selectedMacro = action.type === 'runMacro' ? macros.find((macro) => macro.id === action.macroId) : undefined;
+  const showContentBelow = false;
 
   const changeType = (type: FrontendAction['type']) => {
     if (type === 'remapKey') {
@@ -33,7 +35,7 @@ export const ActionEditor: React.FC<ActionEditorProps> = ({ action, onChange, on
     } else if (type === 'typeText') {
       onChange({ type, text: '', dateFormat: 'dmy', timeFormat: 'hm24' });
     } else if (type === 'runMacro') {
-      onChange({ type, steps: [], playback: { speed: 1, repeatCount: 1, repeatWhileHeld: false } });
+      onChange({ type, macroId: macros[0]?.id ?? '', playback: { speed: 1, repeatCount: 1, repeatWhileHeld: false } });
     } else if (type === 'toggleLayer' || type === 'holdLayer') {
       onChange({ type, layerId: '' });
     } else if (type === 'systemVolume') {
@@ -54,25 +56,7 @@ export const ActionEditor: React.FC<ActionEditorProps> = ({ action, onChange, on
   return (
     <div className="border border-app-border/70 bg-app-bg">
       <div className="min-h-9 px-1.5 py-1 flex items-center gap-1.5">
-        <select
-          value={action.type}
-          onChange={(event) => changeType(event.target.value as FrontendAction['type'])}
-          className={`${selectClass} w-[154px] shrink-0 bg-app-surface/35`}
-        >
-          <option value="remapKey">{t('ruleBuilder.action_types.remapKey')}</option>
-          <option value="remapMouse">{t('ruleBuilder.action_types.remapMouse')}</option>
-          <option value="typeText">{t('ruleBuilder.action_types.typeText')}</option>
-          <option value="runMacro">{t('ruleBuilder.action_types.runMacro')}</option>
-          <option value="toggleLayer">{t('ruleBuilder.action_types.toggleLayer')}</option>
-          <option value="holdLayer">{t('ruleBuilder.action_types.holdLayer')}</option>
-          <option value="systemVolume">{t('ruleBuilder.action_types.systemVolume')}</option>
-          <option value="mediaKey">{t('ruleBuilder.action_types.mediaKey')}</option>
-          <option value="windowAction">{t('ruleBuilder.action_types.windowAction')}</option>
-          <option value="launchApp">{t('ruleBuilder.action_types.launchApp')}</option>
-          <option value="focusProcess">{t('ruleBuilder.action_types.focusProcess')}</option>
-          <option value="sleep">{t('ruleBuilder.action_types.sleep')}</option>
-          <option value="monitorOff">{t('ruleBuilder.action_types.monitorOff')}</option>
-        </select>
+        <ActionTypePicker value={action.type} onChange={changeType} />
 
         {!showContentBelow && (
           <div className="flex-1 min-w-0 flex items-center gap-1.5">
@@ -134,6 +118,46 @@ export const ActionEditor: React.FC<ActionEditorProps> = ({ action, onChange, on
                     <div className="text-[9px] leading-4 text-app-muted">
                       {t('textExpansion.clipboard_lazy', { defaultValue: 'Буфер обмена читается только если сработал шаблон с {{clipboard}}.' })}
                     </div>
+                  </div>
+                </details>
+              </>
+            )}
+
+            {action.type === 'runMacro' && (
+              <>
+                {macros.length === 0 ? (
+                  <div className="h-7 flex-1 flex items-center text-[10px] text-app-danger">Сначала создайте макрос во вкладке «Макросы».</div>
+                ) : (
+                  <select value={action.macroId} onChange={(event) => onChange({ ...action, macroId: event.target.value })} className={`${selectClass} flex-1 min-w-0`}>
+                    {!action.macroId && <option value="">Выберите макрос…</option>}
+                    {macros.map((macro) => <option key={macro.id} value={macro.id}>{macro.name}</option>)}
+                  </select>
+                )}
+                <button
+                  type="button"
+                  disabled={!selectedMacro || selectedMacro.steps.length === 0}
+                  onClick={() => {
+                    if (!selectedMacro) return;
+                    void invoke('ipc_call', { method: 'macro.preview', params: { steps: selectedMacro.steps, playback: action.playback } })
+                      .catch((error) => console.error('Macro preview failed', error));
+                  }}
+                  className="h-7 px-2 inline-flex items-center gap-1 border border-app-border bg-app-bg text-[9px] text-app-text hover:bg-app-surface disabled:opacity-35"
+                >
+                  <Play size={10} /> Тест
+                </button>
+                <button type="button" onClick={() => void invoke('ipc_call', { method: 'macro.stop_playback' })} className="h-7 w-7 inline-flex items-center justify-center border border-app-border bg-app-bg text-app-muted hover:bg-app-surface" title="Стоп"><Square size={9} /></button>
+                <details className="relative shrink-0">
+                  <summary className="list-none h-7 px-2 inline-flex items-center border border-app-border bg-app-bg text-[9px] text-app-muted hover:bg-app-surface cursor-pointer">Доп.</summary>
+                  <div className="absolute z-40 right-0 top-8 w-60 border border-app-border bg-app-bg shadow-lg p-2 space-y-2">
+                    <label className="block"><span className="block mb-1 text-[9px] text-app-muted">Скорость</span>
+                      <select value={action.playback.speed} onChange={(event) => onChange({ ...action, playback: { ...action.playback, speed: Number.parseFloat(event.target.value) || 1 } })} className={`${selectClass} w-full`}>
+                        {[0.5, 0.75, 1, 1.25, 1.5, 2, 3, 5].map((speed) => <option key={speed} value={speed}>{speed}×</option>)}
+                      </select>
+                    </label>
+                    <label className="block"><span className="block mb-1 text-[9px] text-app-muted">Повторов</span>
+                      <input type="number" min={1} max={10000} value={action.playback.repeatCount} disabled={action.playback.repeatWhileHeld} onChange={(event) => onChange({ ...action, playback: { ...action.playback, repeatCount: Math.max(1, Math.min(10000, Number.parseInt(event.target.value, 10) || 1)) } })} className={`${controlClass} w-full font-mono disabled:opacity-40`} />
+                    </label>
+                    <label className="flex items-center gap-2 text-[10px] text-app-text cursor-pointer"><input type="checkbox" checked={action.playback.repeatWhileHeld} onChange={(event) => onChange({ ...action, playback: { ...action.playback, repeatWhileHeld: event.target.checked } })} />Повторять, пока удерживается триггер</label>
                   </div>
                 </details>
               </>
@@ -311,97 +335,6 @@ export const ActionEditor: React.FC<ActionEditorProps> = ({ action, onChange, on
         </button>
       </div>
 
-      {action.type === 'runMacro' && (
-        <div className="border-t border-app-border/70 p-1.5">
-          <div className="mb-1.5 flex items-center justify-end gap-1">
-            <button
-              type="button"
-              disabled={action.steps.length === 0}
-              onClick={() => {
-                void invoke('ipc_call', {
-                  method: 'macro.preview',
-                  params: { steps: action.steps, playback: action.playback },
-                }).catch((error) => console.error('Macro preview failed', error));
-              }}
-              className="h-6 px-2 inline-flex items-center gap-1 border border-app-border bg-app-bg text-[9px] text-app-text hover:bg-app-surface disabled:opacity-35"
-            >
-              <Play size={10} />
-              {t('macro.preview', { defaultValue: 'Тест' })}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                void invoke('ipc_call', { method: 'macro.stop_playback' })
-                  .catch((error) => console.error('Macro stop failed', error));
-              }}
-              className="h-6 px-2 inline-flex items-center gap-1 border border-app-border bg-app-bg text-[9px] text-app-text hover:bg-app-surface"
-            >
-              <Square size={9} />
-              {t('macro.stop_playback', { defaultValue: 'Стоп' })}
-            </button>
-            <details className="relative">
-              <summary className="list-none h-6 px-2 inline-flex items-center border border-app-border bg-app-bg text-[9px] text-app-muted hover:bg-app-surface cursor-pointer">
-                {t('common.advanced', { defaultValue: 'Доп.' })}
-              </summary>
-              <div className="absolute z-40 right-0 top-7 w-60 border border-app-border bg-app-bg shadow-lg p-2 space-y-2">
-                <label className="block">
-                  <span className="block mb-1 text-[9px] text-app-muted">{t('macro.playback_speed', { defaultValue: 'Скорость' })}</span>
-                  <select
-                    value={action.playback.speed}
-                    onChange={(event) => onChange({
-                      ...action,
-                      playback: { ...action.playback, speed: Number.parseFloat(event.target.value) || 1 },
-                    })}
-                    className={`${selectClass} w-full`}
-                  >
-                    <option value="0.5">0.5×</option>
-                    <option value="0.75">0.75×</option>
-                    <option value="1">1×</option>
-                    <option value="1.25">1.25×</option>
-                    <option value="1.5">1.5×</option>
-                    <option value="2">2×</option>
-                    <option value="3">3×</option>
-                    <option value="5">5×</option>
-                  </select>
-                </label>
-                <label className="block">
-                  <span className="block mb-1 text-[9px] text-app-muted">{t('macro.repeat_count', { defaultValue: 'Повторов' })}</span>
-                  <input
-                    type="number"
-                    min={1}
-                    max={10000}
-                    value={action.playback.repeatCount}
-                    disabled={action.playback.repeatWhileHeld}
-                    onChange={(event) => onChange({
-                      ...action,
-                      playback: {
-                        ...action.playback,
-                        repeatCount: Math.max(1, Math.min(10000, Number.parseInt(event.target.value, 10) || 1)),
-                      },
-                    })}
-                    className={`${controlClass} w-full font-mono disabled:opacity-40`}
-                  />
-                </label>
-                <label className="flex items-center gap-2 text-[10px] text-app-text cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={action.playback.repeatWhileHeld}
-                    onChange={(event) => onChange({
-                      ...action,
-                      playback: { ...action.playback, repeatWhileHeld: event.target.checked },
-                    })}
-                  />
-                  {t('macro.repeat_while_held', { defaultValue: 'Повторять, пока удерживается триггер' })}
-                </label>
-              </div>
-            </details>
-          </div>
-          <MacroEditor
-            steps={action.steps || []}
-            onChange={(steps) => onChange({ ...action, steps })}
-          />
-        </div>
-      )}
     </div>
   );
 };

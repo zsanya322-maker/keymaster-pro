@@ -9,6 +9,7 @@ import { invoke } from '../lib/ipc'
 import { emitRuleCommand, emitRuleSearch } from '../lib/uiEvents'
 
 import { RulesPage } from '../pages/RulesPage'
+import { MacroLibraryPage } from '../pages/MacroLibraryPage'
 import { SettingsPage } from '../pages/SettingsPage'
 import { LayersPanel } from '../components/LayersPanel'
 import { UpdateBanner } from '../components/UpdateBanner'
@@ -23,7 +24,7 @@ import { ToastViewport } from './ToastViewport'
 import { useToastQueue } from './useToastQueue'
 import { useDaemonConnection, type DaemonStatus } from './useDaemonConnection'
 
-const PROFILE_SCHEMA_VERSION = 6
+const PROFILE_SCHEMA_VERSION = 7
 
 interface ImportedProfileMeta {
   id?: string
@@ -269,11 +270,11 @@ function App() {
     }
   }
 
-  const macroCount = activeProfile?.rules.filter((rule) => rule.actions.some((action) => action.type === 'runMacro')).length ?? 0
+  const macroCount = activeProfile?.macros?.length ?? 0
   const textRuleCount = activeProfile?.rules.filter(
     (rule) => rule.trigger.type === 'typedText' || rule.actions.some((action) => action.type === 'typeText'),
   ).length ?? 0
-  const isRulesWorkspace = activeCategory === 'rules' || activeCategory === 'macros' || activeCategory === 'text'
+  const isRulesWorkspace = activeCategory === 'rules'
 
   const handleShellSearch = (value: string) => {
     setShellSearch(value)
@@ -345,8 +346,7 @@ function App() {
 
         <main className="flex-1 min-w-0 min-h-0 overflow-hidden bg-app-bg">
           {activeCategory === 'rules' && <RulesPage mode="all" />}
-          {activeCategory === 'macros' && <RulesPage mode="macros" />}
-          {activeCategory === 'text' && <RulesPage mode="text" />}
+          {activeCategory === 'macros' && <MacroLibraryPage />}
           {activeCategory === 'layers' && <LayersPanel />}
           {activeCategory === 'settings' && <SettingsPage />}
         </main>
