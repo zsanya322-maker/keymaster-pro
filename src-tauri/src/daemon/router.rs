@@ -39,6 +39,9 @@ fn update_active_profile_runtime(
             tap_hold_timeout_ms: current_tap_hold_timeout(),
         };
         s.engine_schema = crate::daemon::compiler::compile_schema(&frontend_config);
+        if let Ok(mut input) = s.advanced_input.lock() {
+            input.reset();
+        }
         s.active_profile = Some(profile);
     }
     Ok(())

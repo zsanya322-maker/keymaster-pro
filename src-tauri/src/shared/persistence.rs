@@ -19,7 +19,7 @@ use crate::shared::types::Profile;
 /// `schemaVersion` хранится в JSON на границе persistence и не входит в
 /// runtime-структуру `Profile`, поэтому существующий IPC/frontend контракт
 /// остаётся совместимым.
-pub const PROFILE_SCHEMA_VERSION: u32 = 5;
+pub const PROFILE_SCHEMA_VERSION: u32 = 6;
 
 #[derive(Debug, Clone)]
 struct LoadedProfile {
@@ -259,6 +259,13 @@ fn migrate_profile_value(mut value: Value) -> Result<(Value, bool), String> {
                 }
                 object.insert("schemaVersion".to_string(), json!(5));
                 version = 5;
+            }
+            5 => {
+                // v5 -> v6: advanced-input trigger variants are additive. No existing
+                // rule payload needs rewriting, so preserve every v5 rule byte-for-byte
+                // apart from the schema marker.
+                object.insert("schemaVersion".to_string(), json!(6));
+                version = 6;
             }
             other => return Err(format!("Нет миграции для версии профиля {}", other)),
         }

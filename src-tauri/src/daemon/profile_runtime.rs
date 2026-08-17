@@ -68,6 +68,9 @@ pub fn activate_runtime(state: &DaemonStateRef, profile: Profile) -> Result<(), 
         .map_err(|_| "Failed to lock daemon state".to_string())?;
     daemon.active_profile_id = profile.id.clone();
     daemon.engine_schema = schema;
+    if let Ok(mut input) = daemon.advanced_input.lock() {
+        input.reset();
+    }
     daemon.active_profile = Some(profile);
     Ok(())
 }

@@ -75,6 +75,16 @@ function triggerText(trigger: FrontendTrigger): string {
       return `2× ${vkToName(trigger.code)}`;
     case 'mouseMove':
       return 'Mouse move';
+    case 'leaderSequence':
+      return `${formatKeyChord(trigger.leader)} → ${trigger.sequence.map(vkToName).join(' → ') || '…'}`;
+    case 'keySequence':
+      return trigger.sequence.map(vkToName).join(' → ') || 'Sequence';
+    case 'keyChordSet':
+      return trigger.codes.map(vkToName).join(' + ') || 'Chord';
+    case 'mouseGesture': {
+      const arrows = { up: '↑', down: '↓', left: '←', right: '→' } as const;
+      return `${vkToName(trigger.code)} · ${trigger.directions.map((direction) => arrows[direction]).join('') || 'gesture'}`;
+    }
     case 'typedText':
       return `“${trigger.sequence}”`;
   }
@@ -86,7 +96,8 @@ function triggerIcon(trigger: FrontendTrigger) {
     || trigger.type === 'mouseUp'
     || trigger.type === 'mouseWheel'
     || trigger.type === 'mouseDoubleClick'
-    || trigger.type === 'mouseMove') return Mouse;
+    || trigger.type === 'mouseMove'
+    || trigger.type === 'mouseGesture') return Mouse;
   return Keyboard;
 }
 

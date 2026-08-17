@@ -188,7 +188,11 @@
       "typedText": "Ввод текста (Typed Text)",
       "mouseWheel": "Колесо мыши",
       "mouseDoubleClick": "Двойной клик",
-      "mouseMove": "Движение мыши"
+      "mouseMove": "Движение мыши",
+      "leaderSequence": "Лидер + последовательность",
+      "keySequence": "Последовательность клавиш",
+      "keyChordSet": "Аккорд клавиш",
+      "mouseGesture": "Жест мышью"
     },
     "condition_types": {
       "layerActive": "Слой активен (LayerActive)",

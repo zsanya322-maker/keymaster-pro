@@ -1,4 +1,6 @@
-use crate::schemas::frontend::{TextDateFormat, TextExpansionMode, TextTimeFormat};
+use crate::schemas::frontend::{
+    GestureDirection, KeyChord, TextDateFormat, TextExpansionMode, TextTimeFormat,
+};
 use crate::shared::types::MatchMode;
 use std::collections::HashMap;
 
@@ -12,6 +14,10 @@ pub struct EngineSchema {
     pub mouse_move_rules: Vec<CompiledMouseMoveRule>,
     pub tap_hold_map: HashMap<u8, Vec<CompiledTapHoldRule>>,
     pub text_expansion_rules: Vec<CompiledTextExpansionRule>,
+    pub leader_sequence_rules: Vec<CompiledLeaderSequenceRule>,
+    pub key_sequence_rules: Vec<CompiledKeySequenceRule>,
+    pub key_chord_set_rules: Vec<CompiledKeyChordSetRule>,
+    pub mouse_gesture_rules: Vec<CompiledMouseGestureRule>,
 }
 
 impl Default for EngineSchema {
@@ -24,6 +30,10 @@ impl Default for EngineSchema {
             mouse_move_rules: Vec::new(),
             tap_hold_map: HashMap::new(),
             text_expansion_rules: Vec::new(),
+            leader_sequence_rules: Vec::new(),
+            key_sequence_rules: Vec::new(),
+            key_chord_set_rules: Vec::new(),
+            mouse_gesture_rules: Vec::new(),
         }
     }
 }
@@ -47,6 +57,40 @@ pub struct CompiledTextExpansionRule {
     pub mode: TextExpansionMode,
     pub delimiters: String,
     pub case_sensitive: bool,
+    pub rule: CompiledRule,
+}
+
+#[derive(Debug, Clone)]
+pub struct CompiledLeaderSequenceRule {
+    pub rule_id_hash: u64,
+    pub leader: KeyChord,
+    pub sequence: Vec<u8>,
+    pub timeout_ms: u32,
+    pub rule: CompiledRule,
+}
+
+#[derive(Debug, Clone)]
+pub struct CompiledKeySequenceRule {
+    pub rule_id_hash: u64,
+    pub sequence: Vec<u8>,
+    pub timeout_ms: u32,
+    pub rule: CompiledRule,
+}
+
+#[derive(Debug, Clone)]
+pub struct CompiledKeyChordSetRule {
+    pub rule_id_hash: u64,
+    pub codes: Vec<u8>,
+    pub max_skew_ms: u32,
+    pub rule: CompiledRule,
+}
+
+#[derive(Debug, Clone)]
+pub struct CompiledMouseGestureRule {
+    pub rule_id_hash: u64,
+    pub code: u8,
+    pub directions: Vec<GestureDirection>,
+    pub min_distance: u16,
     pub rule: CompiledRule,
 }
 

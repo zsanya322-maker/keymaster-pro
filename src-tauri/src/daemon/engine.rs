@@ -12,6 +12,7 @@ use crate::daemon::chord_output::{
     build_atomic_chord_commands, isolate_macro_commands, modifier_vks, release_modifier_commands,
     shell_mask_commands,
 };
+use crate::daemon::input_state::GestureSpec;
 use crate::daemon::mouse_triggers::{
     DoubleClickDetector, MoveGate, system_double_click_limits, wheel_key,
 };
@@ -654,6 +655,143 @@ pub fn process_keyboard_event(
         None => return EventAction::PassThrough,
     };
 
+    // v0.4.0 advanced triggers use one bounded state machine. Ordinary
+    // sequences/chords observe input; leader mode intentionally captures it.
+    {
+        let now = Instant::now();
+        let window_id = try_read_ctx(&ctx_arc)
+            .map(|ctx| ctx.active_window_id)
+            .unwrap_or(0);
+        let max_sequence_timeout = engine_schema
+            .key_sequence_rules
+            .iter()
+            .map(|rule| rule.timeout_ms)
+            .max()
+            .unwrap_or(0);
+        let max_leader_timeout = engine_schema
+            .leader_sequence_rules
+            .iter()
+            .map(|rule| rule.timeout_ms)
+            .max()
+            .unwrap_or(0);
+        let mut additive_actions: Option<Vec<EngineAction>> = None;
+        let mut capture = false;
+
+        if let Ok(mut input) = s.advanced_input.lock() {
+            input.prepare_window(window_id);
+            input.expire(now, max_sequence_timeout, max_leader_timeout);
+
+            if !is_key_down {
+                if input.key_up(vk_code) {
+                    return EventAction::Block;
+                }
+            } else {
+                let fresh_press = input.key_down(vk_code, now);
+
+                if input.leader_active() {
+                    capture = true;
+                    if fresh_press {
+                        input.suppress_keyup(vk_code);
+                        if vk_code == 0x1B {
+                            input.finish_leader();
+                        } else if !is_modifier_vk(vk_code) {
+                            input.push_leader_key(vk_code);
+                            if let Some((source, started_at, keys)) = input.leader_snapshot() {
+                                let mut has_prefix = false;
+                                if let Some(ctx) = try_read_ctx(&ctx_arc) {
+                                    for candidate in &engine_schema.leader_sequence_rules {
+                                        if candidate.leader.code != source.code
+                                            || !modifiers_match(
+                                                candidate.leader.modifiers,
+                                                source.modifiers,
+                                            )
+                                            || now.duration_since(started_at)
+                                                > Duration::from_millis(u64::from(
+                                                    candidate.timeout_ms,
+                                                ))
+                                        {
+                                            continue;
+                                        }
+                                        if candidate.sequence.starts_with(&keys) {
+                                            has_prefix = true;
+                                        }
+                                        if candidate.sequence == keys
+                                            && check_conditions(&candidate.rule.conditions, &ctx)
+                                        {
+                                            additive_actions = Some(candidate.rule.actions.clone());
+                                            break;
+                                        }
+                                    }
+                                }
+                                if additive_actions.is_some() || !has_prefix {
+                                    input.finish_leader();
+                                }
+                            }
+                        }
+                    }
+                } else if fresh_press && !is_modifier_vk(vk_code) {
+                    // Enter leader mode only if at least one rule is eligible in the
+                    // current context, so an inactive leader never swallows a key.
+                    if let Some(ctx) = try_read_ctx(&ctx_arc) {
+                        if engine_schema.leader_sequence_rules.iter().any(|candidate| {
+                            candidate.leader.code == vk_code
+                                && modifiers_match(candidate.leader.modifiers, event_modifiers)
+                                && check_conditions(&candidate.rule.conditions, &ctx)
+                        }) {
+                            input.start_leader(
+                                crate::schemas::frontend::KeyChord {
+                                    code: vk_code,
+                                    modifiers: event_modifiers,
+                                },
+                                now,
+                            );
+                            capture = true;
+                        }
+                    }
+
+                    if !capture {
+                        input.push_sequence(vk_code, now);
+                        if let Some(ctx) = try_read_ctx(&ctx_arc) {
+                            for candidate in &engine_schema.key_sequence_rules {
+                                if input.sequence_matches(
+                                    &candidate.sequence,
+                                    now,
+                                    candidate.timeout_ms,
+                                ) && check_conditions(&candidate.rule.conditions, &ctx)
+                                {
+                                    additive_actions = Some(candidate.rule.actions.clone());
+                                    break;
+                                }
+                            }
+
+                            if additive_actions.is_none() {
+                                for candidate in &engine_schema.key_chord_set_rules {
+                                    if input.chord_should_fire(
+                                        candidate.rule_id_hash,
+                                        &candidate.codes,
+                                        candidate.max_skew_ms,
+                                    ) && check_conditions(&candidate.rule.conditions, &ctx)
+                                    {
+                                        additive_actions = Some(candidate.rule.actions.clone());
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Some(actions) = additive_actions {
+            execute_actions(&actions, simulator, &ctx_arc, true, state, 0);
+            execute_actions(&actions, simulator, &ctx_arc, false, state, 0);
+        }
+        if capture {
+            return EventAction::Block;
+        }
+    }
+
     // Text expansion matching. State is bounded and in-memory only.
     if is_key_down {
         let now = Instant::now();
@@ -1038,6 +1176,12 @@ pub fn process_mouse_event(
         Some(c) => c,
         None => return EventAction::PassThrough,
     };
+    let window_id = try_read_ctx(&ctx_arc)
+        .map(|ctx| ctx.active_window_id)
+        .unwrap_or(0);
+    if let Ok(mut input) = s.advanced_input.lock() {
+        input.prepare_window(window_id);
+    }
 
     // Wheel/hwheel are standalone source events, so matched wheel rules can be
     // consumed immediately without creating a down/up lifecycle.
@@ -1062,9 +1206,12 @@ pub fn process_mouse_event(
         return EventAction::PassThrough;
     }
 
-    // Movement triggers are additive. Blocking WM_MOUSEMOVE would freeze the
-    // pointer; no waiting or platform query happens in this hot path.
+    // Feed any active gesture before ordinary mouse-move triggers. The gesture
+    // state is bounded by configured rules and max 8 directions per rule.
     if is_move {
+        if let Ok(mut input) = s.advanced_input.lock() {
+            input.gesture_move(x, y);
+        }
         if !engine_schema.mouse_move_rules.is_empty() {
             let Some(ctx) = try_read_ctx(&ctx_arc) else {
                 return EventAction::PassThrough;
@@ -1096,6 +1243,48 @@ pub fn process_mouse_event(
             }
         }
         return EventAction::PassThrough;
+    }
+
+    // Start an observational mouse-gesture session on anchor-button down.
+    if is_down && button != 255 {
+        let specs = engine_schema
+            .mouse_gesture_rules
+            .iter()
+            .filter(|rule| rule.code == button)
+            .map(|rule| GestureSpec {
+                rule_id_hash: rule.rule_id_hash,
+                directions: rule.directions.clone(),
+                min_distance: rule.min_distance,
+            })
+            .collect::<Vec<_>>();
+        if let Ok(mut input) = s.advanced_input.lock() {
+            input.start_gesture(button, x, y, specs);
+        }
+    }
+
+    // Finish gestures on anchor release and fire the highest-priority eligible
+    // completed rule. The physical button event itself remains pass-through.
+    if !is_down && button != 255 {
+        let completed = s
+            .advanced_input
+            .lock()
+            .map(|mut input| input.finish_gesture(button))
+            .unwrap_or_default();
+        if !completed.is_empty() {
+            if let Some(ctx) = try_read_ctx(&ctx_arc) {
+                for rule in &engine_schema.mouse_gesture_rules {
+                    if completed.contains(&rule.rule_id_hash)
+                        && check_conditions(&rule.rule.conditions, &ctx)
+                    {
+                        let actions = rule.rule.actions.clone();
+                        drop(ctx);
+                        execute_actions(&actions, simulator, &ctx_arc, true, state, 0);
+                        execute_actions(&actions, simulator, &ctx_arc, false, state, 0);
+                        break;
+                    }
+                }
+            }
+        }
     }
 
     // Double-click detection is also additive: the first click is never delayed

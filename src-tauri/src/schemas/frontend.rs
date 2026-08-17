@@ -92,6 +92,15 @@ pub enum MouseWheelDirection {
     Right,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum GestureDirection {
+    Up,
+    Down,
+    Left,
+    Right,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub enum TextExpansionMode {
@@ -156,6 +165,32 @@ pub enum FrontendTrigger {
         #[serde(default = "default_mouse_move_cooldown")]
         cooldown_ms: u32,
     },
+    LeaderSequence {
+        leader: KeyChord,
+        #[serde(default)]
+        sequence: Vec<u8>,
+        #[serde(rename = "timeoutMs", default = "default_advanced_timeout")]
+        timeout_ms: u32,
+    },
+    KeySequence {
+        #[serde(default)]
+        sequence: Vec<u8>,
+        #[serde(rename = "timeoutMs", default = "default_advanced_timeout")]
+        timeout_ms: u32,
+    },
+    KeyChordSet {
+        #[serde(default)]
+        codes: Vec<u8>,
+        #[serde(rename = "maxSkewMs", default = "default_chord_skew")]
+        max_skew_ms: u32,
+    },
+    MouseGesture {
+        code: u8,
+        #[serde(default)]
+        directions: Vec<GestureDirection>,
+        #[serde(rename = "minDistance", default = "default_gesture_distance")]
+        min_distance: u16,
+    },
     TapHoldKeyDown {
         code: u8,
         timeout_ms: u32,
@@ -177,6 +212,18 @@ fn default_mouse_move_distance() -> u16 {
 
 fn default_mouse_move_cooldown() -> u32 {
     120
+}
+
+fn default_advanced_timeout() -> u32 {
+    800
+}
+
+fn default_chord_skew() -> u32 {
+    80
+}
+
+fn default_gesture_distance() -> u16 {
+    28
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]

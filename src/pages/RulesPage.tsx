@@ -12,6 +12,7 @@ import { useAppStore } from '../store/appStore';
 import { ActionEditor } from '../components/ruleBuilder/ActionEditor';
 import { ConditionEditor } from '../components/ruleBuilder/ConditionEditor';
 import { KeyPicker } from '../components/ruleBuilder/KeyPicker';
+import { AdvancedTriggerEditor } from '../components/ruleBuilder/AdvancedTriggerEditor';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { TextPromptDialog } from '../components/TextPromptDialog';
 import { RuleTreePanel, type FolderMoveTarget, type RuleMoveTarget } from '../components/rules/RuleTreePanel';
@@ -102,6 +103,16 @@ function formatTriggerKey(trigger: FrontendTrigger): string {
       return `2× ${vkToName(trigger.code)}`;
     case 'mouseMove':
       return 'Mouse move';
+    case 'leaderSequence':
+      return `${formatKeyChord(trigger.leader)} → ${trigger.sequence.map(vkToName).join(' → ') || '…'}`;
+    case 'keySequence':
+      return trigger.sequence.map(vkToName).join(' → ') || 'Sequence';
+    case 'keyChordSet':
+      return trigger.codes.map(vkToName).join(' + ') || 'Chord';
+    case 'mouseGesture': {
+      const arrow = { up: '↑', down: '↓', left: '←', right: '→' } as const;
+      return `${vkToName(trigger.code)} · ${trigger.directions.map((direction) => arrow[direction]).join('') || 'gesture'}`;
+    }
     case 'typedText':
       return `“${trigger.sequence}” · ${trigger.mode === 'delimiter' ? 'delimiter' : 'instant'}`;
   }
@@ -116,6 +127,10 @@ function formatTriggerType(trigger: FrontendTrigger, t: TFunction): string {
     case 'mouseWheel': return t('ruleBuilder.trigger_types.mouseWheel');
     case 'mouseDoubleClick': return t('ruleBuilder.trigger_types.mouseDoubleClick');
     case 'mouseMove': return t('ruleBuilder.trigger_types.mouseMove');
+    case 'leaderSequence': return t('ruleBuilder.trigger_types.leaderSequence', { defaultValue: 'Лидер + последовательность' });
+    case 'keySequence': return t('ruleBuilder.trigger_types.keySequence', { defaultValue: 'Последовательность клавиш' });
+    case 'keyChordSet': return t('ruleBuilder.trigger_types.keyChordSet', { defaultValue: 'Аккорд клавиш' });
+    case 'mouseGesture': return t('ruleBuilder.trigger_types.mouseGesture', { defaultValue: 'Жест мышью' });
     case 'tapHoldKeyDown': return t('rules.trigger_tap_hold');
     case 'typedText': return t('rules.trigger_typed');
   }
@@ -219,7 +234,11 @@ function changeTriggerType(rule: FrontendRule, type: FrontendTrigger['type']): F
   if (type === 'mouseUp') return { ...rule, trigger: { type: 'mouseUp', code: 1 } };
   if (type === 'mouseWheel') return { ...rule, trigger: { type: 'mouseWheel', direction: 'up' } };
   if (type === 'mouseDoubleClick') return { ...rule, trigger: { type: 'mouseDoubleClick', code: 1 } };
-  return { ...rule, trigger: { type: 'mouseMove', minDistance: 24, cooldownMs: 120 } };
+  if (type === 'mouseMove') return { ...rule, trigger: { type: 'mouseMove', minDistance: 24, cooldownMs: 120 } };
+  if (type === 'leaderSequence') return { ...rule, trigger: { type: 'leaderSequence', leader: { code: 0, modifiers: 0 }, sequence: [], timeoutMs: 800 } };
+  if (type === 'keySequence') return { ...rule, trigger: { type: 'keySequence', sequence: [], timeoutMs: 800 } };
+  if (type === 'keyChordSet') return { ...rule, trigger: { type: 'keyChordSet', codes: [], maxSkewMs: 80 } };
+  return { ...rule, trigger: { type: 'mouseGesture', code: 4, directions: [], minDistance: 28 } };
 }
 
 export const RulesPage: React.FC<RulesPageProps> = ({ mode = 'all' }) => {
@@ -680,6 +699,10 @@ export const RulesPage: React.FC<RulesPageProps> = ({ mode = 'all' }) => {
                       <option value="mouseWheel">{t('ruleBuilder.trigger_types.mouseWheel')}</option>
                       <option value="mouseDoubleClick">{t('ruleBuilder.trigger_types.mouseDoubleClick')}</option>
                       <option value="mouseMove">{t('ruleBuilder.trigger_types.mouseMove')}</option>
+                      <option value="leaderSequence">{t('ruleBuilder.trigger_types.leaderSequence', { defaultValue: 'Лидер + последовательность' })}</option>
+                      <option value="keySequence">{t('ruleBuilder.trigger_types.keySequence', { defaultValue: 'Последовательность клавиш' })}</option>
+                      <option value="keyChordSet">{t('ruleBuilder.trigger_types.keyChordSet', { defaultValue: 'Аккорд клавиш' })}</option>
+                      <option value="mouseGesture">{t('ruleBuilder.trigger_types.mouseGesture', { defaultValue: 'Жест мышью' })}</option>
                       <option value="tapHoldKeyDown">{t('ruleBuilder.trigger_types.tapHoldKeyDown')}</option>
                       <option value="typedText">{t('ruleBuilder.trigger_types.typedText')}</option>
                     </select>
@@ -738,6 +761,12 @@ export const RulesPage: React.FC<RulesPageProps> = ({ mode = 'all' }) => {
                         </details>
                       </>
                     )}
+
+                    <AdvancedTriggerEditor
+                      trigger={draftRule.trigger}
+                      disabled={saving}
+                      onChange={(trigger) => setDraftRule({ ...draftRule, trigger })}
+                    />
 
                     {(draftRule.trigger.type === 'keyDown' || draftRule.trigger.type === 'keyUp') && (
                       <KeyPicker

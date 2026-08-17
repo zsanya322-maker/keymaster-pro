@@ -50,6 +50,7 @@ export interface FrontendRule {
 }
 
 export type MouseWheelDirection = 'up' | 'down' | 'left' | 'right'
+export type GestureDirection = 'up' | 'down' | 'left' | 'right'
 export type TextExpansionMode = 'instant' | 'delimiter'
 export type TextDateFormat = 'dmy' | 'ymd' | 'mdy'
 export type TextTimeFormat = 'hm24' | 'hms24' | 'hm12'
@@ -62,6 +63,10 @@ export type FrontendTrigger =
   | { type: 'mouseWheel'; direction: MouseWheelDirection }
   | { type: 'mouseDoubleClick'; code: number }
   | { type: 'mouseMove'; minDistance: number; cooldownMs: number }
+  | { type: 'leaderSequence'; leader: KeyChord; sequence: number[]; timeoutMs: number }
+  | { type: 'keySequence'; sequence: number[]; timeoutMs: number }
+  | { type: 'keyChordSet'; codes: number[]; maxSkewMs: number }
+  | { type: 'mouseGesture'; code: number; directions: GestureDirection[]; minDistance: number }
   | { type: 'tapHoldKeyDown'; code: number; timeoutMs: number }
   | { type: 'typedText'; sequence: string; mode: TextExpansionMode; delimiters: string; caseSensitive: boolean }
 

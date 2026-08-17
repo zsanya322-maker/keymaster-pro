@@ -56,6 +56,8 @@ pub struct DaemonState {
     pub last_record_time: std::sync::Mutex<Option<std::time::Instant>>,
     /// Bounded, memory-only text expansion buffer and single undo record.
     pub text_input: std::sync::Mutex<crate::daemon::text_expansion::TextInputState>,
+    /// Dedicated bounded state machine for leader/sequence/chord/gesture triggers.
+    pub advanced_input: std::sync::Mutex<crate::daemon::input_state::AdvancedInputState>,
     /// Режим захвата клавиши/кнопки мыши для KeyPicker.
     /// Keyboard hook в этом режиме сам собирает chord и блокирует его до Windows,
     /// чтобы Win/Alt-комбинации можно было записывать без системного side-effect.
@@ -95,6 +97,9 @@ impl DaemonState {
             last_record_time: std::sync::Mutex::new(None),
             text_input: std::sync::Mutex::new(
                 crate::daemon::text_expansion::TextInputState::default(),
+            ),
+            advanced_input: std::sync::Mutex::new(
+                crate::daemon::input_state::AdvancedInputState::default(),
             ),
             key_capture_active: std::sync::atomic::AtomicBool::new(false),
             last_captured_key: std::sync::Mutex::new(None),
@@ -136,6 +141,9 @@ impl Default for DaemonState {
             last_record_time: std::sync::Mutex::new(None),
             text_input: std::sync::Mutex::new(
                 crate::daemon::text_expansion::TextInputState::default(),
+            ),
+            advanced_input: std::sync::Mutex::new(
+                crate::daemon::input_state::AdvancedInputState::default(),
             ),
             key_capture_active: std::sync::atomic::AtomicBool::new(false),
             last_captured_key: std::sync::Mutex::new(None),

@@ -188,7 +188,11 @@
       "typedText": "Typed Text (Expansion)",
       "mouseWheel": "Mouse wheel",
       "mouseDoubleClick": "Double click",
-      "mouseMove": "Mouse movement"
+      "mouseMove": "Mouse movement",
+      "leaderSequence": "Leader + sequence",
+      "keySequence": "Key sequence",
+      "keyChordSet": "Key chord",
+      "mouseGesture": "Mouse gesture"
     },
     "condition_types": {
       "layerActive": "Layer Active (LayerActive)",

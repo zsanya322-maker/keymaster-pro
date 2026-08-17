@@ -1,8 +1,10 @@
 use std::collections::HashMap;
 
 use crate::schemas::engine::{
-    CompiledMouseMoveRule, CompiledRule, CompiledTapHoldRule, CompiledTextExpansionRule,
-    EngineAction, EngineCondition, EngineSchema, MacroPlaybackConfig, SimulatorCommand,
+    CompiledKeyChordSetRule, CompiledKeySequenceRule, CompiledLeaderSequenceRule,
+    CompiledMouseGestureRule, CompiledMouseMoveRule, CompiledRule, CompiledTapHoldRule,
+    CompiledTextExpansionRule, EngineAction, EngineCondition, EngineSchema, MacroPlaybackConfig,
+    SimulatorCommand,
 };
 use crate::schemas::frontend::{
     FrontendAction, FrontendCondition, FrontendConfig, FrontendRule, FrontendTrigger, MacroAction,
@@ -27,6 +29,10 @@ pub fn compile_schema(frontend: &FrontendConfig) -> EngineSchema {
     let mut mouse_move_rules: Vec<CompiledMouseMoveRule> = Vec::new();
     let mut tap_hold_map: HashMap<u8, Vec<CompiledTapHoldRule>> = HashMap::new();
     let mut text_expansion_rules: Vec<CompiledTextExpansionRule> = Vec::new();
+    let mut leader_sequence_rules: Vec<CompiledLeaderSequenceRule> = Vec::new();
+    let mut key_sequence_rules: Vec<CompiledKeySequenceRule> = Vec::new();
+    let mut key_chord_set_rules: Vec<CompiledKeyChordSetRule> = Vec::new();
+    let mut mouse_gesture_rules: Vec<CompiledMouseGestureRule> = Vec::new();
 
     for rule in frontend.rules.iter().filter(|rule| rule.enabled) {
         match &rule.trigger {
@@ -71,6 +77,80 @@ pub fn compile_schema(frontend: &FrontendConfig) -> EngineSchema {
                 cooldown_ms,
             } => {
                 mouse_move_rules.push(compile_mouse_move_rule(rule, *min_distance, *cooldown_ms));
+            }
+            FrontendTrigger::LeaderSequence {
+                leader,
+                sequence,
+                timeout_ms,
+            } => {
+                let sequence: Vec<u8> = sequence
+                    .iter()
+                    .copied()
+                    .filter(|code| *code != 0)
+                    .take(16)
+                    .collect();
+                if leader.code != 0 && !sequence.is_empty() {
+                    leader_sequence_rules.push(CompiledLeaderSequenceRule {
+                        rule_id_hash: calculate_hash(&rule.id),
+                        leader: *leader,
+                        sequence,
+                        timeout_ms: (*timeout_ms).clamp(100, 10_000),
+                        rule: compile_rule(rule, 0, true),
+                    });
+                }
+            }
+            FrontendTrigger::KeySequence {
+                sequence,
+                timeout_ms,
+            } => {
+                let sequence: Vec<u8> = sequence
+                    .iter()
+                    .copied()
+                    .filter(|code| *code != 0)
+                    .take(16)
+                    .collect();
+                if !sequence.is_empty() {
+                    key_sequence_rules.push(CompiledKeySequenceRule {
+                        rule_id_hash: calculate_hash(&rule.id),
+                        sequence,
+                        timeout_ms: (*timeout_ms).clamp(100, 10_000),
+                        rule: compile_rule(rule, 0, true),
+                    });
+                }
+            }
+            FrontendTrigger::KeyChordSet { codes, max_skew_ms } => {
+                let mut codes: Vec<u8> = codes
+                    .iter()
+                    .copied()
+                    .filter(|code| *code != 0)
+                    .take(8)
+                    .collect();
+                codes.sort_unstable();
+                codes.dedup();
+                if codes.len() >= 3 {
+                    key_chord_set_rules.push(CompiledKeyChordSetRule {
+                        rule_id_hash: calculate_hash(&rule.id),
+                        codes,
+                        max_skew_ms: (*max_skew_ms).clamp(10, 1_000),
+                        rule: compile_rule(rule, 0, true),
+                    });
+                }
+            }
+            FrontendTrigger::MouseGesture {
+                code,
+                directions,
+                min_distance,
+            } => {
+                let directions = directions.iter().copied().take(8).collect::<Vec<_>>();
+                if *code != 0 && !directions.is_empty() {
+                    mouse_gesture_rules.push(CompiledMouseGestureRule {
+                        rule_id_hash: calculate_hash(&rule.id),
+                        code: *code,
+                        directions,
+                        min_distance: (*min_distance).clamp(4, 500),
+                        rule: compile_rule(rule, 0, true),
+                    });
+                }
             }
             FrontendTrigger::TapHoldKeyDown { code, timeout_ms } => {
                 tap_hold_map
@@ -120,6 +200,30 @@ pub fn compile_schema(frontend: &FrontendConfig) -> EngineSchema {
             .then_with(|| b.sequence.chars().count().cmp(&a.sequence.chars().count()))
             .then_with(|| a.sequence.cmp(&b.sequence))
     });
+    leader_sequence_rules.sort_by(|a, b| {
+        b.rule
+            .priority
+            .cmp(&a.rule.priority)
+            .then_with(|| b.sequence.len().cmp(&a.sequence.len()))
+    });
+    key_sequence_rules.sort_by(|a, b| {
+        b.rule
+            .priority
+            .cmp(&a.rule.priority)
+            .then_with(|| b.sequence.len().cmp(&a.sequence.len()))
+    });
+    key_chord_set_rules.sort_by(|a, b| {
+        b.rule
+            .priority
+            .cmp(&a.rule.priority)
+            .then_with(|| b.codes.len().cmp(&a.codes.len()))
+    });
+    mouse_gesture_rules.sort_by(|a, b| {
+        b.rule
+            .priority
+            .cmp(&a.rule.priority)
+            .then_with(|| b.directions.len().cmp(&a.directions.len()))
+    });
 
     EngineSchema {
         keyboard_map,
@@ -129,6 +233,10 @@ pub fn compile_schema(frontend: &FrontendConfig) -> EngineSchema {
         mouse_move_rules,
         tap_hold_map,
         text_expansion_rules,
+        leader_sequence_rules,
+        key_sequence_rules,
+        key_chord_set_rules,
+        mouse_gesture_rules,
     }
 }
 
@@ -374,7 +482,7 @@ fn compile_action(action: &FrontendAction, macro_key: u64) -> EngineAction {
 mod tests {
     use super::*;
     use crate::schemas::frontend::{
-        FrontendAction, FrontendConfig, FrontendRule, FrontendTrigger, KeyChord,
+        FrontendAction, FrontendConfig, FrontendRule, FrontendTrigger, GestureDirection, KeyChord,
         MouseWheelDirection, key_modifiers,
     };
 
@@ -536,6 +644,104 @@ mod tests {
     }
 
     #[test]
+    fn advanced_triggers_compile_into_bounded_priority_sorted_vectors() {
+        let config = FrontendConfig {
+            rules: vec![
+                rule(
+                    "leader-low",
+                    1,
+                    FrontendTrigger::LeaderSequence {
+                        leader: KeyChord {
+                            code: 0x14,
+                            modifiers: key_modifiers::CTRL,
+                        },
+                        sequence: vec![0x46, 0x46],
+                        timeout_ms: 50,
+                    },
+                    FrontendAction::TypeText {
+                        text: "leader".into(),
+                        date_format: crate::schemas::frontend::TextDateFormat::Dmy,
+                        time_format: crate::schemas::frontend::TextTimeFormat::Hm24,
+                    },
+                ),
+                rule(
+                    "sequence-high",
+                    40,
+                    FrontendTrigger::KeySequence {
+                        sequence: (1u8..=30).collect(),
+                        timeout_ms: 50_000,
+                    },
+                    FrontendAction::TypeText {
+                        text: "sequence".into(),
+                        date_format: crate::schemas::frontend::TextDateFormat::Dmy,
+                        time_format: crate::schemas::frontend::TextTimeFormat::Hm24,
+                    },
+                ),
+                rule(
+                    "chord",
+                    20,
+                    FrontendTrigger::KeyChordSet {
+                        codes: vec![0x4B, 0, 0x4A, 0x4B, 0x4C],
+                        max_skew_ms: 1,
+                    },
+                    FrontendAction::TypeText {
+                        text: "chord".into(),
+                        date_format: crate::schemas::frontend::TextDateFormat::Dmy,
+                        time_format: crate::schemas::frontend::TextTimeFormat::Hm24,
+                    },
+                ),
+                rule(
+                    "gesture",
+                    30,
+                    FrontendTrigger::MouseGesture {
+                        code: 4,
+                        directions: vec![
+                            GestureDirection::Right,
+                            GestureDirection::Down,
+                            GestureDirection::Left,
+                            GestureDirection::Up,
+                            GestureDirection::Right,
+                            GestureDirection::Down,
+                            GestureDirection::Left,
+                            GestureDirection::Up,
+                            GestureDirection::Right,
+                        ],
+                        min_distance: 1,
+                    },
+                    FrontendAction::TypeText {
+                        text: "gesture".into(),
+                        date_format: crate::schemas::frontend::TextDateFormat::Dmy,
+                        time_format: crate::schemas::frontend::TextTimeFormat::Hm24,
+                    },
+                ),
+            ],
+            layers: vec![],
+            tap_hold_timeout_ms: 200,
+        };
+        let schema = compile_schema(&config);
+
+        assert_eq!(schema.leader_sequence_rules.len(), 1);
+        assert_eq!(schema.leader_sequence_rules[0].timeout_ms, 100);
+        assert_eq!(
+            schema.leader_sequence_rules[0].leader.modifiers,
+            key_modifiers::CTRL
+        );
+        assert_eq!(schema.leader_sequence_rules[0].sequence, vec![0x46, 0x46]);
+
+        assert_eq!(schema.key_sequence_rules.len(), 1);
+        assert_eq!(schema.key_sequence_rules[0].sequence.len(), 16);
+        assert_eq!(schema.key_sequence_rules[0].timeout_ms, 10_000);
+
+        assert_eq!(schema.key_chord_set_rules.len(), 1);
+        assert_eq!(schema.key_chord_set_rules[0].codes, vec![0x4A, 0x4B, 0x4C]);
+        assert_eq!(schema.key_chord_set_rules[0].max_skew_ms, 10);
+
+        assert_eq!(schema.mouse_gesture_rules.len(), 1);
+        assert_eq!(schema.mouse_gesture_rules[0].directions.len(), 8);
+        assert_eq!(schema.mouse_gesture_rules[0].min_distance, 4);
+    }
+
+    #[test]
     fn disabled_rules_are_not_compiled() {
         let mut disabled = rule(
             "disabled",
@@ -558,6 +764,10 @@ mod tests {
         assert!(schema.mouse_wheel_map.is_empty());
         assert!(schema.mouse_double_click_map.is_empty());
         assert!(schema.mouse_move_rules.is_empty());
+        assert!(schema.leader_sequence_rules.is_empty());
+        assert!(schema.key_sequence_rules.is_empty());
+        assert!(schema.key_chord_set_rules.is_empty());
+        assert!(schema.mouse_gesture_rules.is_empty());
     }
 
     #[test]
