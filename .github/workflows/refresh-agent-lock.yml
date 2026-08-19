@@ -1,9 +1,10 @@
 name: Refresh Agent Cargo Lock
 
 on:
-  push:
+  pull_request:
     branches:
-      - agent/ai-mcp-hub
+      - main
+    types: [opened, synchronize, reopened]
     paths:
       - .github/workflows/refresh-agent-lock.yml
       - src-tauri/Cargo.toml
@@ -13,11 +14,12 @@ permissions:
 
 jobs:
   refresh-lock:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'agent/ai-mcp-hub'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: agent/ai-mcp-hub
+          ref: ${{ github.event.pull_request.head.ref }}
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
       - name: Refresh Cargo.lock
