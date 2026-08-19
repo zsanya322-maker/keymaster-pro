@@ -4,13 +4,17 @@ on:
   push:
     branches:
       - agent/ai-provider-profiles-hotfix
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: write
 
 jobs:
   apply:
-    if: github.actor != 'github-actions[bot]'
+    if: github.actor != 'github-actions[bot]' && (github.event_name == 'push' || github.event.pull_request.head.ref == 'agent/ai-provider-profiles-hotfix')
     runs-on: windows-latest
     steps:
       - name: Checkout branch
