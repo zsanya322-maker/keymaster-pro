@@ -61,3 +61,52 @@ jobs:
       - name: ESLint (legacy debt report)
         continue-on-error: true
         run: pnpm lint
+
+  mcp-smoke:
+    name: MCP stdio smoke
+    needs: validate
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Install client dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build KeyMaster debug binary
+        working-directory: src-tauri
+        run: cargo build --locked
+
+      - name: Run official MCP stdio client against KeyMaster
+        shell: pwsh
+        run: |
+          $exe = Join-Path $PWD 'src-tauri\target\debug\keymaster-pro.exe'
+          $appData = Join-Path $env:RUNNER_TEMP 'keymaster-mcp-smoke-appdata'
+          $log = Join-Path $PWD 'artifacts\mcp-smoke.log'
+          node .\scripts\mcp-smoke.mjs $exe $appData $log
+
+      - name: Upload MCP smoke log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcp-smoke-log
+          path: artifacts/mcp-smoke.log
+          if-no-files-found: warn
