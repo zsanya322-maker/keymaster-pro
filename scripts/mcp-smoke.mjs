@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
+import net from 'node:net'
 import path from 'node:path'
 import process from 'node:process'
 
@@ -17,7 +18,9 @@ const appData = path.resolve(appDataArg)
 const artifactLog = path.resolve(artifactArg ?? path.join('artifacts', 'mcp-smoke.log'))
 const profileId = 'mcp-smoke-profile'
 const macroId = 'mcp-smoke-macro'
+const ipcPipe = String.raw`\\.\pipe\keymaster-pro-ipc`
 const logLines = []
+let ipcRequestId = 1000
 
 function log(message, data) {
   const line = data === undefined ? message : `${message} ${JSON.stringify(data)}`
@@ -44,9 +47,11 @@ async function flushLog() {
 }
 
 const env = { ...process.env, APPDATA: appData }
+const profilePath = path.join(appData, 'KeyMaster Pro', 'profiles', `${profileId}.json`)
+const backupsDir = path.join(appData, 'KeyMaster Pro', 'backups')
 
 async function seedProfile() {
-  const profilesDir = path.join(appData, 'KeyMaster Pro', 'profiles')
+  const profilesDir = path.dirname(profilePath)
   await mkdir(profilesDir, { recursive: true })
   const profile = {
     schemaVersion: 7,
@@ -70,7 +75,11 @@ async function seedProfile() {
     layers: [{ id: 'mcp-smoke-layer', name: 'MCP Smoke Layer' }],
     folders: [],
   }
-  await writeFile(path.join(profilesDir, `${profileId}.json`), JSON.stringify(profile, null, 2), 'utf8')
+  await writeFile(profilePath, JSON.stringify(profile, null, 2), 'utf8')
+}
+
+async function readProfile() {
+  return JSON.parse(await readFile(profilePath, 'utf8'))
 }
 
 function startDaemon() {
@@ -83,6 +92,42 @@ function startDaemon() {
   child.stdout?.on('data', (chunk) => log(`DAEMON stdout ${String(chunk).trim()}`))
   child.stderr?.on('data', (chunk) => log(`DAEMON stderr ${String(chunk).trim()}`))
   return child
+}
+
+function ipcCall(method, params = undefined) {
+  return new Promise((resolve, reject) => {
+    const id = ipcRequestId++
+    const socket = net.createConnection(ipcPipe)
+    let buffer = ''
+    let settled = false
+
+    const finish = (error, value) => {
+      if (settled) return
+      settled = true
+      socket.destroy()
+      if (error) reject(error)
+      else resolve(value)
+    }
+
+    socket.setTimeout(5000, () => finish(new Error(`IPC timeout for ${method}`)))
+    socket.once('error', (error) => finish(error))
+    socket.once('connect', () => {
+      socket.write(`${JSON.stringify({ jsonrpc: '2.0', method, params, id })}\n`)
+    })
+    socket.on('data', (chunk) => {
+      buffer += String(chunk)
+      const newline = buffer.indexOf('\n')
+      if (newline < 0) return
+      try {
+        const response = JSON.parse(buffer.slice(0, newline))
+        assert.equal(response.id, id)
+        if (response.error) finish(new Error(`IPC ${method}: ${response.error.message}`))
+        else finish(null, response.result)
+      } catch (error) {
+        finish(error)
+      }
+    })
+  })
 }
 
 function createClient(args, mode) {
@@ -142,13 +187,28 @@ const appliedRule = {
   folderId: null,
 }
 
+function additionRule(id, name, code, text) {
+  return {
+    id,
+    name,
+    trigger: { type: 'keyDown', code, modifiers: 0 },
+    actions: [{ type: 'typeText', text, dateFormat: 'dmy', timeFormat: 'hm24' }],
+    holdActions: null,
+    conditions: [],
+    priority: 10,
+    enabled: true,
+    folderId: null,
+    order: 999,
+  }
+}
+
 let daemon
 try {
   await seedProfile()
   daemon = startDaemon()
 
-  // READ-ONLY mode: legacy initialize handshake, four read/validate tools succeed,
-  // and all three mutating/executing tools are actively rejected if called anyway.
+  // READ-ONLY mode: force the classic initialize handshake. Four tools succeed;
+  // the three write/execute tools are rejected even when a client calls them by name.
   const readClient = await connectClient(['--mcp'], 'legacy')
   try {
     const readTools = await readClient.listTools()
@@ -196,7 +256,7 @@ try {
     await readClient.close()
   }
 
-  // WRITE mode: use modern negotiation and execute all seven advertised tools.
+  // WRITE mode: use current/modern negotiation and execute every advertised tool.
   const writeClient = await connectClient(['--mcp-write'], 'auto')
   try {
     const writeTools = await writeClient.listTools()
@@ -234,10 +294,78 @@ try {
     await writeClient.close()
   }
 
-  const saved = JSON.parse(await readFile(path.join(appData, 'KeyMaster Pro', 'profiles', `${profileId}.json`), 'utf8'))
+  let saved = await readProfile()
   assert.ok(saved.rules.some((rule) => rule.name === appliedRule.name))
   log('DISK persistence verification PASS')
-  log('MCP SMOKE PASS')
+
+  // AI/pack use automation.install. Exercise that exact daemon path, confirm a
+  // physical backup exists, and then restore it using the same receipt as the UI.
+  const installRule = additionRule('install-rule-id', 'Automation install smoke', 0x7a, 'install-smoke')
+  const receipt = await ipcCall('automation.install', {
+    profileId,
+    additions: { rules: [installRule], macros: [], layers: [], folders: [] },
+  })
+  assert.ok(receipt.backupName)
+  assert.ok(receipt.postRevision)
+  const backups = await readdir(backupsDir)
+  assert.ok(backups.includes(receipt.backupName), `backup ${receipt.backupName} not found`)
+  saved = await readProfile()
+  assert.ok(saved.rules.some((rule) => rule.name === installRule.name))
+  log('AUTOMATION install + physical backup PASS', { backupName: receipt.backupName })
+
+  await ipcCall('automation.undo_install', {
+    profileId,
+    backupName: receipt.backupName,
+    expectedRevision: receipt.postRevision,
+  })
+  saved = await readProfile()
+  assert.ok(!saved.rules.some((rule) => rule.name === installRule.name))
+  assert.ok(saved.rules.some((rule) => rule.name === appliedRule.name))
+  log('AUTOMATION Undo install PASS')
+
+  // Stale Undo must never erase a newer edit.
+  const staleRule = additionRule('stale-install-rule-id', 'Stale undo target', 0x7b, 'stale-target')
+  const staleReceipt = await ipcCall('automation.install', {
+    profileId,
+    additions: { rules: [staleRule], macros: [], layers: [], folders: [] },
+  })
+  await ipcCall('automation.append_rule', {
+    profileId,
+    rule: { ...validationRule, name: 'Newer edit after install' },
+  })
+  let staleDenied = false
+  try {
+    await ipcCall('automation.undo_install', {
+      profileId,
+      backupName: staleReceipt.backupName,
+      expectedRevision: staleReceipt.postRevision,
+    })
+  } catch (error) {
+    staleDenied = String(error).includes('AUTOMATION_UNDO_STALE')
+  }
+  assert.equal(staleDenied, true, 'stale Undo must be rejected')
+  saved = await readProfile()
+  assert.ok(saved.rules.some((rule) => rule.name === 'Newer edit after install'))
+  log('AUTOMATION stale Undo protection PASS')
+
+  // True RMW race test: ten independent pipe clients mutate the same profile at
+  // once. The daemon mutation mutex must serialize them so all ten survive.
+  const concurrentNames = Array.from({ length: 10 }, (_, index) => `Concurrent rule ${index}`)
+  await Promise.all(concurrentNames.map((name, index) => ipcCall('automation.append_rule', {
+    profileId,
+    rule: {
+      ...validationRule,
+      name,
+      trigger: { type: 'keyDown', code: 0x30 + index, modifiers: 0 },
+    },
+  })))
+  saved = await readProfile()
+  for (const name of concurrentNames) {
+    assert.ok(saved.rules.some((rule) => rule.name === name), `lost concurrent mutation: ${name}`)
+  }
+  log('AUTOMATION concurrent mutation serialization PASS', { writes: concurrentNames.length })
+
+  log('MCP + AUTOMATION SAFETY SMOKE PASS')
 } catch (error) {
   log('MCP SMOKE FAIL', { error: error instanceof Error ? error.stack ?? error.message : String(error) })
   throw error
