@@ -110,6 +110,8 @@ const aiBridgeCodes: Record<string, AutomationErrorCode> = {
   provider_http: 'ai_provider_http',
   provider_invalid_json: 'ai_provider_invalid_json',
   provider_content_missing: 'ai_provider_content_missing',
+  provider_profile_missing: 'ai_provider_missing',
+  provider_profile_load_failed: 'ai_provider_missing',
 }
 
 export function decodeAiBridgeError(error: unknown): AutomationError | null {
@@ -123,6 +125,24 @@ export function decodeAiBridgeError(error: unknown): AutomationError | null {
   const code = aiBridgeCodes[bridgeCode]
   if (!code) return null
   return new AutomationError(code, detail ? { detail } : {})
+}
+
+function parseDraftContent(content: string): AiAutomationDraft {
+  const raw = stripCodeFence(content)
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch (error) {
+    automationError('ai_invalid_json', { detail: error instanceof Error ? error.message : String(error) })
+  }
+  return parseAutomationDraft(parsed)
+}
+
+function composerMessages(profile: Profile, userPrompt: string) {
+  return [
+    { role: 'system', content: buildComposerSystemPrompt(profile) },
+    { role: 'user', content: userPrompt.trim() },
+  ]
 }
 
 export async function requestAutomationDraft(
@@ -143,10 +163,7 @@ export async function requestAutomationDraft(
         endpoint,
         model,
         apiKey: provider.apiKey,
-        messages: [
-          { role: 'system', content: buildComposerSystemPrompt(profile) },
-          { role: 'user', content: userPrompt.trim() },
-        ],
+        messages: composerMessages(profile, userPrompt),
         temperature: 0.15,
       },
     })
@@ -156,12 +173,32 @@ export async function requestAutomationDraft(
     throw error
   }
 
-  const raw = stripCodeFence(response.content)
-  let parsed: unknown
+  return parseDraftContent(response.content)
+}
+
+export async function requestAutomationDraftFromSavedProvider(
+  providerId: string,
+  profile: Profile,
+  userPrompt: string,
+): Promise<AiAutomationDraft> {
+  const cleanProviderId = providerId.trim()
+  if (!cleanProviderId) automationError('ai_provider_missing')
+  if (!userPrompt.trim()) automationError('ai_prompt_missing')
+
+  let response: AiChatResponse
   try {
-    parsed = JSON.parse(raw)
+    response = await invoke<AiChatResponse>('ai_chat_completion_saved', {
+      request: {
+        providerId: cleanProviderId,
+        messages: composerMessages(profile, userPrompt),
+        temperature: 0.15,
+      },
+    })
   } catch (error) {
-    automationError('ai_invalid_json', { detail: error instanceof Error ? error.message : String(error) })
+    const decoded = decodeAiBridgeError(error)
+    if (decoded) throw decoded
+    throw error
   }
-  return parseAutomationDraft(parsed)
+
+  return parseDraftContent(response.content)
 }
