@@ -21,15 +21,6 @@ pub struct AiChatRequest {
     pub temperature: f32,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AiSavedChatRequest {
-    pub provider_id: String,
-    pub messages: Vec<AiChatMessage>,
-    #[serde(default = "default_temperature")]
-    pub temperature: f32,
-}
-
 fn default_temperature() -> f32 {
     0.15
 }
@@ -78,7 +69,13 @@ fn extract_content(value: &Value) -> Result<String, String> {
         .ok_or_else(|| ai_error("provider_content_missing", "choices[0].message.content"))
 }
 
-async fn execute_chat_completion(request: AiChatRequest) -> Result<Value, String> {
+/// Provider-neutral OpenAI-compatible proxy.
+///
+/// API key intentionally lives only in the request and is never persisted or logged.
+/// Remote plaintext HTTP is rejected; localhost HTTP remains available for Ollama/
+/// LM Studio/other local OpenAI-compatible providers.
+#[tauri::command]
+pub async fn ai_chat_completion(request: AiChatRequest) -> Result<Value, String> {
     if request.model.trim().is_empty() {
         return Err(ai_error("model_missing", ""));
     }
@@ -143,44 +140,6 @@ async fn execute_chat_completion(request: AiChatRequest) -> Result<Value, String
         .map_err(|error| ai_error("provider_invalid_json", error.to_string()))?;
     let content = extract_content(&value)?;
     Ok(json!({ "content": content }))
-}
-
-/// Provider-neutral OpenAI-compatible proxy used for explicit, non-persisted
-/// provider requests (for example local development/test providers).
-#[tauri::command]
-pub async fn ai_chat_completion(request: AiChatRequest) -> Result<Value, String> {
-    execute_chat_completion(request).await
-}
-
-/// Run a request through a saved AI Provider Profile without exposing the
-/// stored API key to the WebView. Provider metadata comes from AppConfig and
-/// the secret is resolved inside Rust from Windows Credential Manager.
-#[tauri::command]
-pub async fn ai_chat_completion_saved(request: AiSavedChatRequest) -> Result<Value, String> {
-    let provider_id = request.provider_id.trim();
-    if provider_id.is_empty() {
-        return Err(ai_error("provider_profile_missing", ""));
-    }
-
-    let config = crate::shared::config::load_config()
-        .map_err(|error| ai_error("provider_profile_load_failed", error))?;
-    let provider = config
-        .ai_providers
-        .iter()
-        .find(|provider| provider.id == provider_id)
-        .ok_or_else(|| ai_error("provider_profile_missing", provider_id))?;
-
-    let api_key = crate::gui::commands::ai_secret_get(provider.id.clone())?
-        .unwrap_or_default();
-
-    execute_chat_completion(AiChatRequest {
-        endpoint: provider.endpoint.clone(),
-        model: provider.model.clone(),
-        api_key,
-        messages: request.messages,
-        temperature: request.temperature,
-    })
-    .await
 }
 
 #[cfg(test)]
