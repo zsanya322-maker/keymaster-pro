@@ -129,7 +129,7 @@ function isIntegerInRange(value: unknown, min: number, max: number): value is nu
 function validChord(value: unknown): boolean {
   return isRecord(value)
     && isIntegerInRange(value.code, 0, 255)
-    && isIntegerInRange(value.modifiers ?? 0, 0xffff)
+    && isIntegerInRange(value.modifiers ?? 0, 0, 0xffff)
 }
 
 function validTrigger(value: unknown): value is FrontendTrigger {
