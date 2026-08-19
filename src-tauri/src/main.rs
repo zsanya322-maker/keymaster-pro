@@ -14,6 +14,20 @@ fn main() {
                 .action(clap::ArgAction::SetTrue),
         )
         .arg(
+            Arg::new("mcp")
+                .long("mcp")
+                .help("Запустить MCP stdio bridge в безопасном read-only режиме")
+                .conflicts_with("daemon")
+                .action(clap::ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("mcp-write")
+                .long("mcp-write")
+                .help("Запустить MCP stdio bridge с write/execute tools (явный opt-in)")
+                .conflicts_with("daemon")
+                .action(clap::ArgAction::SetTrue),
+        )
+        .arg(
             Arg::new("parent-pid")
                 .long("parent-pid")
                 .help("PID родительского процесса для мониторинга")
@@ -27,6 +41,15 @@ fn main() {
                 .value_parser(clap::value_parser!(u64)),
         )
         .get_matches();
+
+    let mcp_write = matches.get_flag("mcp-write");
+    if matches.get_flag("mcp") || mcp_write {
+        if let Err(error) = keymaster_pro_lib::mcp::run_stdio(mcp_write) {
+            eprintln!("MCP bridge error: {error}");
+            std::process::exit(1);
+        }
+        return;
+    }
 
     if matches.get_flag("daemon") {
         let parent_pid = matches.get_one::<u32>("parent-pid").copied();
