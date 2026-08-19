@@ -8,10 +8,10 @@
 
 [![Лицензия: FCL](https://img.shields.io/badge/Лицензия-FCL-blue.svg)](LICENSE)
 [![Платформа: Windows](https://img.shields.io/badge/Платформа-Windows%2010%2F11-0078D4.svg)](https://github.com/zsanya322-maker/keymaster-pro)
-[![Стабильная версия](https://img.shields.io/badge/stable-v0.2.4-2f855a.svg)](https://github.com/zsanya322-maker/keymaster-pro/releases/latest)
+[![Стабильная версия](https://img.shields.io/badge/stable-v0.4.1-2f855a.svg)](https://github.com/zsanya322-maker/keymaster-pro/releases/latest)
 [![Tauri](https://img.shields.io/badge/Tauri-v2-FFC131.svg)](https://v2.tauri.app)
 
-[📥 Скачать](#скачать) · [✅ Что работает](#что-работает-в-v024) · [🗺️ План](ROADMAP.md) · [📝 История изменений](CHANGELOG.md) · [🐛 Issues](https://github.com/zsanya322-maker/keymaster-pro/issues)
+[📥 Скачать](#скачать) · [✅ Что работает](#что-работает-в-v041) · [🗺️ План](ROADMAP.md) · [📝 История изменений](CHANGELOG.md) · [🐛 Issues](https://github.com/zsanya322-maker/keymaster-pro/issues)
 
 </div>
 
@@ -19,147 +19,177 @@
 
 ## Что такое KeyMaster Pro?
 
-KeyMaster Pro — настольная Windows-утилита для переназначения и автоматизации ввода, построенная вокруг единой модели правил:
+KeyMaster Pro — настольная Windows-утилита для переназначения и автоматизации ввода, построенная вокруг единой модели:
 
 ```text
 ТРИГГЕР + УСЛОВИЯ -> ДЕЙСТВИЯ
 ```
 
-Правило может реагировать на клавишу, поддерживаемую кнопку мыши, Tap-Hold или набранную текстовую последовательность. Условия ограничивают правило активным слоем или текущим окном. Действия могут переназначать ввод, печатать текст, запускать записанный макрос, управлять слоями, окнами, медиа/системными действиями, запускать или фокусировать приложение.
+Низкоуровневые Windows-хуки, машины состояний ввода, отслеживание контекста и выполнение правил работают в отдельном **Rust-daemon**. GUI на **Tauri + React** отвечает за профили, правила, макросы и настройки. GUI и daemon общаются через Named Pipes / JSON-RPC.
 
-Низкоуровневые Windows-хуки и выполнение правил работают в отдельном **Rust-daemon**, а GUI на **Tauri + React** отвечает за профили, правила и настройки. GUI и daemon общаются через Named Pipes / JSON-RPC.
-
-> **Правило документации:** этот README описывает только реально работающую стабильную версию. Будущие и частично реализованные возможности находятся в [`ROADMAP.md`](ROADMAP.md).
+> **Правило документации:** этот README описывает текущий стабильный релиз. Реально выпущенные изменения находятся в [`CHANGELOG.md`](CHANGELOG.md), оставшаяся работа — в [`ROADMAP.md`](ROADMAP.md).
 
 ---
 
-## Что работает в v0.2.4
+## Что работает в v0.4.1
 
-### Триггеры
+### Клавиатура и мышь
 
-- **Key Down / Key Up** — один Windows virtual-key code на один триггер.
-- **Mouse Button Down / Up** — Left, Right, Middle, X1 и X2.
-- **Tap-Hold** — отдельные действия на короткое нажатие и удержание, таймаут задаётся для правила.
-- **Typed Text** — статическое совпадение по введённой аббревиатуре/последовательности.
+- **Key Down / Key Up** с полноценными сочетаниями модификаторов `Ctrl`, `Alt`, `Shift`, `Win`.
+- Переназначение сочетание → сочетание с корректной обработкой модификаторов.
+- Расширенный каталог Windows VK и компактный chord-aware выбор клавиш.
+- Кнопки мыши Left, Right, Middle, X1 и X2.
+- Вертикальное и горизонтальное колесо мыши.
+- Двойной клик.
+- Движение мыши с порогом расстояния и cooldown.
+- Tap-Hold.
+- **Leader-последовательности**.
+- Обычные **последовательности клавиш**.
+- Одновременные **chord-наборы обычных клавиш**.
+- **Жесты мыши** по направлениям.
 
-### Условия
+### Условия и контекст
 
-- **Layer Active**.
-- **Window Match** по имени процесса и/или части заголовка активного окна.
-  - Если в текущем формате заполнены оба поля, используется логика **OR / ЛЮБОЕ совпадение**.
+- активный слой;
+- совместимый старый process/title `WindowMatch`;
+- структурированный `contextMatch` с режимом **ANY / ALL**;
+- имя процесса и путь к executable;
+- заголовок и класс окна;
+- диапазоны размера окна;
+- fullscreen;
+- monitor и virtual-desktop identifiers, когда они доступны в нормализованном Windows-контексте.
 
 ### Действия
 
-- переназначение клавиши;
-- переназначение поддерживаемой кнопки мыши;
-- ввод текста;
-- запуск записанного keyboard/mouse макроса;
-- toggle/hold слоя;
-- mute / громкость вверх / вниз;
-- play/pause/next/previous/stop;
+- переназначение клавиатурных сочетаний;
+- переназначение кнопок мыши;
+- ввод текста и шаблонов;
+- запуск именованного макроса из библиотеки профиля;
+- Toggle/Hold Layer;
+- системная громкость;
+- media keys;
 - snap/minimize/maximize/close окна;
 - запуск приложения;
-- фокус окна по процессу или заголовку;
-- сон ПК и отключение монитора.
+- фокус процесса/окна;
+- сон ПК и выключение монитора.
 
-### Макросы
+### Библиотека макросов
 
+В v0.4.1 макросы стали самостоятельными объектами профиля вместо независимых списков шагов, встроенных прямо в каждое правило.
+
+- именованная библиотека макросов для каждого профиля;
+- создание, редактирование, поиск, копирование и удаление;
+- счётчик использования макроса в правилах;
+- защита от удаления используемого макроса;
+- правила ссылаются на макрос через `macroId`;
 - запись клавиатуры и мыши;
-- шаги движения мыши и вертикального скролла;
-- сохранение задержки для каждого шага;
-- опциональный возврат курсора после макроса;
-- воспроизведение макросов идёт в отдельной очереди/worker, поэтому длинный `Delay` макроса **не блокирует обычные быстрые remap-команды**.
+- движение мыши, вертикальный/горизонтальный скролл и абсолютные координаты;
+- задержки между шагами и перестановка шагов;
+- множитель скорости;
+- повтор N раз и repeat-while-held;
+- тестовый запуск прямо из редактора;
+- остановка/отмена воспроизведения и настраиваемая emergency-stop клавиша;
+- отдельная очередь макросов: длинная задержка в макросе не блокирует обычные remap-действия;
+- миграция schema v7 переносит старые inline-макросы в библиотеку без случайного объединения независимых макросов.
 
-### Слои и профили
+### Text Expansion
 
-- toggle и hold слои;
-- условие `Layer Active` для правил;
-- создание, сохранение/переименование, удаление, импорт, экспорт и ручное переключение профилей;
-- безопасное хранение профилей/config с версией схемы, миграциями, backup, atomic write и recovery повреждённых файлов.
+- instant и delimiter режимы;
+- настраиваемые разделители и чувствительность к регистру;
+- шаблоны `{{date}}`, `{{time}}`, `{{clipboard}}`;
+- выбор формата даты и времени;
+- чтение буфера обмена только если реально сработал шаблон с `{{clipboard}}`;
+- `Ctrl+Z` для отмены последнего подходящего расширения;
+- ограниченный буфер только в памяти с очисткой по focus/timeout; история нажатий на диск не пишется.
 
-### Само приложение
+### Профили, привязки и структура правил
 
-- компактная classic-style Windows-оболочка и inline-редактор правила;
+- создание, переименование, копирование, изменение порядка, сохранение, удаление, импорт/экспорт и ручная активация профилей;
+- структурированные привязки к приложениям/контексту;
+- автоматическое переключение профилей;
+- глобальный Auto-switch ON/OFF;
+- Manual Profile Lock, чтобы ручной выбор пользователя имел приоритет;
+- вложенные папки правил со стабильными ID и порядком;
+- enable/disable, folder assignment, order и priority для правил;
+- слои с Toggle/Hold и условием Layer Active;
+- безопасные schema-aware миграции, backup перед разрушительными изменениями, atomic writes и восстановление повреждённых профилей.
+
+### Интерфейс приложения
+
+- компактная Windows-style оболочка;
+- упрощённый редактор правил по блокам **КОГДА / ЕСЛИ / СДЕЛАТЬ**;
+- компактные поисковые pickers типов триггеров, условий и действий;
+- отдельный раздел **Macro Library**;
 - русский и английский интерфейс;
-- светлая и тёмная темы;
-- системный трей и автозапуск Windows;
-- встроенное подписанное обновление через GitHub Releases;
-- защита несохранённого черновика правила при навигации, выходе, рестарте и обновлении;
-- single-instance GUI и усиленный lifecycle/IPC daemon.
+- светлая/тёмная тема;
+- tray и автозапуск Windows;
+- подписанный встроенный updater через GitHub Releases;
+- защита несохранённых изменений при переходах, выходе, перезапуске и обновлении;
+- single-instance GUI и усиленный lifecycle/IPC daemon-а.
 
 ---
 
-## Важные ограничения текущей версии
+## Текущие ограничения
 
-Следующие пункты **запланированы, но не являются готовыми функциями v0.2.4**:
+В v0.4.1 специально **не заявляются как полностью готовые**:
 
-- полноценные комбинации модификаторов вроде `Ctrl + Shift + F2`;
-- переназначение комбинации в комбинацию, например `Ctrl+Shift+F2 -> Alt+Tab`;
-- полный удобный каталог Windows VK и picker для него;
-- wheel / horizontal wheel / double-click как триггеры правила;
-- скорость макроса, repeat N, repeat while-held, cancel/emergency-stop и тестовый playback из редактора;
-- автоматическое переключение профиля по приложению и режим Manual Lock;
-- Virtual Desktop matching;
-- date/time/clipboard переменные, delimiters и undo в Text Expansion;
-- папки/группы/дерево для большого списка правил.
+- надёжное определение password/secure fields для Text Expansion во всех браузерах и приложениях;
+- отдельный публичный portable ZIP;
+- пользовательский UI для backup/restore поверх уже существующих внутренних механизмов сохранности;
+- отдельная модель приоритета слоёв помимо порядка/приоритета правил;
+- scripting/plugin API, browser automation, cloud sync, AI-функции и marketplace.
 
-### Совместимость Virtual Desktop
-
-Тип `VirtualDesktop` пока остаётся в сериализуемой схеме, чтобы старые/импортированные профили можно было прочитать, но реального runtime-matcher ещё нет. В обычном редакторе это условие нельзя создать заново. Legacy-условия Virtual Desktop компилируются **fail-closed** — они не превращаются в глобальные правила и не должны срабатывать на любом рабочем столе.
-
-Подробный порядок реализации, изменения модели данных, миграции и критерии готовности находятся в [`ROADMAP.md`](ROADMAP.md).
+Оставшаяся работа после завершённого цикла 0.3.x → 0.4.1 находится в [`ROADMAP.md`](ROADMAP.md).
 
 ---
 
 ## Архитектура
 
 ```text
-┌──────────────────────────────┐
-│ GUI: Tauri + React/TypeScript│
-│ правила, профили, настройки │
-└──────────────┬───────────────┘
-               │ Named Pipes / JSON-RPC
-┌──────────────▼───────────────┐
-│ Rust daemon                  │
-│ compiler + engine + context  │
-└───────────┬─────────┬────────┘
-            │         │
-       keyboard     mouse
-       LL hook       LL hook
-            │         │
-       immediate   macro worker
-       simulator   (Delay отдельно)
+┌──────────────────────────────────┐
+│ GUI: Tauri + React/TypeScript    │
+│ правила, макросы, профили        │
+└────────────────┬─────────────────┘
+                 │ Named Pipes / JSON-RPC
+┌────────────────▼─────────────────┐
+│ Rust daemon                     │
+│ compiler + engine + input state │
+│ context tracker + macro runtime │
+└────────────┬───────────┬─────────┘
+             │           │
+        keyboard       mouse
+        LL hook        LL hook
+             │           │
+        immediate     macro worker
+        simulator     / state machines
 ```
 
-Архитектурные гарантии, которые нужно сохранять после v0.2.4:
+Основные гарантии v0.4.1:
 
 - только один daemon владеет Named Pipe и input engines;
-- неподдерживаемые условия не должны fail-open;
-- low-level hook callback не выполняет медленный file/network I/O;
-- задержки макросов не блокируют immediate-remap очередь;
-- миграции профилей/config неразрушающие и отклоняют неподдерживаемую future-schema.
+- неподдерживаемые условия не должны незаметно превращаться в глобальные правила;
+- в low-level hook нет медленного file/network I/O;
+- advanced triggers обрабатываются ограниченными state machines без случайных долгих sleep в hook path;
+- задержки макросов не блокируют immediate remaps;
+- миграции обратно совместимы и неразрушительны, future schema отклоняется.
 
 ---
 
 ## Скачать
 
-### Установщик — основной вариант
+### Installer
 
-Откройте [**GitHub Releases**](https://github.com/zsanya322-maker/keymaster-pro/releases/latest) и скачайте:
+Откройте [**GitHub Releases**](https://github.com/zsanya322-maker/keymaster-pro/releases/latest) и скачайте Windows installer последнего релиза.
 
-```text
-KeyMaster-Pro_<version>_x64-setup.exe
-```
-
-После установки приложение умеет обновляться само через встроенный подписанный updater.
+Установленная версия умеет обновляться через встроенный подписанный updater.
 
 ### MSI
 
-К публичным релизам также прикладывается x64 MSI.
+Release workflow также умеет собирать x64 MSI для сценариев, где удобнее MSI-развёртывание.
 
 ### WinGet
 
-В репозитории есть workflow публикации WinGet. Если пакет доступен в используемом WinGet source, ID пакета:
+В репозитории есть workflow публикации WinGet. Используемый package ID:
 
 ```powershell
 winget install KeyMasterPro.KeyMasterPro
@@ -167,21 +197,21 @@ winget install KeyMasterPro.KeyMasterPro
 
 ### Portable
 
-Нормальный публичный portable ZIP ещё в плане. Standalone-файлы из dev/checkpoint сборок пока **не считаются стабильным portable-дистрибутивом**.
+Отдельный публичный portable ZIP остаётся в плане. Dev/checkpoint standalone binaries не считаются стабильной portable-дистрибуцией.
 
 ---
 
 ## Сборка из исходников
 
-### Нужно
+### Требования
 
 - Windows 10/11 x64;
-- рекомендуется Node.js 22;
+- Node.js 22;
 - pnpm 9+;
-- актуальный stable Rust toolchain под MSVC;
+- актуальный stable Rust toolchain (MSVC);
 - Visual Studio Build Tools с C++ build tools.
 
-### Запуск разработки
+### Команды
 
 ```powershell
 git clone https://github.com/zsanya322-maker/keymaster-pro.git
@@ -196,13 +226,13 @@ Production build:
 pnpm tauri build
 ```
 
-Windows bundles появляются в:
+Windows bundles:
 
 ```text
 src-tauri/target/release/bundle/
 ```
 
-Проверки, которые используются для release candidate:
+Проверки release candidate:
 
 ```powershell
 pnpm build
@@ -213,57 +243,30 @@ cargo test --manifest-path src-tauri/Cargo.toml
 
 ---
 
-## Стек
+## Завершённый цикл разработки
 
-| Слой | Технология |
-|---|---|
-| Backend / desktop shell | Rust + Tauri v2 |
-| Frontend | React 19 + TypeScript + Vite 6 |
-| UI | Tailwind CSS 4 + Lucide |
-| State | Zustand |
-| i18n | i18next (RU + EN) |
-| Input hooks | `SetWindowsHookEx` (`WH_KEYBOARD_LL`, `WH_MOUSE_LL`) через windows-rs |
-| Контекст | foreground-window WinEvent hook |
-| IPC | Named Pipes + JSON-RPC 2.0 |
-| Хранение | локальные JSON профилей/config |
+- **0.3.0** — modifier/key combinations, расширенный key model и nested rule-tree foundation;
+- **0.3.1** — завершение mouse triggers и macro playback/control;
+- **0.3.2** — profiles, auto-switch/manual lock и richer context matching;
+- **0.3.3** — Text Expansion templates, delimiter modes и undo;
+- **0.4.0** — Leader Keys, Sequences, ordinary-key Chords и Mouse Gestures;
+- **0.4.1** — упрощённый rule UX, first-class Macro Library и schema v7.
 
----
-
-## Приватность и обработка ввода
-
-Для переназначения KeyMaster Pro использует низкоуровневые keyboard/mouse hooks. Те же Win32 API могут использовать кейлоггеры, поэтому security software иногда может относиться к таким приложениям подозрительно.
-
-Проект рассчитан на обработку событий ввода в памяти для matching/remapping и не предназначен для сохранения истории нажатий. Профили и настройки хранятся локально в JSON; встроенный updater обращается к GitHub Releases для проверки/загрузки обновлений.
-
-Из-за low-level input interception и synthetic input возможны ложные срабатывания антивирусов. При необходимости исходники и release artifacts можно проверить самостоятельно.
-
----
-
-## План разработки
-
-Единый актуальный план находится в [`ROADMAP.md`](ROADMAP.md). Ближайшая последовательность core-completion:
-
-- **0.3.0** — modifier/key combinations, rule-model v2, полный key picker, фундамент дерева правил;
-- **0.3.1** — мышиные триггеры и завершение macro playback/control;
-- **0.3.2** — профили, auto-switch/manual lock, расширенный context matching, Virtual Desktop;
-- **0.3.3** — завершение Text Expansion;
-- **0.4.0** — Leader Keys, Sequences, обычные-key Chords и Mouse Gestures.
-
-Rhai scripting, browser automation, plugins, cloud sync, AI и marketplace сознательно отложены до завершения и стабилизации основного input model.
+Дальнейшая работа ведётся по [`ROADMAP.md`](ROADMAP.md), а не по старому уже выполненному плану.
 
 ---
 
 ## Разработка / баги
 
-- Баги: [GitHub Issues](https://github.com/zsanya322-maker/keymaster-pro/issues)
-- План: [`ROADMAP.md`](ROADMAP.md)
-- Что уже выпущено: [`CHANGELOG.md`](CHANGELOG.md)
+- Bugs: [GitHub Issues](https://github.com/zsanya322-maker/keymaster-pro/issues)
+- Roadmap: [`ROADMAP.md`](ROADMAP.md)
+- История релизов: [`CHANGELOG.md`](CHANGELOG.md)
 - Telegram: [@KeyM_Pro](https://t.me/KeyM_Pro)
 
-Если изменение затрагивает правила или профили, оно считается завершённым только когда согласованы **schema + migration + compiler/runtime + UI + tests**. Одна новая кнопка в интерфейсе не означает готовую функцию.
+Если функция меняет правила или профили, считать её готовой можно только когда согласованы **schema + migration + compiler/runtime + UI + tests**.
 
 ---
 
 ## Лицензия
 
-KeyMaster Pro распространяется по **Fair Core License (FCL)**. Точные условия и дата перехода лицензии указаны в [`LICENSE`](LICENSE).
+KeyMaster Pro распространяется по **Fair Core License (FCL)**. Точные условия и дата conversion указаны в [`LICENSE`](LICENSE).
