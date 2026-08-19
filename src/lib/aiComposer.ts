@@ -1,6 +1,7 @@
 import { invoke } from './ipc'
 import type { Profile } from './types'
 import { parseAutomationDraft, type AiAutomationDraft } from './innovation'
+import { automationError } from './automationErrors'
 
 export interface AiProviderConfig {
   endpoint: string
@@ -101,9 +102,9 @@ export async function requestAutomationDraft(
 ): Promise<AiAutomationDraft> {
   const endpoint = provider.endpoint.trim()
   const model = provider.model.trim()
-  if (!endpoint) throw new Error('Укажите OpenAI-compatible endpoint')
-  if (!model) throw new Error('Укажите модель')
-  if (!userPrompt.trim()) throw new Error('Опишите автоматизацию')
+  if (!endpoint) automationError('ai_endpoint_missing')
+  if (!model) automationError('ai_model_missing')
+  if (!userPrompt.trim()) automationError('ai_prompt_missing')
 
   const response = await invoke<AiChatResponse>('ai_chat_completion', {
     request: {
@@ -123,7 +124,7 @@ export async function requestAutomationDraft(
   try {
     parsed = JSON.parse(raw)
   } catch (error) {
-    throw new Error(`AI вернул невалидный JSON: ${error instanceof Error ? error.message : String(error)}`)
+    automationError('ai_invalid_json', { detail: error instanceof Error ? error.message : String(error) })
   }
   return parseAutomationDraft(parsed)
 }
