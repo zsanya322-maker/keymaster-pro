@@ -22,6 +22,8 @@ describe('Automation Lab i18n', () => {
     await i18n.changeLanguage('ru')
     expect(i18n.t('automation.ai.generate')).toBe('Создать draft')
     expect(i18n.t('automation.errors.pack_invalid_json')).toContain('некорректный JSON')
+    expect(i18n.t('automation.ai.api_key')).toContain('Windows Credential Manager')
+    expect(i18n.t('automation.ai.not_installed')).toContain('ещё не установлен')
     expect(i18n.t('nav.automation')).toBe('Automation Lab')
   })
 
@@ -29,7 +31,8 @@ describe('Automation Lab i18n', () => {
     await i18n.changeLanguage('en')
     expect(i18n.t('automation.ai.generate')).toBe('Create draft')
     expect(i18n.t('automation.errors.pack_invalid_json')).toBe('Pack file contains invalid JSON')
-    expect(i18n.t('automation.ai.api_key')).toContain('never saved')
+    expect(i18n.t('automation.ai.api_key')).toContain('Windows Credential Manager')
+    expect(i18n.t('automation.ai.not_installed')).toContain('not installed')
     expect(i18n.t('automation.mcp.chatgpt_scope')).toContain('remote MCP')
   })
 })
