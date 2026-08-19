@@ -37,7 +37,7 @@ export interface AutomationPack {
   }
 }
 
-export interface PackInspection {
+export interface PackInspection extends Record<string, unknown> {
   rules: number
   macros: number
   layers: number
