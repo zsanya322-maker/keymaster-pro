@@ -171,19 +171,7 @@ async fn handle_client(pipe: NamedPipeServer, state: DaemonStateRef) -> Result<(
                     } else {
                         None
                     };
-                    let mutation_guard = if serializes_profile_mutation(&req.method) {
-                        Some(PROFILE_MUTATION_LOCK.lock().await)
-                    } else {
-                        None
-                    };
-                    let mutation_guard = if serializes_profile_mutation(&req.method) {
-                        Some(PROFILE_MUTATION_LOCK.lock().await)
-                    } else {
-                        None
-                    };
                     let response = route_request(req, &state).await;
-                    drop(mutation_guard);
-                    drop(mutation_guard);
                     drop(mutation_guard);
                     let mut response_bytes = serde_json::to_string(&response)
                         .map_err(|e| format!("Serialization error: {}", e))?;
