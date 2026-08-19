@@ -5,6 +5,7 @@ pub mod context;
 pub mod daemon;
 pub mod gui;
 pub mod logging;
+pub mod mcp;
 pub mod schemas;
 pub mod shared;
 pub mod simulator;
@@ -55,6 +56,7 @@ pub fn run() {
             gui::commands::is_elevated,
             gui::commands::get_gui_config,
             gui::commands::update_gui_config,
+            gui::ai::ai_chat_completion,
         ])
         .setup(|app| {
             // Background event subscription is a long-lived connection distinct

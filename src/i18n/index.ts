@@ -10,15 +10,19 @@ import i18n from 'i18next'
 import { initReactI18next } from 'react-i18next'
 import ru from './locales/ru.json'
 import en from './locales/en.json'
+import automationRu from './locales/automation.ru.json'
+import automationEn from './locales/automation.en.json'
 
 const ruTranslation = {
   ...ru,
+  automation: automationRu,
   nav: {
     ...ru.nav,
     rules: 'Правила',
     layers: 'Слои',
     macros: 'Макросы',
     text: 'Текст',
+    automation: automationRu.nav,
     settings: 'Настройки',
   },
   menu: {
@@ -122,12 +126,14 @@ const ruTranslation = {
 
 const enTranslation = {
   ...en,
+  automation: automationEn,
   nav: {
     ...en.nav,
     rules: 'Rules',
     layers: 'Layers',
     macros: 'Macros',
     text: 'Text',
+    automation: automationEn.nav,
     settings: 'Settings',
   },
   menu: {

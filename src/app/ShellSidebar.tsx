@@ -1,4 +1,4 @@
-import { Activity, Keyboard, Layers, Settings } from 'lucide-react'
+import { Activity, Keyboard, Layers, Settings, Sparkles } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { Category } from '../store/keyMasterStore'
 
@@ -16,6 +16,7 @@ export function ShellSidebar({ open, activeCategory, onNavigate }: ShellSidebarP
     { id: 'rules' as const, label: t('nav.rules'), icon: Keyboard },
     { id: 'macros' as const, label: t('nav.macros'), icon: Activity },
     { id: 'layers' as const, label: t('nav.layers'), icon: Layers },
+    { id: 'automation' as const, label: t('nav.automation'), icon: Sparkles },
     { id: 'settings' as const, label: t('nav.settings'), icon: Settings },
   ]
 

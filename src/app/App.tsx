@@ -10,6 +10,7 @@ import { emitRuleCommand, emitRuleSearch } from '../lib/uiEvents'
 
 import { RulesPage } from '../pages/RulesPage'
 import { MacroLibraryPage } from '../pages/MacroLibraryPage'
+import { AutomationLabPage } from '../pages/AutomationLabPage'
 import { SettingsPage } from '../pages/SettingsPage'
 import { LayersPanel } from '../components/LayersPanel'
 import { UpdateBanner } from '../components/UpdateBanner'
@@ -348,6 +349,7 @@ function App() {
           {activeCategory === 'rules' && <RulesPage mode="all" />}
           {activeCategory === 'macros' && <MacroLibraryPage />}
           {activeCategory === 'layers' && <LayersPanel />}
+          {activeCategory === 'automation' && <AutomationLabPage />}
           {activeCategory === 'settings' && <SettingsPage />}
         </main>
       </div>

@@ -6,13 +6,34 @@ This file describes **shipped releases**. Planned work belongs in [`ROADMAP.md`]
 
 ## [Unreleased]
 
-### Documentation
+### Automation Lab / AI Composer
 
-- Synchronized `README.md` and `README.ru.md` with the actual stable release, v0.4.1.
-- Backfilled the missing 0.3.0 → 0.4.1 release history.
-- Replaced the obsolete post-v0.2.4 roadmap with a post-v0.4.1 roadmap.
+- Added the bilingual Automation Lab UI with provider-neutral OpenAI-compatible draft generation, permission inspection and explicit install.
+- API keys remain request-only and are never persisted; remote plaintext HTTP is rejected while localhost HTTP remains available for local model servers.
+- Added defensive TypeScript parsing for AI drafts/macro steps plus canonical Rust-side validation before profile writes.
+- Provider/network failures now cross the Rust/TypeScript boundary as stable codes so EN/RU UI errors do not depend on backend prose.
 
-No runtime or application-code changes are included in this documentation update.
+### MCP bridge
+
+- Added local stdio MCP modes: `--mcp` (read-only) and explicit `--mcp-write` (write/execute).
+- Added seven MCP tools across profile reads, runtime status, rule validation, activation, macro execution and atomic rule installation.
+- Routed MCP validation/writes through the same Rust automation boundary used by GUI installs instead of a parallel validator.
+- Added a Windows real-process smoke test using the official `@modelcontextprotocol/client`, including legacy/modern initialization and both access modes.
+
+### keymaster-pack v1 and write safety
+
+- Added portable `keymaster-pack` v1 import/export with UUID regeneration and reference rebinding.
+- Added 2 MiB import bounds, duplicate/dangling-reference/folder-cycle checks and permission/warning inspection.
+- Serialized all profile mutations across Named Pipe clients to eliminate GUI/MCP read-modify-write loss.
+- Added mandatory backup receipts, one-click Undo install and stale-Undo protection.
+- Undo receipt now survives Automation Lab navigation for the lifetime of the app process.
+- Daemon normalizes incoming rule/folder ordering inside the serialized write transaction instead of trusting frontend order values.
+
+### Validation and localization
+
+- Added Vitest coverage for draft/pack validation, real EN/RU language switching and AI bridge error decoding.
+- CI runs frontend tests, TypeScript/Vite, Rust check/tests, ESLint and a separate Windows MCP/safety smoke job.
+- Version advanced to 0.5.0 for this feature candidate; PR remains draft until manual Windows UI QA is complete.
 
 ---
 
