@@ -129,7 +129,7 @@ function isIntegerInRange(value: unknown, min: number, max: number): value is nu
 function validChord(value: unknown): boolean {
   return isRecord(value)
     && isIntegerInRange(value.code, 0, 255)
-    && isIntegerInRange(value.modifiers ?? 0, 0, 0xffff)
+    && isIntegerInRange(value.modifiers ?? 0, 0xffff)
 }
 
 function validTrigger(value: unknown): value is FrontendTrigger {
@@ -172,6 +172,8 @@ function validTrigger(value: unknown): value is FrontendTrigger {
         && textModes.has(value.mode)
         && typeof value.delimiters === 'string'
         && typeof value.caseSensitive === 'boolean'
+    default:
+      return false
   }
 }
 
@@ -215,6 +217,8 @@ function validAction(value: unknown): value is AiDraftAction {
     case 'sleep':
     case 'monitorOff':
       return true
+    default:
+      return false
   }
 }
 
@@ -237,6 +241,8 @@ function validCondition(value: unknown): value is FrontendCondition {
         && typeof value.mode === 'string'
         && matchModes.has(value.mode)
     }
+    default:
+      return false
   }
 }
 
@@ -257,6 +263,8 @@ function validMacroStep(value: unknown): value is MacroStep {
       return isIntegerInRange(action.delta, -0x80000000, 0x7fffffff)
     case 'mouseToAbsolute':
       return isIntegerInRange(action.x, -0x80000000, 0x7fffffff) && isIntegerInRange(action.y, -0x80000000, 0x7fffffff)
+    default:
+      return false
   }
 }
 
@@ -275,8 +283,8 @@ function parseRuleDraft(value: unknown, index: number): AiRuleDraft {
       automationError('draft_condition_invalid', { index: index + 1 })
     }
   }
-  if (value.priority !== undefined && !isFiniteNumber(value.priority)) automationError('draft_invalid_rule_shape', { index: index + 1 } as never)
-  if (value.enabled !== undefined && typeof value.enabled !== 'boolean') automationError('draft_invalid_rule_shape', { index: index + 1 } as never)
+  if (value.priority !== undefined && !isFiniteNumber(value.priority)) automationError('draft_invalid_rule_shape', { index: index + 1 })
+  if (value.enabled !== undefined && typeof value.enabled !== 'boolean') automationError('draft_invalid_rule_shape', { index: index + 1 })
   return value as unknown as AiRuleDraft
 }
 
