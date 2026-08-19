@@ -1,0 +1,271 @@
+name: Finalize PR4
+
+on:
+  push:
+    branches: [agent/ai-mcp-hub]
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/ai-mcp-hub
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Apply final production consistency and docs
+        shell: pwsh
+        run: |
+          @'
+          import json
+          import re
+          from pathlib import Path
+
+          # Keep the one-click Undo receipt when Automation Lab is unmounted during navigation.
+          path = Path('src/pages/AutomationLabPage.tsx')
+          text = path.read_text(encoding='utf-8')
+          if "../store/keyMasterStore" not in text:
+              text = text.replace(
+                  "import { useProfileStore } from '../store/profileStore'\n",
+                  "import { useProfileStore } from '../store/profileStore'\nimport { useKeyMasterStore } from '../store/keyMasterStore'\n",
+                  1,
+              )
+          text = text.replace(
+              "  const [lastInstall, setLastInstall] = useState<AutomationInstallReceipt | null>(null)\n",
+              "  const { lastAutomationInstall: lastInstall, setLastAutomationInstall: setLastInstall } = useKeyMasterStore()\n",
+              1,
+          )
+          path.write_text(text, encoding='utf-8')
+
+          # Normalize rule/folder ordering inside the serialized Rust write boundary.
+          path = Path('src-tauri/src/daemon/automation.rs')
+          text = path.read_text(encoding='utf-8')
+          old = '''fn candidate_with_additions(mut profile: Profile, additions: AutomationAdditions) -> Profile {\n    profile.rules.extend(additions.rules);\n    profile.macros.extend(additions.macros);\n    profile.layers.extend(additions.layers);\n    profile.folders.extend(additions.folders);\n    profile\n}\n'''
+          new = '''fn next_rule_order(profile: &Profile) -> i32 {\n    profile\n        .rules\n        .iter()\n        .map(|rule| rule.order)\n        .max()\n        .unwrap_or(-1)\n        .saturating_add(1)\n}\n\nfn next_folder_order(profile: &Profile) -> i32 {\n    profile\n        .folders\n        .iter()\n        .map(|folder| folder.order)\n        .max()\n        .unwrap_or(-1)\n        .saturating_add(1)\n}\n\nfn candidate_with_additions(mut profile: Profile, mut additions: AutomationAdditions) -> Profile {\n    let rule_start = next_rule_order(&profile);\n    for (index, rule) in additions.rules.iter_mut().enumerate() {\n        rule.order = rule_start.saturating_add(i32::try_from(index).unwrap_or(i32::MAX));\n    }\n    let folder_start = next_folder_order(&profile);\n    for (index, folder) in additions.folders.iter_mut().enumerate() {\n        folder.order = folder_start.saturating_add(i32::try_from(index).unwrap_or(i32::MAX));\n    }\n\n    profile.rules.extend(additions.rules);\n    profile.macros.extend(additions.macros);\n    profile.layers.extend(additions.layers);\n    profile.folders.extend(additions.folders);\n    profile\n}\n'''
+          if old in text:
+              text = text.replace(old, new, 1)
+          text = text.replace(
+              '    let rule = normalize_rule_value(request.rule, profile.rules.len() as i32)?;\n',
+              '    let rule = normalize_rule_value(request.rule, next_rule_order(&profile))?;\n',
+          )
+          if 'additions_order_is_normalized_inside_write_boundary' not in text:
+              test_insert = '''\n    #[test]\n    fn additions_order_is_normalized_inside_write_boundary() {\n        let mut profile = base_profile();\n        profile.folders[0].order = 30;\n        let mut existing = valid_rule();\n        existing.id = "existing".into();\n        existing.order = 40;\n        profile.rules.push(existing);\n\n        let mut incoming = valid_rule();\n        incoming.id = "incoming".into();\n        incoming.order = -100;\n        let additions = AutomationAdditions {\n            rules: vec![incoming],\n            folders: vec![RuleFolder {\n                id: "new-folder".into(),\n                name: "New folder".into(),\n                parent_id: None,\n                order: -100,\n            }],\n            ..AutomationAdditions::default()\n        };\n\n        let candidate = candidate_with_additions(profile, additions);\n        assert_eq!(candidate.rules.last().unwrap().order, 41);\n        assert_eq!(candidate.folders.last().unwrap().order, 31);\n    }\n'''
+              text = text.rsplit('\n}', 1)[0] + test_insert + '\n}\n'
+          path.write_text(text, encoding='utf-8')
+
+          # Version bump for this feature candidate. Stable README badges remain 0.4.1 until release.
+          path = Path('package.json')
+          data = json.loads(path.read_text(encoding='utf-8'))
+          data['version'] = '0.5.0'
+          path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+
+          path = Path('src-tauri/tauri.conf.json')
+          data = json.loads(path.read_text(encoding='utf-8'))
+          data['version'] = '0.5.0'
+          path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+
+          path = Path('src-tauri/Cargo.toml')
+          text = path.read_text(encoding='utf-8')
+          text = text.replace('version = "0.4.1"', 'version = "0.5.0"', 1)
+          path.write_text(text, encoding='utf-8')
+
+          path = Path('src-tauri/Cargo.lock')
+          text = path.read_text(encoding='utf-8')
+          text = re.sub(r'(\[\[package\]\]\nname = "keymaster-pro"\nversion = ")0\.4\.1("\n)', r'\g<1>0.5.0\2', text, count=1)
+          path.write_text(text, encoding='utf-8')
+
+          en_block = r'''## Preview in PR #4: Automation Lab (0.5.0 candidate)
+
+This branch adds the first production-hardened vertical slice for **AI Composer**, the local **MCP bridge**, and portable **keymaster-pack v1** bundles. It is intentionally still a draft until the Windows UI is manually exercised on the branch.
+
+### AI Automation Composer
+
+- OpenAI-compatible provider endpoint with a typed draft contract and explicit preview/install flow.
+- The API key exists only in the request/UI state: KeyMaster does **not** save it to the profile, config, store, or logs.
+- Plain `http://` is accepted only for localhost providers; remote providers must use TLS (`https://`).
+- Generated rules/macros are not trusted just because TypeScript parsed them: installation is re-deserialized and validated by the Rust daemon against the runtime profile types before any profile write.
+- Every install creates a profile backup and returns a one-click **Undo install** receipt; stale Undo is blocked after a newer profile mutation.
+
+### MCP bridge
+
+KeyMaster exposes a local stdio MCP server through the installed executable:
+
+- `KeyMaster-Pro.exe --mcp` — read-only mode: profile/status reads plus rule validation.
+- `KeyMaster-Pro.exe --mcp-write` — explicit opt-in for profile activation, macro execution and rule writes.
+
+Claude Desktop / Claude Code local stdio example (use `--mcp` by default):
+
+```json
+{
+  "mcpServers": {
+    "keymaster": {
+      "command": "C:\\Program Files\\KeyMaster-Pro\\KeyMaster-Pro.exe",
+      "args": ["--mcp"]
+    }
+  }
+}
+```
+
+For Claude Code the same object can live in project `.mcp.json` (or be supplied with its MCP config options). Change the argument to `--mcp-write` only when write/execute access is deliberately required.
+
+**ChatGPT scope:** this PR does not expose the local stdio process as a ChatGPT app/connector. OpenAI's MCP integration is based on a reachable **remote MCP server URL/service connector**, so a remote HTTP transport, authentication, exposure model and threat review are a separate task.
+
+### `keymaster-pack` v1
+
+- portable JSON envelope: `format: "keymaster-pack"`, `version: 1`;
+- import limit: **2 MiB**, checked before and after file read/parsing;
+- local inspection reports permissions and high-risk actions before install;
+- imported macro/layer/folder/rule UUIDs are regenerated and internal references are rebound;
+- dangling references, duplicate IDs, folder cycles, empty actions and malformed payloads are rejected;
+- final acceptance is the same Rust automation validation/write boundary used by AI and MCP;
+- install is backup-first and Undo-capable.
+
+### Validation evidence
+
+PR #4 Windows CI runs frontend unit tests, TypeScript/Vite, Rust check/tests and ESLint, then a separate real-process MCP smoke test. The smoke job builds `KeyMaster-Pro.exe`, launches a real daemon with isolated `%APPDATA%`, connects with the official `@modelcontextprotocol/client`, exercises both MCP modes, verifies all seven write-mode tools, disk persistence, physical backup, Undo/stale-Undo protection, and concurrent profile mutations.
+
+**Not in this PR:** the second Hub layer (diff/conflict detector, signed catalog), marketplace/discovery, and remote MCP hosting for ChatGPT. Those remain separate work after this vertical slice passes manual Windows UI QA.
+
+---
+
+'''
+          path = Path('README.md')
+          text = path.read_text(encoding='utf-8')
+          if '## Preview in PR #4: Automation Lab' not in text:
+              text = text.replace('## Architecture\n', en_block + '## Architecture\n', 1)
+          path.write_text(text, encoding='utf-8')
+
+          ru_block = r'''## Preview PR #4: Automation Lab (кандидат 0.5.0)
+
+В этой ветке добавлен первый доведённый вертикальный срез **AI Composer**, локального **MCP bridge** и переносимых пакетов **keymaster-pack v1**. PR намеренно остаётся draft до ручной проверки Windows UI на ветке.
+
+### AI Automation Composer
+
+- OpenAI-compatible endpoint, типизированный draft и обязательный preview/install вместо прямого исполнения ответа модели.
+- API key живёт только в поле UI и текущем запросе: KeyMaster **не сохраняет** его в профиль, config/store или логи.
+- Обычный `http://` разрешён только для localhost-провайдеров; удалённый endpoint обязан использовать `https://`.
+- Успешный TypeScript-парсинг не даёт права на запись: правила и макросы повторно десериализуются и валидируются Rust-daemon по тем же runtime-типам профиля непосредственно перед сохранением.
+- Перед каждой установкой создаётся backup профиля; после установки доступна кнопка **Undo install**, а устаревший Undo блокируется, если профиль уже изменился ещё раз.
+
+### MCP bridge
+
+Локальный stdio MCP server запускается тем же установленным exe:
+
+- `KeyMaster-Pro.exe --mcp` — read-only: чтение профилей/status и валидация правила.
+- `KeyMaster-Pro.exe --mcp-write` — отдельный явный opt-in для активации профиля, запуска макроса и записи правила.
+
+Пример локальной stdio-конфигурации для Claude Desktop / Claude Code (по умолчанию используйте `--mcp`):
+
+```json
+{
+  "mcpServers": {
+    "keymaster": {
+      "command": "C:\\Program Files\\KeyMaster-Pro\\KeyMaster-Pro.exe",
+      "args": ["--mcp"]
+    }
+  }
+}
+```
+
+Для Claude Code тот же объект можно хранить в проектном `.mcp.json` (либо передать через MCP config options). Менять аргумент на `--mcp-write` следует только когда осознанно нужен write/execute доступ.
+
+**Граница ChatGPT:** этот PR не пытается подключить локальный stdio-процесс как ChatGPT app/connector. MCP-интеграция OpenAI рассчитана на доступный **remote MCP server URL/service connector**, поэтому HTTP transport, аутентификация, внешний доступ и отдельный threat review — самостоятельная задача.
+
+### `keymaster-pack` v1
+
+- переносимый JSON envelope: `format: "keymaster-pack"`, `version: 1`;
+- лимит импорта **2 MiB**, проверяемый до чтения файла и повторно после чтения/парсинга;
+- локальный inspection показывает permissions и опасные действия до установки;
+- UUID macro/layer/folder/rule при импорте генерируются заново, внутренние ссылки перепривязываются;
+- dangling references, duplicate IDs, folder cycles, пустые actions и повреждённый payload отклоняются;
+- финальный допуск выполняет тот же Rust automation validation/write boundary, что используется AI и MCP;
+- установка всегда backup-first и поддерживает Undo.
+
+### Что реально проверяет CI
+
+Windows CI PR #4 запускает frontend unit tests, TypeScript/Vite, Rust check/tests и ESLint, затем отдельный real-process MCP smoke. Smoke job собирает `KeyMaster-Pro.exe`, поднимает настоящий daemon с изолированным `%APPDATA%`, подключается официальным `@modelcontextprotocol/client`, проверяет оба MCP-режима, все семь tools write-режима, запись на диск, физический backup, Undo/stale-Undo protection и конкурентные изменения профиля.
+
+**Не входит в этот PR:** второй слой Hub (diff/conflict detector, каталог с подписями), marketplace/discovery и remote MCP hosting для ChatGPT. К ним не переходим, пока этот вертикальный срез не пройдёт ручной Windows UI QA.
+
+---
+
+'''
+          path = Path('README.ru.md')
+          text = path.read_text(encoding='utf-8')
+          if '## Preview PR #4: Automation Lab' not in text:
+              text = text.replace('## Архитектура\n', ru_block + '## Архитектура\n', 1)
+          path.write_text(text, encoding='utf-8')
+
+          changelog = r'''## [Unreleased]
+
+### Automation Lab / AI Composer
+
+- Added the bilingual Automation Lab UI with provider-neutral OpenAI-compatible draft generation, permission inspection and explicit install.
+- API keys remain request-only and are never persisted; remote plaintext HTTP is rejected while localhost HTTP remains available for local model servers.
+- Added defensive TypeScript parsing for AI drafts and macro steps plus canonical Rust-side validation before profile writes.
+
+### MCP bridge
+
+- Added local stdio MCP modes: `--mcp` (read-only) and explicit `--mcp-write` (write/execute).
+- Added seven MCP tools across profile reads, runtime status, rule validation, activation, macro execution and atomic rule installation.
+- Routed MCP validation/writes through the same Rust automation boundary used by GUI installs instead of a parallel validator.
+- Added a Windows real-process smoke test using the official `@modelcontextprotocol/client`, including legacy/modern initialization and both access modes.
+
+### keymaster-pack v1 and write safety
+
+- Added portable `keymaster-pack` v1 import/export with UUID regeneration and reference rebinding.
+- Added 2 MiB import bounds, duplicate/dangling-reference/folder-cycle checks and permission/warning inspection.
+- Serialized all profile mutations across Named Pipe clients to eliminate GUI/MCP read-modify-write loss.
+- Added mandatory backup receipts, one-click Undo install and stale-Undo protection.
+- Daemon now normalizes incoming rule/folder ordering inside the serialized write transaction instead of trusting frontend order values.
+
+### Validation and localization
+
+- Added Vitest and 22 frontend tests covering draft/pack validation and actual EN/RU language switching.
+- CI now runs frontend tests, TypeScript/Vite, Rust check/tests, ESLint and a separate Windows MCP/safety smoke job.
+- Version advanced to 0.5.0 for this feature candidate; PR remains draft until manual Windows UI QA is complete.
+
+---
+'''
+          path = Path('CHANGELOG.md')
+          text = path.read_text(encoding='utf-8')
+          text = re.sub(r'## \[Unreleased\]\n.*?\n---\n', changelog, text, count=1, flags=re.S)
+          path.write_text(text, encoding='utf-8')
+          '@ | python -
+      - name: Refresh lockfile and format
+        shell: pwsh
+        run: |
+          pnpm install --lockfile-only --no-frozen-lockfile
+          Push-Location src-tauri
+          cargo fmt --all
+          Pop-Location
+      - name: Validate finalized branch
+        shell: pwsh
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm test
+          pnpm build
+          Push-Location src-tauri
+          cargo check --all-targets --locked
+          cargo test --locked
+          Pop-Location
+      - name: Commit finalization
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/pages/AutomationLabPage.tsx src/store/keyMasterStore.ts src-tauri/src/daemon/automation.rs package.json pnpm-lock.yaml src-tauri/Cargo.toml src-tauri/Cargo.lock src-tauri/tauri.conf.json README.md README.ru.md CHANGELOG.md
+          git diff --cached --quiet
+          if ($LASTEXITCODE -eq 0) { exit 0 }
+          git commit -m "chore: finalize Automation Lab production slice"
+          git push origin HEAD:agent/ai-mcp-hub
