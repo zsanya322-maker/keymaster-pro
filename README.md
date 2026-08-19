@@ -8,10 +8,10 @@
 
 [![License: FCL](https://img.shields.io/badge/License-FCL-blue.svg)](LICENSE)
 [![Platform: Windows](https://img.shields.io/badge/Platform-Windows%2010%2F11-0078D4.svg)](https://github.com/zsanya322-maker/keymaster-pro)
-[![Current stable](https://img.shields.io/badge/stable-v0.2.4-2f855a.svg)](https://github.com/zsanya322-maker/keymaster-pro/releases/latest)
+[![Current stable](https://img.shields.io/badge/stable-v0.4.1-2f855a.svg)](https://github.com/zsanya322-maker/keymaster-pro/releases/latest)
 [![Built with Tauri](https://img.shields.io/badge/Tauri-v2-FFC131.svg)](https://v2.tauri.app)
 
-[📥 Download](#download) · [✅ Current capabilities](#current-capabilities-v024) · [🗺️ Roadmap](ROADMAP.md) · [📝 Changelog](CHANGELOG.md) · [🐛 Issues](https://github.com/zsanya322-maker/keymaster-pro/issues)
+[📥 Download](#download) · [✅ Current capabilities](#current-capabilities-v041) · [🗺️ Roadmap](ROADMAP.md) · [📝 Changelog](CHANGELOG.md) · [🐛 Issues](https://github.com/zsanya322-maker/keymaster-pro/issues)
 
 </div>
 
@@ -25,119 +25,152 @@ KeyMaster Pro is a Windows desktop input-automation utility built around one rul
 TRIGGER + CONDITIONS -> ACTIONS
 ```
 
-A rule can react to a keyboard key, supported mouse button, Tap-Hold gesture or typed text. Conditions can limit it to an active layer or foreground window. Actions can remap input, type text, run a recorded macro, control layers, manage windows/media/system actions, or launch/focus an application.
+The application uses a **Rust daemon** for low-level Windows hooks, input-state machines, context tracking and rule execution, with a **Tauri + React** GUI for profiles, rules, macro editing and settings. GUI and daemon communicate through Named Pipes / JSON-RPC.
 
-The application uses a **Rust daemon** for low-level Windows hooks and rule execution, with a **Tauri + React** GUI for editing profiles and rules. The GUI and daemon communicate through Named Pipes / JSON-RPC.
-
-> **Documentation rule:** this README describes the current stable release only. Planned features and partially implemented ideas belong in [`ROADMAP.md`](ROADMAP.md).
+> **Documentation rule:** this README describes the current stable release. Shipped history belongs in [`CHANGELOG.md`](CHANGELOG.md); remaining work belongs in [`ROADMAP.md`](ROADMAP.md).
 
 ---
 
-## Current capabilities (v0.2.4)
+## Current capabilities (v0.4.1)
 
-### Triggers
+### Keyboard and mouse triggers
 
-- **Keyboard Key Down / Key Up** — one Windows virtual-key code per trigger.
-- **Mouse Button Down / Up** — Left, Right, Middle, X1 and X2.
-- **Tap-Hold** — one action set for tap and another for hold, with per-rule timeout.
-- **Typed Text** — static abbreviation/sequence matching.
+- **Key Down / Key Up** with first-class modifier combinations (`Ctrl`, `Alt`, `Shift`, `Win`) through a reusable key-chord model.
+- Combination-to-combination key remapping with deterministic modifier handling.
+- Expanded Windows VK catalogue and compact chord-aware key picker.
+- Mouse button Down / Up for Left, Right, Middle, X1 and X2.
+- Mouse wheel and horizontal wheel directions.
+- Mouse double-click triggers.
+- Mouse movement triggers with distance/cooldown configuration.
+- Tap-Hold key triggers.
+- **Leader sequences**.
+- Ordinary **key sequences**.
+- Simultaneous ordinary-key **chord sets**.
+- **Mouse gestures** with directional paths.
 
-### Conditions
+### Conditions and context
 
-- **Layer Active**.
-- **Window Match** by foreground process name and/or window-title substring.
-  - When both fields are present in the current schema, matching uses **OR / ANY** semantics.
+- active-layer conditions;
+- legacy process/title window matching;
+- structured `contextMatch` rules with explicit **ANY / ALL** mode;
+- process name and executable path;
+- window title and class;
+- window size ranges;
+- fullscreen state;
+- monitor and virtual-desktop identifiers when available from the normalized Windows context snapshot.
 
 ### Actions
 
-- remap a keyboard key;
-- remap a supported mouse button;
-- type text;
-- run a recorded keyboard/mouse macro;
+- remap keyboard chords;
+- remap supported mouse buttons;
+- type text and render text templates;
+- run a named macro from the profile macro library;
 - toggle or hold a layer;
 - volume mute/up/down;
 - media play/pause/next/previous/stop;
 - window snap/minimize/maximize/close;
 - launch an application;
-- focus a process/window by process name or title;
+- focus a process/window;
 - sleep the PC or turn the monitor off.
 
-### Macros
+### Macro library and playback
 
+v0.4.1 promotes macros to first-class profile objects instead of embedding independent step lists directly inside rules.
+
+- named per-profile macro library;
+- create, edit, duplicate, search and delete macros;
+- usage count and deletion guard while a macro is referenced by rules;
+- rules reference macros by `macroId`;
 - keyboard and mouse recording;
-- mouse movement and scroll steps;
-- per-step recorded delays;
-- optional cursor-position restore after playback;
-- macro playback runs on a separate worker/queue so a long macro `Delay` does **not** block ordinary immediate remaps.
+- mouse movement, vertical/horizontal scrolling and absolute-position steps;
+- editable per-step delays and drag/reorder workflow;
+- playback speed multiplier;
+- repeat count and repeat-while-held;
+- preview/test playback from the editor;
+- stop/cancel playback and configurable emergency-stop key;
+- separate macro worker/queue, so macro delays do not block ordinary immediate remaps;
+- schema-v7 migration converts older inline macro actions into library objects without sharing unrelated legacy macros accidentally.
 
-### Layers and profiles
+### Text Expansion
 
-- create and use toggle/hold layers;
-- add `Layer Active` conditions to rules;
-- create, rename/save, delete, import, export and manually activate profiles;
-- safe profile/config persistence with schema versioning, migration, backups, atomic writes and damaged-profile recovery.
+- instant and delimiter-based expansion modes;
+- configurable delimiters and case sensitivity;
+- `{{date}}`, `{{time}}` and `{{clipboard}}` template tokens;
+- selectable date/time formats;
+- clipboard access only when a fired template actually requests it;
+- `Ctrl+Z` undo for the most recent eligible expansion;
+- bounded, memory-only typed-text state with focus/timeout reset; no persistent keystroke history.
+
+### Profiles, bindings and rule organization
+
+- create, rename, duplicate, reorder, save, delete, import, export and manually activate profiles;
+- structured application/context bindings;
+- automatic profile switching;
+- global Auto-switch ON/OFF;
+- Manual Profile Lock so explicit user selection can override automatic switching;
+- nested rule folders with stable IDs/order;
+- rule enable/disable, folder assignment, ordering and priority;
+- layers with toggle/hold actions and layer-active conditions;
+- schema-aware, non-destructive profile/config migrations with backups, atomic writes and damaged-profile recovery.
 
 ### Desktop application
 
-- compact classic-style Windows shell with inline rule editor;
+- compact classic-style Windows shell;
+- simplified rule editor built around **WHEN / IF / DO** blocks;
+- searchable compact type pickers for triggers, conditions and actions;
+- separate Macro Library workspace;
 - Russian and English UI;
 - light/dark themes;
 - system tray and Windows autostart;
-- in-app signed updater through GitHub Releases;
-- guarded unsaved-rule drafts during navigation, exit, restart and update;
+- signed in-app updater through GitHub Releases;
+- guarded unsaved drafts during navigation, exit, restart and update;
 - single-instance GUI and hardened daemon lifecycle/IPC.
 
 ---
 
 ## Important current limitations
 
-The following items are **planned, not shipped as complete features in v0.2.4**:
+The following are intentionally **not** claimed as complete in v0.4.1:
 
-- first-class modifier combinations such as `Ctrl + Shift + F2`;
-- combination-to-combination remaps such as `Ctrl+Shift+F2 -> Alt+Tab`;
-- complete friendly naming/picking for the practical Windows VK set;
-- mouse wheel / horizontal wheel / double-click as rule triggers;
-- macro speed, repeat count, repeat-while-held, cancel/emergency-stop and editor test playback;
-- automatic app-based profile switching and manual-lock behavior;
-- Virtual Desktop matching;
-- date/time/clipboard variables, delimiters and undo in Text Expansion;
-- folders/groups/tree organization for rules.
+- reliable secure/password-field detection for Text Expansion across arbitrary applications and browsers;
+- a dedicated public portable ZIP release asset;
+- user-facing backup/restore tooling beyond the internal persistence safeguards;
+- a separate explicit layer-priority model beyond rule priority/order;
+- scripting/plugin APIs, browser automation, cloud sync, AI features and a marketplace.
 
-### Virtual Desktop compatibility note
-
-`VirtualDesktop` still exists in the serialized schema so older/imported profiles can be read, but the runtime matcher is not implemented. The normal editor does not offer it as a new condition. Legacy Virtual Desktop conditions compile **fail-closed** rather than silently becoming global rules.
-
-See [`ROADMAP.md`](ROADMAP.md) for the implementation order, data-model direction, migrations and acceptance criteria for these features.
+See [`ROADMAP.md`](ROADMAP.md) for the remaining work after the completed 0.3.x → 0.4.1 core cycle.
 
 ---
 
 ## Architecture
 
 ```text
-┌─────────────────────────────┐
-│ GUI: Tauri + React/TypeScript│
-│ rules, profiles, settings   │
-└──────────────┬──────────────┘
-               │ Named Pipes / JSON-RPC
-┌──────────────▼──────────────┐
-│ Rust daemon                 │
-│ compiler + engine + context │
-└───────────┬─────────┬───────┘
-            │         │
-       keyboard     mouse
-       LL hook       LL hook
-            │         │
-       immediate   macro worker
-       simulator   (isolated delays)
+┌──────────────────────────────────┐
+│ GUI: Tauri + React/TypeScript    │
+│ rules, macros, profiles, settings│
+└────────────────┬─────────────────┘
+                 │ Named Pipes / JSON-RPC
+┌────────────────▼─────────────────┐
+│ Rust daemon                     │
+│ compiler + engine + input state │
+│ context tracker + macro runtime │
+└────────────┬───────────┬─────────┘
+             │           │
+        keyboard       mouse
+        LL hook        LL hook
+             │           │
+        immediate     macro worker
+        simulator     / state machines
 ```
 
-Key architectural guarantees carried forward from v0.2.4:
+Core guarantees carried into v0.4.1:
 
 - one daemon owns the Named Pipe/input engines at a time;
-- unsupported conditions must not fail open;
+- unsupported conditions must not silently fail open;
 - low-level hooks stay free of slow file/network work;
+- bounded state machines handle advanced input patterns outside ad-hoc sleeps;
 - macro delays do not block the immediate-remap queue;
-- profile/config migrations are non-destructive and reject unsupported future schemas.
+- migrations are backward compatible and non-destructive, and unsupported future schemas are rejected.
 
 ---
 
@@ -145,21 +178,17 @@ Key architectural guarantees carried forward from v0.2.4:
 
 ### Installer (recommended)
 
-Open [**GitHub Releases**](https://github.com/zsanya322-maker/keymaster-pro/releases/latest) and download:
+Open [**GitHub Releases**](https://github.com/zsanya322-maker/keymaster-pro/releases/latest) and download the Windows installer for the latest release.
 
-```text
-KeyMaster-Pro_<version>_x64-setup.exe
-```
-
-The installed application can then update itself through the built-in signed updater.
+The installed application can update itself through the built-in signed updater.
 
 ### MSI
 
-An x64 MSI is also attached to public releases for users who prefer MSI deployment.
+An x64 MSI can also be produced by the release workflow for deployment scenarios that prefer MSI.
 
 ### WinGet
 
-The repository contains a WinGet publishing workflow. If the package is available in your WinGet source, the package ID is:
+The repository contains a WinGet publishing workflow. The package ID used by the project is:
 
 ```powershell
 winget install KeyMasterPro.KeyMasterPro
@@ -167,7 +196,7 @@ winget install KeyMasterPro.KeyMasterPro
 
 ### Portable build
 
-A deliberate public portable ZIP is still planned. Dev/checkpoint standalone binaries are **not** treated as the stable portable distribution yet.
+A deliberate public portable ZIP remains planned. Dev/checkpoint standalone binaries are not treated as the stable portable distribution.
 
 ---
 
@@ -196,7 +225,7 @@ Production build:
 pnpm tauri build
 ```
 
-The Windows bundles are generated under:
+Windows bundles are generated under:
 
 ```text
 src-tauri/target/release/bundle/
@@ -223,7 +252,7 @@ cargo test --manifest-path src-tauri/Cargo.toml
 | State | Zustand |
 | i18n | i18next (EN + RU) |
 | Input hooks | `SetWindowsHookEx` (`WH_KEYBOARD_LL`, `WH_MOUSE_LL`) via windows-rs |
-| Context tracking | foreground-window WinEvent hook |
+| Context tracking | foreground-window WinEvent/Windows context APIs |
 | IPC | Named Pipes + JSON-RPC 2.0 |
 | Storage | local JSON profile/config files |
 
@@ -231,25 +260,24 @@ cargo test --manifest-path src-tauri/Cargo.toml
 
 ## Privacy and input handling
 
-KeyMaster Pro needs low-level keyboard and mouse hooks to remap input. That can look suspicious to security software because the same Windows APIs can also be used by keyloggers.
+KeyMaster Pro needs low-level keyboard and mouse hooks to remap input. Those APIs can also be used by keyloggers, so security software may treat this class of utility cautiously.
 
-The project is designed to process input events in memory for matching/remapping. It does not intentionally persist a keystroke history. Profiles and settings are local JSON files; the built-in updater contacts GitHub Releases when checking/downloading updates.
-
-Because low-level input interception and synthetic input are core functionality, antivirus false positives are possible. Review the source and release artifacts if that matters for your environment.
+The project processes input events in memory for matching/remapping and does not intentionally persist a keystroke history. Text Expansion keeps only a bounded in-memory buffer. Profiles and settings are local JSON files; the built-in updater contacts GitHub Releases when checking/downloading updates.
 
 ---
 
 ## Development roadmap
 
-The next core-completion sequence is maintained in [`ROADMAP.md`](ROADMAP.md):
+The original core-completion sequence is now complete:
 
-- **0.3.0** — modifier/key combinations, rule-model v2, full key picker, tree foundation;
+- **0.3.0** — modifier/key combinations, expanded key model and nested rule-tree foundation;
 - **0.3.1** — mouse trigger completion and macro playback/control;
-- **0.3.2** — profiles/auto-switch/manual lock, richer context rules, Virtual Desktop;
-- **0.3.3** — Text Expansion completion;
-- **0.4.0** — Leader Keys, Sequences, ordinary-key Chords and Mouse Gestures.
+- **0.3.2** — profiles, auto-switch/manual lock and richer context matching;
+- **0.3.3** — Text Expansion templates, delimiter modes and undo;
+- **0.4.0** — Leader Keys, Sequences, ordinary-key Chords and Mouse Gestures;
+- **0.4.1** — simplified rule UX, first-class Macro Library and schema v7.
 
-Scripting, browser automation, plugins, cloud sync, AI and marketplace work are intentionally deferred until the core input model is complete and stable.
+Future work is tracked in [`ROADMAP.md`](ROADMAP.md) without pretending completed milestones are still planned.
 
 ---
 
@@ -260,7 +288,7 @@ Scripting, browser automation, plugins, cloud sync, AI and marketplace work are 
 - Shipped changes: [`CHANGELOG.md`](CHANGELOG.md)
 - Telegram (RU): [@KeyM_Pro](https://t.me/KeyM_Pro)
 
-When contributing a feature that changes rules or profiles, treat **schema + migration + compiler/runtime + UI + tests** as one unit. A UI control alone does not make a feature complete.
+When a feature changes rules or profiles, treat **schema + migration + compiler/runtime + UI + tests** as one unit. A UI control alone does not make a feature complete.
 
 ---
 
