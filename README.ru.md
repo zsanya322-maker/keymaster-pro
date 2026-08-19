@@ -4,14 +4,14 @@
 
 # ⌨️ KeyMaster Pro
 
-**Переназначение клавиатуры и мыши, макросы, слои и текстовые расширения для Windows**
+**Переназначение клавиатуры и мыши, макросы, слои, Text Expansion и AI-автоматизация для Windows**
 
 [![Лицензия: FCL](https://img.shields.io/badge/Лицензия-FCL-blue.svg)](LICENSE)
 [![Платформа: Windows](https://img.shields.io/badge/Платформа-Windows%2010%2F11-0078D4.svg)](https://github.com/zsanya322-maker/keymaster-pro)
-[![Стабильная версия](https://img.shields.io/badge/stable-v0.4.1-2f855a.svg)](https://github.com/zsanya322-maker/keymaster-pro/releases/latest)
+[![Стабильная версия](https://img.shields.io/badge/stable-v0.5.1-2f855a.svg)](https://github.com/zsanya322-maker/keymaster-pro/releases/latest)
 [![Tauri](https://img.shields.io/badge/Tauri-v2-FFC131.svg)](https://v2.tauri.app)
 
-[📥 Скачать](#скачать) · [✅ Что работает](#что-работает-в-v041) · [🗺️ План](ROADMAP.md) · [📝 История изменений](CHANGELOG.md) · [🐛 Issues](https://github.com/zsanya322-maker/keymaster-pro/issues)
+[📥 Скачать](#скачать) · [✅ Что работает](#что-работает-в-v051) · [🤖 Automation Lab](#automation-lab) · [🗺️ План](ROADMAP.md) · [📝 История изменений](CHANGELOG.md) · [🐛 Issues](https://github.com/zsanya322-maker/keymaster-pro/issues)
 
 </div>
 
@@ -25,72 +25,64 @@ KeyMaster Pro — настольная Windows-утилита для перен�
 ТРИГГЕР + УСЛОВИЯ -> ДЕЙСТВИЯ
 ```
 
-Низкоуровневые Windows-хуки, машины состояний ввода, отслеживание контекста и выполнение правил работают в отдельном **Rust-daemon**. GUI на **Tauri + React** отвечает за профили, правила, макросы и настройки. GUI и daemon общаются через Named Pipes / JSON-RPC.
+Низкоуровневые Windows-хуки, машины состояний ввода, отслеживание контекста, выполнение макросов и безопасная запись профилей работают в **Rust-daemon**. GUI построен на **Tauri + React/TypeScript**. GUI и daemon общаются через Named Pipes / JSON-RPC.
 
 > **Правило документации:** этот README описывает текущий стабильный релиз. Реально выпущенные изменения находятся в [`CHANGELOG.md`](CHANGELOG.md), оставшаяся работа — в [`ROADMAP.md`](ROADMAP.md).
 
 ---
 
-## Что работает в v0.4.1
+## Что работает в v0.5.1
 
 ### Клавиатура и мышь
 
-- **Key Down / Key Up** с полноценными сочетаниями модификаторов `Ctrl`, `Alt`, `Shift`, `Win`.
-- Переназначение сочетание → сочетание с корректной обработкой модификаторов.
-- Расширенный каталог Windows VK и компактный chord-aware выбор клавиш.
-- Кнопки мыши Left, Right, Middle, X1 и X2.
-- Вертикальное и горизонтальное колесо мыши.
-- Двойной клик.
-- Движение мыши с порогом расстояния и cooldown.
+- Key Down / Key Up с сочетаниями `Ctrl`, `Alt`, `Shift`, `Win`.
+- Переназначение сочетание → сочетание.
+- Расширенный каталог Windows VK и chord-aware picker.
+- Left / Right / Middle / X1 / X2 кнопки мыши.
+- Вертикальное и горизонтальное колесо.
+- Двойной клик и движение мыши.
 - Tap-Hold.
-- **Leader-последовательности**.
-- Обычные **последовательности клавиш**.
-- Одновременные **chord-наборы обычных клавиш**.
-- **Жесты мыши** по направлениям.
+- Leader Sequence.
+- Обычные последовательности клавиш.
+- Одновременные chord-наборы обычных клавиш.
+- Направленные жесты мыши.
 
 ### Условия и контекст
 
 - активный слой;
-- совместимый старый process/title `WindowMatch`;
-- структурированный `contextMatch` с режимом **ANY / ALL**;
+- process/title matching;
+- структурированный `contextMatch` с ANY / ALL;
 - имя процесса и путь к executable;
 - заголовок и класс окна;
-- диапазоны размера окна;
+- диапазоны размеров окна;
 - fullscreen;
 - monitor и virtual-desktop identifiers, когда они доступны в нормализованном Windows-контексте.
 
 ### Действия
 
-- переназначение клавиатурных сочетаний;
-- переназначение кнопок мыши;
+- переназначение клавиатурных сочетаний и поддерживаемых кнопок мыши;
 - ввод текста и шаблонов;
-- запуск именованного макроса из библиотеки профиля;
+- запуск именованных макросов;
 - Toggle/Hold Layer;
-- системная громкость;
-- media keys;
+- системная громкость и media keys;
 - snap/minimize/maximize/close окна;
-- запуск приложения;
+- запуск приложений;
 - фокус процесса/окна;
 - сон ПК и выключение монитора.
 
-### Библиотека макросов
+### Macro Library
 
-В v0.4.1 макросы стали самостоятельными объектами профиля вместо независимых списков шагов, встроенных прямо в каждое правило.
+Макросы являются самостоятельными объектами профиля, а правила ссылаются на них через `macroId`.
 
-- именованная библиотека макросов для каждого профиля;
-- создание, редактирование, поиск, копирование и удаление;
-- счётчик использования макроса в правилах;
-- защита от удаления используемого макроса;
-- правила ссылаются на макрос через `macroId`;
+- создание, редактирование, копирование, поиск и удаление;
+- счётчик использования и защита от удаления используемого макроса;
 - запись клавиатуры и мыши;
 - движение мыши, вертикальный/горизонтальный скролл и абсолютные координаты;
-- задержки между шагами и перестановка шагов;
-- множитель скорости;
-- повтор N раз и repeat-while-held;
-- тестовый запуск прямо из редактора;
-- остановка/отмена воспроизведения и настраиваемая emergency-stop клавиша;
-- отдельная очередь макросов: длинная задержка в макросе не блокирует обычные remap-действия;
-- миграция schema v7 переносит старые inline-макросы в библиотеку без случайного объединения независимых макросов.
+- редактируемые задержки и перестановка шагов;
+- скорость, repeat count и repeat-while-held;
+- preview/test playback;
+- stop/cancel и настраиваемая emergency-stop клавиша;
+- отдельная очередь макросов, чтобы задержки внутри макросов не блокировали обычные remap-действия.
 
 ### Text Expansion
 
@@ -98,28 +90,27 @@ KeyMaster Pro — настольная Windows-утилита для перен�
 - настраиваемые разделители и чувствительность к регистру;
 - шаблоны `{{date}}`, `{{time}}`, `{{clipboard}}`;
 - выбор формата даты и времени;
-- чтение буфера обмена только если реально сработал шаблон с `{{clipboard}}`;
+- чтение clipboard только если реально сработал шаблон с `{{clipboard}}`;
 - `Ctrl+Z` для отмены последнего подходящего расширения;
 - ограниченный буфер только в памяти с очисткой по focus/timeout; история нажатий на диск не пишется.
 
-### Профили, привязки и структура правил
+### Профили, правила и слои
 
-- создание, переименование, копирование, изменение порядка, сохранение, удаление, импорт/экспорт и ручная активация профилей;
+- создание, переименование, копирование, изменение порядка, сохранение, удаление, импорт/экспорт и активация профилей;
 - структурированные привязки к приложениям/контексту;
 - автоматическое переключение профилей;
-- глобальный Auto-switch ON/OFF;
-- Manual Profile Lock, чтобы ручной выбор пользователя имел приоритет;
+- глобальный Auto-switch ON/OFF и Manual Profile Lock;
 - вложенные папки правил со стабильными ID и порядком;
 - enable/disable, folder assignment, order и priority для правил;
 - слои с Toggle/Hold и условием Layer Active;
-- безопасные schema-aware миграции, backup перед разрушительными изменениями, atomic writes и восстановление повреждённых профилей.
+- schema-aware миграции, backup, atomic writes и восстановление повреждённых профилей.
 
 ### Интерфейс приложения
 
 - компактная Windows-style оболочка;
-- упрощённый редактор правил по блокам **КОГДА / ЕСЛИ / СДЕЛАТЬ**;
+- редактор правил по блокам **КОГДА / ЕСЛИ / СДЕЛАТЬ**;
 - компактные поисковые pickers типов триггеров, условий и действий;
-- отдельный раздел **Macro Library**;
+- отдельный раздел Macro Library;
 - русский и английский интерфейс;
 - светлая/тёмная тема;
 - tray и автозапуск Windows;
@@ -129,32 +120,35 @@ KeyMaster Pro — настольная Windows-утилита для перен�
 
 ---
 
-## Текущие ограничения
+## Automation Lab
 
-В v0.4.1 специально **не заявляются как полностью готовые**:
-
-- надёжное определение password/secure fields для Text Expansion во всех браузерах и приложениях;
-- отдельный публичный portable ZIP;
-- пользовательский UI для backup/restore поверх уже существующих внутренних механизмов сохранности;
-- отдельная модель приоритета слоёв помимо порядка/приоритета правил;
-- scripting/plugin API, browser automation, cloud sync, AI-функции и marketplace.
-
-Оставшаяся работа после завершённого цикла 0.3.x → 0.4.1 находится в [`ROADMAP.md`](ROADMAP.md).
-
----
-
-## Preview PR #4: Automation Lab (кандидат 0.5.0)
-
-В этой ветке добавлен первый доведённый вертикальный срез **AI Composer**, локального **MCP bridge** и переносимых пакетов **keymaster-pack v1**. PR намеренно остаётся draft до ручной проверки Windows UI на ветке.
+v0.5.0 добавил первый рабочий вертикальный срез Automation Lab. В v0.5.1 исправлен реальный Windows UX после ручной проверки.
 
 ### AI Automation Composer
 
-- OpenAI-compatible endpoint, типизированный draft и обязательный preview/install вместо прямого исполнения ответа модели.
-- API key живёт только в поле UI и текущем запросе: KeyMaster **не сохраняет** его в профиль, config/store или логи.
+KeyMaster умеет создавать через OpenAI-compatible провайдера **черновик** правил/макросов. Ответ модели сам по себе ничего не устанавливает: запись в профиль происходит только после явного подтверждения.
+
+- AI-провайдер настраивается один раз в **Настройки → AI-провайдеры**.
+- В профиле сохраняются название, endpoint и model.
+- API key хранится отдельно в **Windows Credential Manager**, а не открытым текстом в profile/config JSON.
+- При редактировании провайдера пустое поле ключа означает «оставить уже сохранённый ключ».
+- Composer использует выбранный сохранённый AI-профиль; вставлять ключ заново при каждом запросе или после перезапуска не нужно.
 - Обычный `http://` разрешён только для localhost-провайдеров; удалённый endpoint обязан использовать `https://`.
-- Provider/network ошибки пересекают Rust boundary как стабильные коды и отображаются на выбранном языке UI.
-- Правила и макросы повторно десериализуются и валидируются Rust-daemon по runtime-типам профиля непосредственно перед сохранением.
-- Перед каждой установкой создаётся backup профиля; доступна кнопка **Undo install**, а устаревший Undo блокируется после более нового изменения профиля.
+- Provider/network ошибки передаются через Rust boundary как стабильные коды и локализуются в EN/RU.
+- Сгенерированный результат явно помечен как **черновик / ещё не установлен**.
+- Prompt и generated draft сохраняются при переходе из Automation Lab в другой раздел и обратно в пределах текущего запуска приложения.
+- Правила и макросы повторно десериализуются и валидируются Rust-daemon непосредственно перед записью.
+- Перед установкой создаётся backup и receipt для Undo.
+- После успешной установки AI-черновика KeyMaster перезагружает профиль и сразу открывает **Правила**, чтобы новые правила были видны.
+
+Пример профиля для Groq-compatible API:
+
+```text
+Название: Groq
+Endpoint: https://api.groq.com/openai/v1
+Model:    <ID нужной OpenAI-compatible модели Groq>
+API key:  один раз сохраняется в Windows Credential Manager
+```
 
 ### MCP bridge
 
@@ -163,7 +157,7 @@ KeyMaster Pro — настольная Windows-утилита для перен�
 - `KeyMaster-Pro.exe --mcp` — read-only: чтение профилей/status и валидация правила.
 - `KeyMaster-Pro.exe --mcp-write` — отдельный явный opt-in для активации профиля, запуска макроса и записи правила.
 
-Пример локальной stdio-конфигурации для Claude Desktop / Claude Code (по умолчанию используйте `--mcp`):
+Пример локальной stdio-конфигурации для Claude Desktop / Claude Code:
 
 ```json
 {
@@ -176,25 +170,65 @@ KeyMaster Pro — настольная Windows-утилита для перен�
 }
 ```
 
-Для Claude Code тот же объект можно хранить в проектном `.mcp.json` либо передать через его MCP config options. Менять аргумент на `--mcp-write` следует только когда осознанно нужен write/execute доступ.
+Использовать `--mcp-write` следует только когда действительно нужен write/execute доступ.
 
-**Граница ChatGPT:** этот PR не пытается подключить локальный stdio-процесс как ChatGPT app/connector. MCP-интеграции OpenAI используют доступный **remote MCP server URL/service connector**, поэтому HTTP transport, аутентификация, внешний доступ и отдельный threat review — самостоятельная задача.
+Сейчас локальный bridge предоставляет семь tools: список/чтение профилей, runtime status, валидацию правила, активацию профиля, запуск макроса и установку правила. Записи проходят через тот же canonical Rust automation boundary, что и GUI.
+
+**Граница ChatGPT:** выпущенный bridge — локальный stdio. Remote MCP hosting/authentication для ChatGPT остаётся отдельной будущей задачей.
 
 ### `keymaster-pack` v1
 
-- переносимый JSON envelope: `format: "keymaster-pack"`, `version: 1`;
-- лимит импорта **2 MiB**, проверяемый до чтения файла и повторно после чтения/парсинга;
-- локальный inspection показывает permissions и опасные действия до установки;
-- UUID macro/layer/folder/rule при импорте генерируются заново, внутренние ссылки перепривязываются;
-- dangling references, duplicate IDs, folder cycles, пустые actions и повреждённый payload отклоняются;
-- финальный допуск выполняет тот же Rust automation validation/write boundary, что используется AI и MCP;
+Переносимые пакеты Automation Lab используют envelope:
+
+```json
+{
+  "format": "keymaster-pack",
+  "version": 1
+}
+```
+
+Правила безопасности:
+
+- лимит импорта **2 MiB**, проверяемый до и после чтения/парсинга;
+- inspection показывает permissions и опасные действия до установки;
+- UUID macro/layer/folder/rule генерируются заново, внутренние ссылки перепривязываются;
+- duplicate IDs, dangling references, folder cycles, пустые actions и повреждённый payload отклоняются;
+- финальный допуск выполняет тот же Rust validation/write boundary, что используется AI и MCP;
 - установка всегда backup-first и поддерживает Undo.
 
-### Что реально проверяет CI
+---
 
-Windows CI PR #4 запускает frontend unit tests, TypeScript/Vite, Rust check/tests и ESLint, затем отдельный real-process MCP smoke. Smoke job собирает `KeyMaster-Pro.exe`, поднимает настоящий daemon с изолированным `%APPDATA%`, подключается официальным `@modelcontextprotocol/client`, проверяет оба MCP-режима, все семь tools write-режима, запись на диск, физический backup, Undo/stale-Undo protection и конкурентные изменения профиля.
+## Проверка релиза
 
-**Не входит в этот PR:** второй слой Hub (diff/conflict detector, каталог с подписями), marketplace/discovery и remote MCP hosting для ChatGPT. К ним не переходим, пока этот вертикальный срез не пройдёт ручной Windows UI QA.
+Windows CI для v0.5.1 прогоняет:
+
+```text
+Vitest frontend tests
+TypeScript + Vite build
+cargo check --all-targets --locked
+cargo test --locked
+ESLint
+real-process MCP stdio smoke
+```
+
+MCP smoke собирает реальный KeyMaster executable, запускает daemon в изолированном `%APPDATA%`, подключается официальным MCP client и проверяет read-only/write режимы, все семь tools, запись на диск, backup/Undo safety и конкурентные изменения профиля.
+
+---
+
+## Текущие ограничения
+
+В v0.5.1 специально **не заявляются как полностью готовые**:
+
+- надёжное определение password/secure fields для Text Expansion во всех браузерах и приложениях;
+- отдельный публичный portable ZIP;
+- полноценный пользовательский backup-browser/restore center поверх текущих backup + Automation Lab Undo safeguards;
+- отдельная модель приоритета слоёв помимо порядка/приоритета правил;
+- general scripting/plugin API и browser automation;
+- cloud sync/account infrastructure;
+- remote MCP hosting для ChatGPT;
+- второй слой Automation Hub: diff/conflict detector, signed catalog/marketplace и discovery.
+
+Оставшаяся работа находится в [`ROADMAP.md`](ROADMAP.md).
 
 ---
 
@@ -203,13 +237,13 @@ Windows CI PR #4 запускает frontend unit tests, TypeScript/Vite, Rust c
 ```text
 ┌──────────────────────────────────┐
 │ GUI: Tauri + React/TypeScript    │
-│ правила, макросы, профили        │
+│ rules, macros, profiles, AI Lab │
 └────────────────┬─────────────────┘
                  │ Named Pipes / JSON-RPC
 ┌────────────────▼─────────────────┐
 │ Rust daemon                     │
 │ compiler + engine + input state │
-│ context tracker + macro runtime │
+│ context + macro + safe writes   │
 └────────────┬───────────┬─────────┘
              │           │
         keyboard       mouse
@@ -219,40 +253,39 @@ Windows CI PR #4 запускает frontend unit tests, TypeScript/Vite, Rust c
         simulator     / state machines
 ```
 
-Основные гарантии v0.4.1:
+Основные гарантии:
 
 - только один daemon владеет Named Pipe и input engines;
-- неподдерживаемые условия не должны незаметно превращаться в глобальные правила;
+- неподдерживаемые условия не должны fail-open;
 - в low-level hook нет медленного file/network I/O;
-- advanced triggers обрабатываются ограниченными state machines без случайных долгих sleep в hook path;
-- задержки макросов не блокируют immediate remaps;
-- миграции обратно совместимы и неразрушительны, future schema отклоняется.
+- advanced input state machines имеют явные границы;
+- macro delays не блокируют immediate remaps;
+- изменения профиля сериализуются и валидируются перед записью;
+- миграции остаются backward-compatible и неразрушительными.
 
 ---
 
 ## Скачать
 
-### Installer
+### Installer — рекомендуется
 
 Откройте [**GitHub Releases**](https://github.com/zsanya322-maker/keymaster-pro/releases/latest) и скачайте Windows installer последнего релиза.
 
-Установленная версия умеет обновляться через встроенный подписанный updater.
+Установленное приложение умеет обновляться через встроенный подписанный updater.
 
 ### MSI
 
-Release workflow также умеет собирать x64 MSI для сценариев, где удобнее MSI-развёртывание.
+Release workflow также умеет собирать x64 MSI.
 
 ### WinGet
-
-В репозитории есть workflow публикации WinGet. Используемый package ID:
 
 ```powershell
 winget install KeyMasterPro.KeyMasterPro
 ```
 
-### Portable
+### Portable build
 
-Отдельный публичный portable ZIP остаётся в плане. Dev/checkpoint standalone binaries не считаются стабильной portable-дистрибуцией.
+Отдельный публичный portable ZIP пока запланирован. Dev/checkpoint standalone binaries не считаются стабильной portable-дистрибуцией.
 
 ---
 
@@ -261,9 +294,9 @@ winget install KeyMasterPro.KeyMasterPro
 ### Требования
 
 - Windows 10/11 x64;
-- Node.js 22;
+- Node.js 22 рекомендуется;
 - pnpm 9+;
-- актуальный stable Rust toolchain (MSVC);
+- актуальный stable Rust toolchain (MSVC target);
 - Visual Studio Build Tools с C++ build tools.
 
 ### Команды
@@ -281,47 +314,50 @@ Production build:
 pnpm tauri build
 ```
 
-Windows bundles:
+Windows bundles создаются в:
 
 ```text
 src-tauri/target/release/bundle/
 ```
 
-Проверки release candidate:
+---
 
-```powershell
-pnpm build
-pnpm lint
-cargo check --manifest-path src-tauri/Cargo.toml
-cargo test --manifest-path src-tauri/Cargo.toml
-```
+## Приватность и обработка ввода
+
+KeyMaster Pro использует low-level keyboard/mouse hooks для переназначения ввода. Такие API могут использоваться и кейлоггерами, поэтому security software иногда относится к этому классу программ осторожно.
+
+KeyMaster обрабатывает события ввода в памяти для matching/remapping и намеренно не пишет историю нажатий на диск. Text Expansion хранит только ограниченный in-memory buffer. Профили и настройки остаются локальными. API keys AI-провайдеров хранятся отдельно через Windows Credential Manager. Встроенный updater обращается к GitHub Releases при проверке/загрузке обновлений.
 
 ---
 
-## Завершённый цикл разработки
+## История разработки / roadmap
 
-- **0.3.0** — modifier/key combinations, расширенный key model и nested rule-tree foundation;
-- **0.3.1** — завершение mouse triggers и macro playback/control;
-- **0.3.2** — profiles, auto-switch/manual lock и richer context matching;
+Завершённая основная последовательность:
+
+- **0.3.0** — modifier/key combinations, расширенная key model и nested rule-tree foundation;
+- **0.3.1** — mouse triggers и macro playback/control;
+- **0.3.2** — profiles, auto-switch/manual lock и rich context matching;
 - **0.3.3** — Text Expansion templates, delimiter modes и undo;
 - **0.4.0** — Leader Keys, Sequences, ordinary-key Chords и Mouse Gestures;
-- **0.4.1** — упрощённый rule UX, first-class Macro Library и schema v7.
+- **0.4.1** — упрощённый rule UX, first-class Macro Library и schema v7;
+- **0.5.0** — Automation Lab, AI Composer, local MCP bridge и `keymaster-pack` v1;
+- **0.5.1** — сохранение AI provider profiles/API keys и исправления Composer navigation/install UX.
 
-Дальнейшая работа ведётся по [`ROADMAP.md`](ROADMAP.md), а не по старому уже выполненному плану.
+Будущая работа находится в [`ROADMAP.md`](ROADMAP.md).
 
 ---
 
-## Разработка / баги
+## Участие / баги
 
-- Bugs: [GitHub Issues](https://github.com/zsanya322-maker/keymaster-pro/issues)
-- Roadmap: [`ROADMAP.md`](ROADMAP.md)
-- История релизов: [`CHANGELOG.md`](CHANGELOG.md)
+- Баги: [GitHub Issues](https://github.com/zsanya322-maker/keymaster-pro/issues)
+- План: [`ROADMAP.md`](ROADMAP.md)
+- Выпущенные изменения: [`CHANGELOG.md`](CHANGELOG.md)
 - Telegram: [@KeyM_Pro](https://t.me/KeyM_Pro)
 
-Если функция меняет правила или профили, считать её готовой можно только когда согласованы **schema + migration + compiler/runtime + UI + tests**.
+Если функция меняет правила или профили, считать её завершённой можно только когда согласованы **schema + migration + compiler/runtime + UI + tests**. Один UI-control сам по себе не делает функцию готовой.
 
 ---
 
 ## Лицензия
 
-KeyMaster Pro распространяется по **Fair Core License (FCL)**. Точные условия и дата conversion указаны в [`LICENSE`](LICENSE).
+KeyMaster Pro распространяется по **Fair Core License (FCL)**. Точные условия и conversion date находятся в [`LICENSE`](LICENSE).
