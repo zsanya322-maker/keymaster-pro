@@ -4,14 +4,14 @@
 
 # ⌨️ KeyMaster Pro
 
-**Keyboard and mouse remapping, macros, layers and text expansion for Windows**
+**Keyboard and mouse remapping, macros, layers, text expansion and AI-assisted automation for Windows**
 
 [![License: FCL](https://img.shields.io/badge/License-FCL-blue.svg)](LICENSE)
 [![Platform: Windows](https://img.shields.io/badge/Platform-Windows%2010%2F11-0078D4.svg)](https://github.com/zsanya322-maker/keymaster-pro)
-[![Current stable](https://img.shields.io/badge/stable-v0.4.1-2f855a.svg)](https://github.com/zsanya322-maker/keymaster-pro/releases/latest)
+[![Current stable](https://img.shields.io/badge/stable-v0.5.1-2f855a.svg)](https://github.com/zsanya322-maker/keymaster-pro/releases/latest)
 [![Built with Tauri](https://img.shields.io/badge/Tauri-v2-FFC131.svg)](https://v2.tauri.app)
 
-[📥 Download](#download) · [✅ Current capabilities](#current-capabilities-v041) · [🗺️ Roadmap](ROADMAP.md) · [📝 Changelog](CHANGELOG.md) · [🐛 Issues](https://github.com/zsanya322-maker/keymaster-pro/issues)
+[📥 Download](#download) · [✅ Current capabilities](#current-capabilities-v051) · [🤖 Automation Lab](#automation-lab) · [🗺️ Roadmap](ROADMAP.md) · [📝 Changelog](CHANGELOG.md) · [🐛 Issues](https://github.com/zsanya322-maker/keymaster-pro/issues)
 
 </div>
 
@@ -25,34 +25,33 @@ KeyMaster Pro is a Windows desktop input-automation utility built around one rul
 TRIGGER + CONDITIONS -> ACTIONS
 ```
 
-The application uses a **Rust daemon** for low-level Windows hooks, input-state machines, context tracking and rule execution, with a **Tauri + React** GUI for profiles, rules, macro editing and settings. GUI and daemon communicate through Named Pipes / JSON-RPC.
+The application uses a **Rust daemon** for low-level Windows hooks, input-state machines, context tracking, macro execution and profile writes. The desktop GUI is built with **Tauri + React/TypeScript**. GUI and daemon communicate through Named Pipes / JSON-RPC.
 
 > **Documentation rule:** this README describes the current stable release. Shipped history belongs in [`CHANGELOG.md`](CHANGELOG.md); remaining work belongs in [`ROADMAP.md`](ROADMAP.md).
 
 ---
 
-## Current capabilities (v0.4.1)
+## Current capabilities (v0.5.1)
 
-### Keyboard and mouse triggers
+### Keyboard and mouse
 
-- **Key Down / Key Up** with first-class modifier combinations (`Ctrl`, `Alt`, `Shift`, `Win`) through a reusable key-chord model.
-- Combination-to-combination key remapping with deterministic modifier handling.
-- Expanded Windows VK catalogue and compact chord-aware key picker.
-- Mouse button Down / Up for Left, Right, Middle, X1 and X2.
-- Mouse wheel and horizontal wheel directions.
-- Mouse double-click triggers.
-- Mouse movement triggers with distance/cooldown configuration.
-- Tap-Hold key triggers.
-- **Leader sequences**.
-- Ordinary **key sequences**.
-- Simultaneous ordinary-key **chord sets**.
-- **Mouse gestures** with directional paths.
+- Key Down / Key Up triggers with `Ctrl`, `Alt`, `Shift`, `Win` modifier combinations.
+- Combination-to-combination key remapping.
+- Expanded Windows VK catalogue and chord-aware key picker.
+- Left / Right / Middle / X1 / X2 mouse buttons.
+- Vertical and horizontal wheel triggers.
+- Double-click and mouse-movement triggers.
+- Tap-Hold.
+- Leader sequences.
+- Ordinary key sequences.
+- Simultaneous ordinary-key chord sets.
+- Directional mouse gestures.
 
 ### Conditions and context
 
 - active-layer conditions;
-- legacy process/title window matching;
-- structured `contextMatch` rules with explicit **ANY / ALL** mode;
+- process/title matching;
+- structured `contextMatch` with explicit ANY / ALL semantics;
 - process name and executable path;
 - window title and class;
 - window size ranges;
@@ -61,63 +60,56 @@ The application uses a **Rust daemon** for low-level Windows hooks, input-state 
 
 ### Actions
 
-- remap keyboard chords;
-- remap supported mouse buttons;
+- remap keyboard chords and supported mouse buttons;
 - type text and render text templates;
-- run a named macro from the profile macro library;
-- toggle or hold a layer;
-- volume mute/up/down;
-- media play/pause/next/previous/stop;
-- window snap/minimize/maximize/close;
-- launch an application;
+- run named macros;
+- toggle or hold layers;
+- system volume and media controls;
+- snap/minimize/maximize/close windows;
+- launch applications;
 - focus a process/window;
 - sleep the PC or turn the monitor off.
 
-### Macro library and playback
+### Macro Library
 
-v0.4.1 promotes macros to first-class profile objects instead of embedding independent step lists directly inside rules.
+Macros are first-class per-profile objects and rules reference them through `macroId`.
 
-- named per-profile macro library;
 - create, edit, duplicate, search and delete macros;
-- usage count and deletion guard while a macro is referenced by rules;
-- rules reference macros by `macroId`;
+- usage count and guarded deletion while referenced;
 - keyboard and mouse recording;
 - mouse movement, vertical/horizontal scrolling and absolute-position steps;
-- editable per-step delays and drag/reorder workflow;
-- playback speed multiplier;
-- repeat count and repeat-while-held;
-- preview/test playback from the editor;
-- stop/cancel playback and configurable emergency-stop key;
-- separate macro worker/queue, so macro delays do not block ordinary immediate remaps;
-- schema-v7 migration converts older inline macro actions into library objects without sharing unrelated legacy macros accidentally.
+- editable delays and step reordering;
+- playback speed, repeat count and repeat-while-held;
+- preview/test playback;
+- stop/cancel and configurable emergency-stop key;
+- separate macro worker/queue so macro delays do not block ordinary immediate remaps.
 
 ### Text Expansion
 
-- instant and delimiter-based expansion modes;
+- instant and delimiter modes;
 - configurable delimiters and case sensitivity;
-- `{{date}}`, `{{time}}` and `{{clipboard}}` template tokens;
-- selectable date/time formats;
-- clipboard access only when a fired template actually requests it;
+- `{{date}}`, `{{time}}` and `{{clipboard}}` templates;
+- date/time format selection;
+- lazy clipboard reads only when a fired template requests `{{clipboard}}`;
 - `Ctrl+Z` undo for the most recent eligible expansion;
-- bounded, memory-only typed-text state with focus/timeout reset; no persistent keystroke history.
+- bounded in-memory typed-text state with focus/timeout reset; no persistent keystroke history.
 
-### Profiles, bindings and rule organization
+### Profiles, rules and layers
 
-- create, rename, duplicate, reorder, save, delete, import, export and manually activate profiles;
+- create, rename, duplicate, reorder, save, delete, import, export and activate profiles;
 - structured application/context bindings;
 - automatic profile switching;
-- global Auto-switch ON/OFF;
-- Manual Profile Lock so explicit user selection can override automatic switching;
+- global Auto-switch ON/OFF and Manual Profile Lock;
 - nested rule folders with stable IDs/order;
 - rule enable/disable, folder assignment, ordering and priority;
 - layers with toggle/hold actions and layer-active conditions;
-- schema-aware, non-destructive profile/config migrations with backups, atomic writes and damaged-profile recovery.
+- schema-aware migrations, backups, atomic writes and damaged-profile recovery.
 
 ### Desktop application
 
 - compact classic-style Windows shell;
-- simplified rule editor built around **WHEN / IF / DO** blocks;
-- searchable compact type pickers for triggers, conditions and actions;
+- rule editor built around **WHEN / IF / DO** blocks;
+- searchable compact trigger/action/condition pickers;
 - separate Macro Library workspace;
 - Russian and English UI;
 - light/dark themes;
@@ -128,32 +120,35 @@ v0.4.1 promotes macros to first-class profile objects instead of embedding indep
 
 ---
 
-## Important current limitations
+## Automation Lab
 
-The following are intentionally **not** claimed as complete in v0.4.1:
-
-- reliable secure/password-field detection for Text Expansion across arbitrary applications and browsers;
-- a dedicated public portable ZIP release asset;
-- user-facing backup/restore tooling beyond the internal persistence safeguards;
-- a separate explicit layer-priority model beyond rule priority/order;
-- scripting/plugin APIs, browser automation, cloud sync, AI features and a marketplace.
-
-See [`ROADMAP.md`](ROADMAP.md) for the remaining work after the completed 0.3.x → 0.4.1 core cycle.
-
----
-
-## Preview in PR #4: Automation Lab (0.5.0 candidate)
-
-This branch adds the first production-hardened vertical slice for **AI Composer**, the local **MCP bridge**, and portable **keymaster-pack v1** bundles. It intentionally remains a draft until the Windows UI is manually exercised on the branch.
+v0.5.0 introduced the first production Automation Lab slice. v0.5.1 hardens its real Windows UX.
 
 ### AI Automation Composer
 
-- OpenAI-compatible provider endpoint with a typed draft contract and explicit preview/install flow.
-- The API key exists only in request/UI state: KeyMaster does **not** save it to the profile, config, store, or logs.
+KeyMaster can generate a **draft** of rules/macros through an OpenAI-compatible provider and requires explicit installation before anything is written to the active profile.
+
+- Provider profiles are configured once in **Settings → AI providers**.
+- Each profile stores a name, endpoint and model in KeyMaster settings.
+- The API key is stored separately in **Windows Credential Manager**, not in plaintext profile/config JSON.
+- Editing a provider with an empty key field keeps the already stored key.
+- Composer uses the selected saved provider; the key does not need to be pasted for every request or after every restart.
 - Plain `http://` is accepted only for localhost providers; remote providers must use TLS (`https://`).
-- Provider/network failures cross the Rust boundary as stable error codes and are rendered by the selected UI locale.
-- Generated rules/macros are re-deserialized and validated by the Rust daemon against runtime profile types before any profile write.
-- Every install creates a profile backup and a one-click **Undo install** receipt; stale Undo is blocked after a newer profile mutation.
+- Provider/network failures cross the Rust boundary as stable error codes and are localized in EN/RU.
+- Generated output is visibly marked as a **draft / not installed**.
+- Prompt and generated draft survive navigation away from Automation Lab and back during the app session.
+- Rules/macros are re-deserialized and validated by the Rust daemon before any profile write.
+- Installation creates a backup and an Undo receipt.
+- After successful AI installation KeyMaster reloads the profile and opens **Rules** so the installed rules are immediately visible.
+
+A typical Groq-compatible profile can use:
+
+```text
+Name:     Groq
+Endpoint: https://api.groq.com/openai/v1
+Model:    <your OpenAI-compatible Groq model id>
+API key:  saved once in Windows Credential Manager
+```
 
 ### MCP bridge
 
@@ -162,7 +157,7 @@ KeyMaster exposes a local stdio MCP server through the installed executable:
 - `KeyMaster-Pro.exe --mcp` — read-only profile/status reads plus rule validation.
 - `KeyMaster-Pro.exe --mcp-write` — explicit opt-in for profile activation, macro execution and rule writes.
 
-Claude Desktop / Claude Code local stdio example (use `--mcp` by default):
+Claude Desktop / Claude Code local stdio example:
 
 ```json
 {
@@ -175,25 +170,65 @@ Claude Desktop / Claude Code local stdio example (use `--mcp` by default):
 }
 ```
 
-For Claude Code the same object can live in project `.mcp.json` or be supplied through its MCP configuration options. Change the argument to `--mcp-write` only when write/execute access is deliberately required.
+Use `--mcp-write` only when write/execute access is deliberately required.
 
-**ChatGPT scope:** this PR does not expose the local stdio process as a ChatGPT app/connector. OpenAI MCP integrations use a reachable **remote MCP server URL/service connector**, so remote HTTP transport, authentication, exposure and threat review are a separate task.
+The current local bridge exposes seven tools across profile listing/reading, runtime status, rule validation, profile activation, macro execution and rule installation. Writes use the same canonical Rust automation boundary as the GUI.
+
+**ChatGPT scope:** the shipped bridge is local stdio. Remote MCP hosting/authentication for ChatGPT is a separate future task.
 
 ### `keymaster-pack` v1
 
-- portable JSON envelope: `format: "keymaster-pack"`, `version: 1`;
+Portable Automation Lab bundles use:
+
+```json
+{
+  "format": "keymaster-pack",
+  "version": 1
+}
+```
+
+Safety rules:
+
 - import limit: **2 MiB**, checked before and after file read/parsing;
 - local inspection reports permissions and high-risk actions before install;
 - imported macro/layer/folder/rule UUIDs are regenerated and internal references are rebound;
-- dangling references, duplicate IDs, folder cycles, empty actions and malformed payloads are rejected;
-- final acceptance is the same Rust automation validation/write boundary used by AI and MCP;
-- install is backup-first and Undo-capable.
+- duplicate IDs, dangling references, folder cycles, empty actions and malformed payloads are rejected;
+- final acceptance uses the same Rust validation/write boundary as AI and MCP;
+- installation is backup-first and Undo-capable.
 
-### Validation evidence
+---
 
-PR #4 Windows CI runs frontend unit tests, TypeScript/Vite, Rust check/tests and ESLint, then a separate real-process MCP smoke test. The smoke job builds `KeyMaster-Pro.exe`, launches a real daemon with isolated `%APPDATA%`, connects with the official `@modelcontextprotocol/client`, exercises both MCP modes, verifies all seven write-mode tools, disk persistence, physical backup, Undo/stale-Undo protection, and concurrent profile mutations.
+## Validation
 
-**Not in this PR:** the second Hub layer (diff/conflict detector, signed catalog), marketplace/discovery, and remote MCP hosting for ChatGPT. Those remain separate work after this vertical slice passes manual Windows UI QA.
+The Windows CI used for v0.5.1 runs:
+
+```text
+Vitest frontend tests
+TypeScript + Vite build
+cargo check --all-targets --locked
+cargo test --locked
+ESLint
+real-process MCP stdio smoke
+```
+
+The MCP smoke builds a real KeyMaster executable, launches an isolated daemon, connects with the official MCP client and exercises both read-only/write modes, all seven tools, persistence, backup/Undo protection and concurrent profile mutations.
+
+---
+
+## Important current limitations
+
+The following are intentionally **not** claimed as complete in v0.5.1:
+
+- reliable secure/password-field detection for Text Expansion across arbitrary applications and browsers;
+- a dedicated public portable ZIP release asset;
+- a full user-facing backup browser/restore center beyond current backup + Automation Lab Undo safeguards;
+- a separate explicit layer-priority model beyond rule priority/order;
+- general scripting/plugin APIs and browser automation;
+- cloud sync/account infrastructure;
+- remote MCP hosting for ChatGPT;
+- the second Automation Hub layer such as diff/conflict analysis, signed catalog/marketplace and discovery.
+
+See [`ROADMAP.md`](ROADMAP.md) for remaining work.
 
 ---
 
@@ -202,13 +237,13 @@ PR #4 Windows CI runs frontend unit tests, TypeScript/Vite, Rust check/tests and
 ```text
 ┌──────────────────────────────────┐
 │ GUI: Tauri + React/TypeScript    │
-│ rules, macros, profiles, settings│
+│ rules, macros, profiles, AI Lab │
 └────────────────┬─────────────────┘
                  │ Named Pipes / JSON-RPC
 ┌────────────────▼─────────────────┐
 │ Rust daemon                     │
 │ compiler + engine + input state │
-│ context tracker + macro runtime │
+│ context + macro + safe writes   │
 └────────────┬───────────┬─────────┘
              │           │
         keyboard       mouse
@@ -218,14 +253,15 @@ PR #4 Windows CI runs frontend unit tests, TypeScript/Vite, Rust check/tests and
         simulator     / state machines
 ```
 
-Core guarantees carried into v0.4.1:
+Core guarantees:
 
 - one daemon owns the Named Pipe/input engines at a time;
 - unsupported conditions must not silently fail open;
 - low-level hooks stay free of slow file/network work;
-- bounded state machines handle advanced input patterns outside ad-hoc sleeps;
-- macro delays do not block the immediate-remap queue;
-- migrations are backward compatible and non-destructive, and unsupported future schemas are rejected.
+- advanced input state machines stay bounded;
+- macro delays do not block immediate remaps;
+- profile mutations are serialized and validated before write;
+- migrations remain backward compatible and non-destructive.
 
 ---
 
@@ -239,11 +275,9 @@ The installed application can update itself through the built-in signed updater.
 
 ### MSI
 
-An x64 MSI can also be produced by the release workflow for deployment scenarios that prefer MSI.
+An x64 MSI can also be produced by the release workflow.
 
 ### WinGet
-
-The repository contains a WinGet publishing workflow. The package ID used by the project is:
 
 ```powershell
 winget install KeyMasterPro.KeyMasterPro
@@ -286,53 +320,30 @@ Windows bundles are generated under:
 src-tauri/target/release/bundle/
 ```
 
-Repository validation used for release candidates includes:
-
-```powershell
-pnpm build
-pnpm lint
-cargo check --manifest-path src-tauri/Cargo.toml
-cargo test --manifest-path src-tauri/Cargo.toml
-```
-
----
-
-## Technology stack
-
-| Layer | Technology |
-|---|---|
-| Backend / desktop shell | Rust + Tauri v2 |
-| Frontend | React 19 + TypeScript + Vite 6 |
-| UI styling/icons | Tailwind CSS 4 + Lucide |
-| State | Zustand |
-| i18n | i18next (EN + RU) |
-| Input hooks | `SetWindowsHookEx` (`WH_KEYBOARD_LL`, `WH_MOUSE_LL`) via windows-rs |
-| Context tracking | foreground-window WinEvent/Windows context APIs |
-| IPC | Named Pipes + JSON-RPC 2.0 |
-| Storage | local JSON profile/config files |
-
 ---
 
 ## Privacy and input handling
 
 KeyMaster Pro needs low-level keyboard and mouse hooks to remap input. Those APIs can also be used by keyloggers, so security software may treat this class of utility cautiously.
 
-The project processes input events in memory for matching/remapping and does not intentionally persist a keystroke history. Text Expansion keeps only a bounded in-memory buffer. Profiles and settings are local JSON files; the built-in updater contacts GitHub Releases when checking/downloading updates.
+The project processes input events in memory for matching/remapping and does not intentionally persist a keystroke history. Text Expansion keeps only a bounded in-memory buffer. Profiles/settings remain local. AI provider API keys are stored separately through Windows Credential Manager. The built-in updater contacts GitHub Releases when checking/downloading updates.
 
 ---
 
-## Development roadmap
+## Development history / roadmap
 
-The original core-completion sequence is now complete:
+Completed major sequence:
 
 - **0.3.0** — modifier/key combinations, expanded key model and nested rule-tree foundation;
 - **0.3.1** — mouse trigger completion and macro playback/control;
 - **0.3.2** — profiles, auto-switch/manual lock and richer context matching;
 - **0.3.3** — Text Expansion templates, delimiter modes and undo;
 - **0.4.0** — Leader Keys, Sequences, ordinary-key Chords and Mouse Gestures;
-- **0.4.1** — simplified rule UX, first-class Macro Library and schema v7.
+- **0.4.1** — simplified rule UX, first-class Macro Library and schema v7;
+- **0.5.0** — Automation Lab, AI Composer, local MCP bridge and `keymaster-pack` v1;
+- **0.5.1** — persistent AI provider profiles/keys and Composer navigation/install UX fixes.
 
-Future work is tracked in [`ROADMAP.md`](ROADMAP.md) without pretending completed milestones are still planned.
+Future work is tracked in [`ROADMAP.md`](ROADMAP.md).
 
 ---
 
