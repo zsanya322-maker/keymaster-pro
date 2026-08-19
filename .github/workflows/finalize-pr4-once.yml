@@ -1,0 +1,60 @@
+name: Finalize PR4 Once
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'agent/ai-mcp-hub' && github.actor != 'github-actions[bot]'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/ai-mcp-hub
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+      - name: Apply deterministic finalization patch
+        run: python scripts/finalize-pr4.py
+      - name: Refresh lockfile and format
+        shell: pwsh
+        run: |
+          pnpm install --lockfile-only --no-frozen-lockfile
+          Push-Location src-tauri
+          cargo fmt --all
+          Pop-Location
+      - name: Validate finalized source
+        shell: pwsh
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm test
+          pnpm build
+          Push-Location src-tauri
+          cargo check --all-targets --locked
+          cargo test --locked
+          Pop-Location
+      - name: Commit finalization
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet
+          if ($LASTEXITCODE -eq 0) { exit 0 }
+          git commit -m "chore: finalize Automation Lab production slice"
+          git fetch origin agent/ai-mcp-hub
+          git rebase origin/agent/ai-mcp-hub
+          git push origin HEAD:agent/ai-mcp-hub
