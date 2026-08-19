@@ -5,6 +5,7 @@ pub mod context;
 pub mod daemon;
 pub mod gui;
 pub mod logging;
+pub mod mcp;
 pub mod schemas;
 pub mod shared;
 pub mod simulator;
