@@ -69,6 +69,11 @@
       "activate_profile": "Переключение профиля",
       "run_macro": "Запуск существующего макроса",
       "apply_rule": "Атомарное добавление проверенного правила"
+    },
+    "access": {
+      "read": "READ",
+      "write": "WRITE",
+      "exec": "EXEC"
     }
   },
   "hub": {

@@ -69,6 +69,11 @@
       "activate_profile": "Switch profile",
       "run_macro": "Run an existing macro",
       "apply_rule": "Atomically append a validated rule"
+    },
+    "access": {
+      "read": "READ",
+      "write": "WRITE",
+      "exec": "EXEC"
     }
   },
   "hub": {

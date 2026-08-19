@@ -100,7 +100,7 @@ fn tool_catalog(write_enabled: bool) -> Vec<Value> {
         tool_definition(
             "keymaster_validate_rule",
             "Validate and normalize a KeyMaster rule without saving it.",
-            json!({ "rule": { "type": "object" } }),
+            json!({ "rule": { "type": "object" }, "profileId": { "type": "string" } }),
             &["rule"],
             true,
         ),
@@ -160,11 +160,15 @@ fn profiles_from_list(value: &Value) -> Result<Vec<crate::shared::types::Profile
         .get("profiles")
         .cloned()
         .ok_or_else(|| "profile.list response has no profiles".to_string())?;
-    serde_json::from_value(profiles).map_err(|error| format!("Invalid profile.list payload: {error}"))
+    serde_json::from_value(profiles)
+        .map_err(|error| format!("Invalid profile.list payload: {error}"))
 }
 
 fn active_id(value: &Value) -> Option<String> {
-    value.get("active").and_then(Value::as_str).map(str::to_string)
+    value
+        .get("active")
+        .and_then(Value::as_str)
+        .map(str::to_string)
 }
 
 fn resolve_profile(
@@ -179,63 +183,6 @@ fn resolve_profile(
         .into_iter()
         .find(|profile| profile.id == id)
         .ok_or_else(|| format!("Profile not found: {id}"))
-}
-
-fn normalize_rule_value(
-    mut value: Value,
-    order: i32,
-) -> Result<crate::schemas::frontend::FrontendRule, String> {
-    let object = value
-        .as_object_mut()
-        .ok_or_else(|| "rule must be an object".to_string())?;
-    object.insert("id".to_string(), json!(uuid::Uuid::new_v4().to_string()));
-    object.insert("order".to_string(), json!(order));
-    object.entry("priority".to_string()).or_insert(json!(10));
-    object.entry("enabled".to_string()).or_insert(json!(true));
-    object.entry("conditions".to_string()).or_insert(json!([]));
-    object.entry("holdActions".to_string()).or_insert(Value::Null);
-    object.entry("folderId".to_string()).or_insert(Value::Null);
-    serde_json::from_value(value).map_err(|error| format!("Invalid KeyMaster rule: {error}"))
-}
-
-fn validate_rule_references(
-    rule: &crate::schemas::frontend::FrontendRule,
-    profile: &crate::shared::types::Profile,
-) -> Result<(), String> {
-    use crate::schemas::frontend::{FrontendAction, FrontendCondition};
-    let macro_ids = profile
-        .macros
-        .iter()
-        .map(|item| item.id.as_str())
-        .collect::<std::collections::HashSet<_>>();
-    let layer_ids = profile
-        .layers
-        .iter()
-        .map(|item| item.id.as_str())
-        .collect::<std::collections::HashSet<_>>();
-
-    for action in rule.actions.iter().chain(rule.hold_actions.iter().flatten()) {
-        match action {
-            FrontendAction::RunMacro { macro_id, .. } if !macro_ids.contains(macro_id.as_str()) => {
-                return Err(format!("Unknown macroId: {macro_id}"));
-            }
-            FrontendAction::ToggleLayer { layer_id } | FrontendAction::HoldLayer { layer_id }
-                if !layer_ids.contains(layer_id.as_str()) =>
-            {
-                return Err(format!("Unknown layerId: {layer_id}"));
-            }
-            _ => {}
-        }
-    }
-
-    for condition in &rule.conditions {
-        if let FrontendCondition::LayerActive { layer_id } = condition {
-            if !layer_ids.contains(layer_id.as_str()) {
-                return Err(format!("Unknown layerId: {layer_id}"));
-            }
-        }
-    }
-    Ok(())
 }
 
 async fn list_profiles_tool() -> Result<Value, String> {
@@ -267,12 +214,15 @@ async fn get_profile_tool(args: &Map<String, Value>) -> Result<Value, String> {
 }
 
 async fn validate_rule_tool(args: &Map<String, Value>) -> Result<Value, String> {
-    let value = args
+    let rule = args
         .get("rule")
         .cloned()
         .ok_or_else(|| "Missing rule".to_string())?;
-    let rule = normalize_rule_value(value, 0)?;
-    serde_json::to_value(rule).map_err(|error| error.to_string())
+    let mut params = json!({ "rule": rule });
+    if let Some(profile_id) = args.get("profileId").and_then(Value::as_str) {
+        params["profileId"] = json!(profile_id);
+    }
+    crate::daemon::ipc_client::call("automation.validate_rule", Some(params)).await
 }
 
 async fn activate_profile_tool(args: &Map<String, Value>) -> Result<Value, String> {
@@ -321,22 +271,15 @@ async fn run_macro_tool(args: &Map<String, Value>) -> Result<Value, String> {
 }
 
 async fn apply_rule_tool(args: &Map<String, Value>) -> Result<Value, String> {
-    let list = profile_list().await?;
-    let mut profile = resolve_profile(&list, args.get("profileId").and_then(Value::as_str))?;
-    let value = args
+    let rule = args
         .get("rule")
         .cloned()
         .ok_or_else(|| "Missing rule".to_string())?;
-    let rule = normalize_rule_value(value, profile.rules.len() as i32)?;
-    validate_rule_references(&rule, &profile)?;
-    let result_rule = serde_json::to_value(&rule).map_err(|error| error.to_string())?;
-    profile.rules.push(rule);
-    crate::daemon::ipc_client::call(
-        "profile.save",
-        Some(serde_json::to_value(profile).map_err(|error| error.to_string())?),
-    )
-    .await?;
-    Ok(json!({ "success": true, "rule": result_rule }))
+    let mut params = json!({ "rule": rule });
+    if let Some(profile_id) = args.get("profileId").and_then(Value::as_str) {
+        params["profileId"] = json!(profile_id);
+    }
+    crate::daemon::ipc_client::call("automation.append_rule", Some(params)).await
 }
 
 async fn call_tool(name: &str, params: Option<&Value>, write_enabled: bool) -> Value {
@@ -456,7 +399,11 @@ pub fn run_stdio(write_enabled: bool) -> Result<(), String> {
         }
         let response = match serde_json::from_str::<RpcRequest>(&line) {
             Ok(request) => runtime.block_on(handle_request(request, write_enabled)),
-            Err(error) => Some(rpc_error(Value::Null, -32700, format!("Parse error: {error}"))),
+            Err(error) => Some(rpc_error(
+                Value::Null,
+                -32700,
+                format!("Parse error: {error}"),
+            )),
         };
         if let Some(response) = response {
             let encoded = serde_json::to_string(&response)
