@@ -378,3 +378,127 @@ pub fn update_gui_config(patch: serde_json::Value) -> Result<serde_json::Value, 
     serde_json::to_value(validated)
         .map_err(|e| format!("Ошибка сериализации сохранённого config: {}", e))
 }
+
+#[cfg(target_os = "windows")]
+fn ai_secret_target(provider_id: &str) -> String {
+    format!("KeyMaster-Pro/AI/{}", provider_id)
+}
+
+#[tauri::command]
+pub fn ai_secret_set(provider_id: String, api_key: String) -> Result<(), String> {
+    if provider_id.trim().is_empty() {
+        return Err("AI provider id is empty".to_string());
+    }
+    if api_key.len() > 5120 {
+        return Err("AI API key is too large".to_string());
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        use windows::Win32::Security::Credentials::{
+            CRED_PERSIST_LOCAL_MACHINE, CRED_TYPE_GENERIC, CREDENTIALW, CredWriteW,
+        };
+        use windows::core::PWSTR;
+
+        let mut target: Vec<u16> = ai_secret_target(&provider_id)
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
+        let mut username: Vec<u16> = "KeyMaster-Pro"
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
+        let mut blob = api_key.into_bytes();
+        let credential = CREDENTIALW {
+            Type: CRED_TYPE_GENERIC,
+            TargetName: PWSTR(target.as_mut_ptr()),
+            CredentialBlobSize: u32::try_from(blob.len())
+                .map_err(|_| "AI API key is too large".to_string())?,
+            CredentialBlob: blob.as_mut_ptr(),
+            Persist: CRED_PERSIST_LOCAL_MACHINE,
+            UserName: PWSTR(username.as_mut_ptr()),
+            ..Default::default()
+        };
+
+        let result = unsafe { CredWriteW(&credential, 0) }
+            .map_err(|error| format!("Windows Credential Manager write failed: {error}"));
+        blob.fill(0);
+        result?;
+        return Ok(());
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (provider_id, api_key);
+        Err("Secure AI secret storage is currently available on Windows only".to_string())
+    }
+}
+
+#[tauri::command]
+pub fn ai_secret_get(provider_id: String) -> Result<Option<String>, String> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::ffi::c_void;
+        use windows::Win32::Security::Credentials::{
+            CRED_TYPE_GENERIC, CREDENTIALW, CredFree, CredReadW,
+        };
+        use windows::core::HSTRING;
+
+        let target = HSTRING::from(ai_secret_target(&provider_id));
+        let mut credential_ptr: *mut CREDENTIALW = std::ptr::null_mut();
+        match unsafe { CredReadW(&target, CRED_TYPE_GENERIC, None, &mut credential_ptr) } {
+            Ok(()) => {
+                if credential_ptr.is_null() {
+                    return Ok(None);
+                }
+                let credential = unsafe { &*credential_ptr };
+                let bytes = unsafe {
+                    std::slice::from_raw_parts(
+                        credential.CredentialBlob,
+                        credential.CredentialBlobSize as usize,
+                    )
+                };
+                let value = String::from_utf8(bytes.to_vec())
+                    .map_err(|_| "Stored AI API key is not valid UTF-8".to_string());
+                unsafe { CredFree(credential_ptr as *const c_void) };
+                value.map(Some)
+            }
+            Err(error) => {
+                // HRESULT_FROM_WIN32(ERROR_NOT_FOUND)
+                if error.code().0 as u32 == 0x80070490 {
+                    Ok(None)
+                } else {
+                    Err(format!("Windows Credential Manager read failed: {error}"))
+                }
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = provider_id;
+        Err("Secure AI secret storage is currently available on Windows only".to_string())
+    }
+}
+
+#[tauri::command]
+pub fn ai_secret_delete(provider_id: String) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        use windows::Win32::Security::Credentials::{CRED_TYPE_GENERIC, CredDeleteW};
+        use windows::core::HSTRING;
+
+        let target = HSTRING::from(ai_secret_target(&provider_id));
+        match unsafe { CredDeleteW(&target, CRED_TYPE_GENERIC, None) } {
+            Ok(()) => Ok(()),
+            Err(error) if error.code().0 as u32 == 0x80070490 => Ok(()),
+            Err(error) => Err(format!("Windows Credential Manager delete failed: {error}")),
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = provider_id;
+        Err("Secure AI secret storage is currently available on Windows only".to_string())
+    }
+}

@@ -57,6 +57,15 @@ pub struct Profile {
     pub folders: Vec<RuleFolder>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AiProviderProfile {
+    pub id: String,
+    pub name: String,
+    pub endpoint: String,
+    pub model: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct AppConfig {
@@ -85,6 +94,8 @@ pub struct AppConfig {
     pub tap_hold_timeout_ms: u64,
     pub font_size: u32,
     pub row_padding: u32,
+    pub ai_providers: Vec<AiProviderProfile>,
+    pub active_ai_provider_id: Option<String>,
 }
 
 impl Default for AppConfig {
@@ -108,6 +119,8 @@ impl Default for AppConfig {
             tap_hold_timeout_ms: 200,
             font_size: 12,
             row_padding: 8,
+            ai_providers: Vec::new(),
+            active_ai_provider_id: None,
         }
     }
 }

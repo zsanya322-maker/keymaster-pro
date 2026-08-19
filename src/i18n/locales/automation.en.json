@@ -26,7 +26,7 @@
     "endpoint": "OpenAI-compatible endpoint",
     "model": "Model",
     "model_placeholder": "for example qwen / gpt / glm",
-    "api_key": "API key · kept only in this window's memory and never saved",
+    "api_key": "API key · stored locally in Windows Credential Manager",
     "api_key_placeholder": "localhost can be left empty",
     "prompt": "What should happen?",
     "prompt_placeholder": "For example: in Chrome, Ctrl + wheel up goes to the previous tab and wheel down to the next tab. Do nothing in other apps.",
@@ -45,7 +45,12 @@
     "reject": "Reject",
     "profile_changed": "The profile changed — regenerate the draft.",
     "profile_changed_toast": "The active profile changed after draft generation. Generate it again.",
-    "installed": "Automation “{{title}}” was added to the profile"
+    "installed": "Automation “{{title}}” was added to the profile",
+    "provider": "AI profile",
+    "no_provider": "Add an AI profile in Settings first",
+    "provider_hint": "Endpoint, model, and key come from the saved AI profile. The key is stored locally in Windows Credential Manager.",
+    "not_installed": "DRAFT · not installed yet",
+    "install_count": "Install {{rules}} rules"
   },
   "mcp": {
     "title": "KeyMaster MCP Bridge",
@@ -178,6 +183,7 @@
     "ai_response_read_failed": "Could not read the AI provider response: {{detail}}",
     "ai_provider_http": "AI provider returned an HTTP error: {{detail}}",
     "ai_provider_invalid_json": "AI provider returned invalid JSON: {{detail}}",
-    "ai_provider_content_missing": "AI provider response is missing message content: {{detail}}"
+    "ai_provider_content_missing": "AI provider response is missing message content: {{detail}}",
+    "ai_provider_missing": "No AI provider is configured. Add one in Settings."
   }
 }

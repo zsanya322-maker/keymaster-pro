@@ -69,6 +69,129 @@ function Section({ title, children }: { title: ReactNode; children: ReactNode })
   );
 }
 
+function AIProviderSettings() {
+  const { t } = useTranslation();
+  const { config, setConfig } = useAppStore();
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [name, setName] = useState('Groq');
+  const [endpoint, setEndpoint] = useState('https://api.groq.com/openai/v1');
+  const [model, setModel] = useState('openai/gpt-oss-20b');
+  const [apiKey, setApiKey] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const resetForm = () => {
+    setEditingId(null);
+    setName('Groq');
+    setEndpoint('https://api.groq.com/openai/v1');
+    setModel('openai/gpt-oss-20b');
+    setApiKey('');
+  };
+
+  const editProvider = (id: string) => {
+    const provider = config.aiProviders.find((item) => item.id === id);
+    if (!provider) return;
+    setEditingId(id);
+    setName(provider.name);
+    setEndpoint(provider.endpoint);
+    setModel(provider.model);
+    setApiKey('');
+  };
+
+  const saveProvider = async () => {
+    const cleanName = name.trim();
+    const cleanEndpoint = endpoint.trim();
+    const cleanModel = model.trim();
+    if (!cleanName || !cleanEndpoint || !cleanModel || busy) return;
+    setBusy(true);
+    try {
+      const id = editingId ?? crypto.randomUUID();
+      if (apiKey.trim()) {
+        await invoke('ai_secret_set', { providerId: id, apiKey: apiKey.trim() });
+      }
+      const nextProvider = { id, name: cleanName, endpoint: cleanEndpoint, model: cleanModel };
+      const aiProviders = [...config.aiProviders.filter((item) => item.id !== id), nextProvider];
+      setConfig({ aiProviders, activeAiProviderId: config.activeAiProviderId ?? id });
+      setEditingId(id);
+      setApiKey('');
+      triggerToast(t('settings.ai_profiles.saved'), 'success');
+    } catch (error) {
+      triggerToast(t('settings.ai_profiles.save_failed', { error: String(error) }), 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const deleteProvider = async (id: string) => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await invoke('ai_secret_delete', { providerId: id });
+      const aiProviders = config.aiProviders.filter((item) => item.id !== id);
+      setConfig({
+        aiProviders,
+        activeAiProviderId: config.activeAiProviderId === id ? (aiProviders[0]?.id ?? null) : config.activeAiProviderId,
+      });
+      resetForm();
+      triggerToast(t('settings.ai_profiles.deleted'), 'success');
+    } catch (error) {
+      triggerToast(t('settings.ai_profiles.delete_failed', { error: String(error) }), 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Section title={t('settings.ai_profiles.title')}>
+      <SettingRow title={t('settings.ai_profiles.saved_profiles')} description={t('settings.ai_profiles.security')} stacked>
+        <div className="space-y-2">
+          {config.aiProviders.length > 0 ? (
+            <div className="flex flex-wrap gap-1.5">
+              {config.aiProviders.map((provider) => (
+                <button
+                  key={provider.id}
+                  type="button"
+                  onClick={() => editProvider(provider.id)}
+                  className={`h-7 px-2 border text-[10px] ${config.activeAiProviderId === provider.id ? 'border-app-primary bg-app-primary/10 text-app-primary' : 'border-app-border bg-app-surface text-app-text'}`}
+                >
+                  {provider.name}{config.activeAiProviderId === provider.id ? ` · ${t('settings.ai_profiles.active')}` : ''}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="text-[10px] text-app-muted">{t('settings.ai_profiles.empty')}</div>
+          )}
+
+          <div className="grid grid-cols-2 gap-2">
+            <input value={name} onChange={(event) => setName(event.target.value)} placeholder={t('settings.ai_profiles.name')} className="h-8 border border-app-border bg-app-bg px-2 text-[10px] text-app-text outline-none focus:border-app-primary" />
+            <input value={model} onChange={(event) => setModel(event.target.value)} placeholder={t('settings.ai_profiles.model')} className="h-8 border border-app-border bg-app-bg px-2 text-[10px] text-app-text outline-none focus:border-app-primary" />
+          </div>
+          <input value={endpoint} onChange={(event) => setEndpoint(event.target.value)} placeholder={t('settings.ai_profiles.endpoint')} className="h-8 w-full border border-app-border bg-app-bg px-2 text-[10px] text-app-text outline-none focus:border-app-primary" />
+          <input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={editingId ? t('settings.ai_profiles.key_keep') : t('settings.ai_profiles.key')} className="h-8 w-full border border-app-border bg-app-bg px-2 text-[10px] text-app-text outline-none focus:border-app-primary" />
+
+          <div className="flex flex-wrap gap-2">
+            <button type="button" disabled={busy} onClick={() => void saveProvider()} className="h-8 px-3 border border-app-primary bg-app-primary text-[10px] font-medium text-white disabled:opacity-50">
+              {editingId ? t('settings.ai_profiles.save') : t('settings.ai_profiles.add')}
+            </button>
+            {editingId && (
+              <button type="button" disabled={busy} onClick={() => setConfig({ activeAiProviderId: editingId })} className="h-8 px-3 border border-app-border bg-app-surface text-[10px] text-app-text disabled:opacity-50">
+                {t('settings.ai_profiles.make_active')}
+              </button>
+            )}
+            {editingId && (
+              <button type="button" disabled={busy} onClick={() => void deleteProvider(editingId)} className="h-8 px-3 border border-app-danger/50 bg-app-danger/10 text-[10px] text-app-danger disabled:opacity-50">
+                {t('settings.ai_profiles.delete')}
+              </button>
+            )}
+            <button type="button" disabled={busy} onClick={resetForm} className="h-8 px-3 border border-app-border bg-app-surface text-[10px] text-app-text disabled:opacity-50">
+              {t('settings.ai_profiles.new')}
+            </button>
+          </div>
+        </div>
+      </SettingRow>
+    </Section>
+  );
+}
+
 export function SettingsPage() {
   const { t, i18n } = useTranslation();
   const { config, setConfig, daemonConnected, diagnostics } = useAppStore();
@@ -276,6 +399,8 @@ export function SettingsPage() {
               </Section>
 
               <Section title={t('settings.profile_automation', { defaultValue: 'Профили и автопереключение' })}><ProfileAutomationPanel /></Section>
+
+              <AIProviderSettings />
 
               <details className="border border-app-border bg-app-bg">
                 <summary className="h-8 px-3 flex items-center cursor-pointer select-none bg-app-surface/35 text-[11px] font-semibold text-app-text">

@@ -57,6 +57,9 @@ pub fn run() {
             gui::commands::get_gui_config,
             gui::commands::update_gui_config,
             gui::ai::ai_chat_completion,
+            gui::commands::ai_secret_set,
+            gui::commands::ai_secret_get,
+            gui::commands::ai_secret_delete,
         ])
         .setup(|app| {
             // Background event subscription is a long-lived connection distinct

@@ -119,6 +119,13 @@ export type FrontendCondition =
   | { type: 'contextMatch'; process?: string; path?: string; title?: string; className?: string; virtualDesktopId?: string; monitorId?: string; minWidth?: number; maxWidth?: number; minHeight?: number; maxHeight?: number; fullscreen?: boolean; mode: MatchMode }
   | { type: 'windowMatch'; process?: string; title?: string }
 
+export interface AiProviderProfile {
+  id: string
+  name: string
+  endpoint: string
+  model: string
+}
+
 export interface AppConfig {
   activeProfileId: string | null
   autostart: boolean
@@ -138,4 +145,6 @@ export interface AppConfig {
   manualProfileLock?: boolean
   tapHoldTimeoutMs?: number
   onboardingComplete?: boolean
+  aiProviders: AiProviderProfile[]
+  activeAiProviderId: string | null
 }

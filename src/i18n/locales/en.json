@@ -388,7 +388,28 @@
     "logs_open_folder": "Open Folder",
     "advanced": "Advanced settings",
     "macro_emergency_stop": "Macro emergency stop",
-    "macro_emergency_stop_desc": "Stops the running macro and queued macros. Pause by default."
+    "macro_emergency_stop_desc": "Stops the running macro and queued macros. Pause by default.",
+    "ai_profiles": {
+      "title": "AI Composer · providers",
+      "saved_profiles": "AI profiles",
+      "security": "Name, endpoint, and model are saved by KeyMaster. API keys are stored locally in Windows Credential Manager.",
+      "empty": "No saved AI profiles yet.",
+      "active": "active",
+      "name": "Name, e.g. Groq",
+      "endpoint": "Endpoint, e.g. https://api.groq.com/openai/v1",
+      "model": "Model, e.g. openai/gpt-oss-20b",
+      "key": "API key",
+      "key_keep": "New API key — leave blank to keep the stored key",
+      "add": "Add profile",
+      "save": "Save",
+      "make_active": "Make active",
+      "delete": "Delete",
+      "new": "New profile",
+      "saved": "AI profile saved",
+      "deleted": "AI profile deleted",
+      "save_failed": "Could not save AI profile: {{error}}",
+      "delete_failed": "Could not delete AI profile: {{error}}"
+    }
   },
   "confirmDialog": {
     "confirm": "Confirm",

@@ -388,7 +388,28 @@
     "logs_open_folder": "Открыть папку",
     "advanced": "Расширенные настройки",
     "macro_emergency_stop": "Аварийный стоп макросов",
-    "macro_emergency_stop_desc": "Останавливает текущий и все ожидающие макросы. По умолчанию Pause."
+    "macro_emergency_stop_desc": "Останавливает текущий и все ожидающие макросы. По умолчанию Pause.",
+    "ai_profiles": {
+      "title": "AI Composer · провайдеры",
+      "saved_profiles": "Профили AI",
+      "security": "Название, endpoint и модель сохраняются в KeyMaster. API key хранится локально в Windows Credential Manager.",
+      "empty": "Пока нет сохранённых AI-профилей.",
+      "active": "активный",
+      "name": "Название, например Groq",
+      "endpoint": "Endpoint, например https://api.groq.com/openai/v1",
+      "model": "Модель, например openai/gpt-oss-20b",
+      "key": "API key",
+      "key_keep": "Новый API key — оставьте пустым, чтобы сохранить текущий",
+      "add": "Добавить профиль",
+      "save": "Сохранить",
+      "make_active": "Сделать активным",
+      "delete": "Удалить",
+      "new": "Новый профиль",
+      "saved": "AI-профиль сохранён",
+      "deleted": "AI-профиль удалён",
+      "save_failed": "Не удалось сохранить AI-профиль: {{error}}",
+      "delete_failed": "Не удалось удалить AI-профиль: {{error}}"
+    }
   },
   "confirmDialog": {
     "confirm": "Подтвердить",
