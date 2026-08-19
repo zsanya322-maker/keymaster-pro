@@ -6,6 +6,11 @@ This file describes **shipped releases**. Planned work belongs in [`ROADMAP.md`]
 
 ## [Unreleased]
 
+### Fixed
+- **AI Provider Profiles:** save provider name/endpoint/model in KeyMaster settings and store API keys locally in Windows Credential Manager instead of asking on every visit.
+- Automation Lab keeps the current prompt and generated draft while navigating between application sections.
+- Generated automations are explicitly marked as drafts until installation is confirmed; successful install immediately opens Rules so the new rules are visible.
+
 ### Automation Lab / AI Composer
 
 - Added the bilingual Automation Lab UI with provider-neutral OpenAI-compatible draft generation, permission inspection and explicit install.

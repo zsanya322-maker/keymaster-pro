@@ -26,7 +26,7 @@
     "endpoint": "OpenAI-compatible endpoint",
     "model": "Модель",
     "model_placeholder": "например qwen / gpt / glm",
-    "api_key": "API key · только в памяти текущего окна, не сохраняется",
+    "api_key": "API key · хранится локально в Windows Credential Manager",
     "api_key_placeholder": "для localhost можно оставить пустым",
     "prompt": "Что должно происходить?",
     "prompt_placeholder": "Например: в Chrome Ctrl + колесо вверх — предыдущая вкладка, вниз — следующая. В других приложениях не работает.",
@@ -45,7 +45,12 @@
     "reject": "Отклонить",
     "profile_changed": "Профиль изменился — draft нужно пересоздать.",
     "profile_changed_toast": "Активный профиль изменился после генерации draft. Сгенерируйте его заново.",
-    "installed": "Автоматизация «{{title}}» добавлена в профиль"
+    "installed": "Автоматизация «{{title}}» добавлена в профиль",
+    "provider": "AI-профиль",
+    "no_provider": "Сначала добавьте AI-профиль в Настройках",
+    "provider_hint": "Endpoint, модель и ключ берутся из сохранённого AI-профиля. Ключ хранится локально в Windows Credential Manager.",
+    "not_installed": "ЧЕРНОВИК · ещё не установлен",
+    "install_count": "Установить {{rules}} правил"
   },
   "mcp": {
     "title": "KeyMaster MCP Bridge",
@@ -178,6 +183,7 @@
     "ai_response_read_failed": "Не удалось прочитать ответ AI provider: {{detail}}",
     "ai_provider_http": "AI provider вернул HTTP-ошибку: {{detail}}",
     "ai_provider_invalid_json": "AI provider вернул некорректный JSON: {{detail}}",
-    "ai_provider_content_missing": "В ответе AI provider отсутствует содержимое сообщения: {{detail}}"
+    "ai_provider_content_missing": "В ответе AI provider отсутствует содержимое сообщения: {{detail}}",
+    "ai_provider_missing": "AI-провайдер не настроен. Добавьте профиль в Настройках."
   }
 }

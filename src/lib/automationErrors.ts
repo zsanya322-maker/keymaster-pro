@@ -21,6 +21,7 @@ export type AutomationErrorCode =
   | 'draft_materialize_macro_ref_missing'
   | 'ai_endpoint_missing'
   | 'ai_model_missing'
+  | 'ai_provider_missing'
   | 'ai_prompt_missing'
   | 'ai_invalid_json'
   | 'ai_endpoint_invalid'

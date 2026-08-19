@@ -39,6 +39,7 @@ import { invoke } from '../lib/ipc'
 import { triggerToast } from '../lib/toast'
 import { useProfileStore } from '../store/profileStore'
 import { useKeyMasterStore } from '../store/keyMasterStore'
+import { useAppStore } from '../store/appStore'
 
 type LabTab = 'ai' | 'mcp' | 'hub'
 
@@ -85,16 +86,20 @@ export function AutomationLabPage() {
   const { t } = useTranslation()
   const { profiles, activeProfileId, loadProfiles } = useProfileStore()
   const activeProfile = profiles.find((profile) => profile.id === activeProfileId) ?? null
-  const [tab, setTab] = useState<LabTab>('ai')
-
-  const [endpoint, setEndpoint] = useState('http://127.0.0.1:11434/v1')
-  const [model, setModel] = useState('')
-  const [apiKey, setApiKey] = useState('')
-  const [prompt, setPrompt] = useState('')
+  const { config, setConfig } = useAppStore()
+  const {
+    automationLabSession,
+    setAutomationLabSession,
+    setActiveCategory,
+  } = useKeyMasterStore()
+  const { tab, prompt, draft, materialized, draftProfileId } = automationLabSession
+  const setTab = (next: LabTab) => setAutomationLabSession({ tab: next })
+  const setPrompt = (next: string) => setAutomationLabSession({ prompt: next })
+  const setDraft = (next: AiAutomationDraft | null) => setAutomationLabSession({ draft: next })
+  const setMaterialized = (next: MaterializedAutomation | null) => setAutomationLabSession({ materialized: next })
+  const setDraftProfileId = (next: string | null) => setAutomationLabSession({ draftProfileId: next })
   const [aiBusy, setAiBusy] = useState(false)
-  const [draft, setDraft] = useState<AiAutomationDraft | null>(null)
-  const [materialized, setMaterialized] = useState<MaterializedAutomation | null>(null)
-  const [draftProfileId, setDraftProfileId] = useState<string | null>(null)
+  const activeProvider = config.aiProviders.find((provider) => provider.id === config.activeAiProviderId) ?? config.aiProviders[0] ?? null
 
   const [packName, setPackName] = useState('')
   const [packDescription, setPackDescription] = useState('')
@@ -119,8 +124,10 @@ export function AutomationLabPage() {
     if (!activeProfile || aiBusy) return
     setAiBusy(true)
     try {
+      if (!activeProvider) automationError('ai_provider_missing')
+      const apiKey = (await invoke<string | null>('ai_secret_get', { providerId: activeProvider.id })) ?? ''
       const nextDraft = await requestAutomationDraft(
-        { endpoint, model, apiKey },
+        { endpoint: activeProvider.endpoint, model: activeProvider.model, apiKey },
         activeProfile,
         prompt,
       )
@@ -158,6 +165,7 @@ export function AutomationLabPage() {
       setDraft(null)
       setMaterialized(null)
       setDraftProfileId(null)
+      setActiveCategory('rules')
     } catch (error) {
       triggerToast(showError(error), 'error')
     }
@@ -332,20 +340,25 @@ export function AutomationLabPage() {
                 <span className="ml-auto text-[9px] text-app-muted">{t('automation.ai.tagline')}</span>
               </div>
               <div className="p-2.5 space-y-2.5">
-                <div className="grid grid-cols-[1.5fr_1fr] gap-2">
+                <div className="grid grid-cols-[1fr_1fr] gap-2">
                   <label className="space-y-1">
-                    <span className="text-[9px] text-app-muted">{t('automation.ai.endpoint')}</span>
-                    <input value={endpoint} onChange={(event) => setEndpoint(event.target.value)} className={`${inputClass} w-full`} />
+                    <span className="text-[9px] text-app-muted">{t('automation.ai.provider')}</span>
+                    <select
+                      value={activeProvider?.id ?? ''}
+                      onChange={(event) => setConfig({ activeAiProviderId: event.target.value || null })}
+                      className={`${inputClass} w-full`}
+                    >
+                      {config.aiProviders.length === 0 && <option value="">{t('automation.ai.no_provider')}</option>}
+                      {config.aiProviders.map((provider) => <option key={provider.id} value={provider.id}>{provider.name}</option>)}
+                    </select>
                   </label>
-                  <label className="space-y-1">
+                  <div className="space-y-1">
                     <span className="text-[9px] text-app-muted">{t('automation.ai.model')}</span>
-                    <input value={model} onChange={(event) => setModel(event.target.value)} placeholder={t('automation.ai.model_placeholder')} className={`${inputClass} w-full`} />
-                  </label>
+                    <div className={`${inputClass} w-full flex items-center`}>{activeProvider?.model ?? '—'}</div>
+                  </div>
                 </div>
-                <label className="space-y-1 block">
-                  <span className="text-[9px] text-app-muted">{t('automation.ai.api_key')}</span>
-                  <input type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={t('automation.ai.api_key_placeholder')} className={`${inputClass} w-full`} />
-                </label>
+                {activeProvider && <div className="text-[9px] text-app-muted select-text">{activeProvider.endpoint}</div>}
+                <div className="text-[9px] text-app-muted">{t('automation.ai.provider_hint')}</div>
                 <label className="space-y-1 block">
                   <span className="text-[9px] text-app-muted">{t('automation.ai.prompt')}</span>
                   <textarea
@@ -363,7 +376,7 @@ export function AutomationLabPage() {
                   ))}
                 </div>
                 <div className="flex items-center gap-2">
-                  <button type="button" disabled={!activeProfile || aiBusy || !prompt.trim() || !model.trim()} onClick={() => void generateDraft()} className={primaryButtonClass}>
+                  <button type="button" disabled={!activeProfile || !activeProvider || aiBusy || !prompt.trim()} onClick={() => void generateDraft()} className={primaryButtonClass}>
                     <Sparkles size={11} /> {aiBusy ? t('automation.ai.generating') : t('automation.ai.generate')}
                   </button>
                   <span className="text-[9px] text-app-muted">{t('automation.ai.deterministic_hint')}</span>
@@ -376,7 +389,7 @@ export function AutomationLabPage() {
                 <div className="h-8 px-2.5 flex items-center border-b border-app-border bg-app-surface/35">
                   <CheckCircle2 size={11} className="text-app-primary" />
                   <span className="ml-1.5 text-[10px] font-semibold">{draft.title}</span>
-                  <span className="ml-auto text-[9px] text-app-muted">{t('automation.ai.draft_counts', { rules: materialized.rules.length, macros: materialized.macros.length })}</span>
+                  <span className="ml-auto text-[9px] font-semibold text-app-warning">{t('automation.ai.not_installed')}</span>
                 </div>
                 <div className="p-2.5 space-y-2.5">
                   <p className="text-[10px] leading-5 text-app-text">{draft.summary}</p>
@@ -388,7 +401,7 @@ export function AutomationLabPage() {
                   </details>
                   <div className="flex items-center gap-2">
                     <button type="button" disabled={!activeProfile || draftProfileId !== activeProfile?.id} onClick={() => void applyDraft()} className={primaryButtonClass}>
-                      {t('automation.ai.install')}
+                      {t('automation.ai.install_count', { rules: materialized.rules.length })}
                     </button>
                     <button type="button" onClick={() => { setDraft(null); setMaterialized(null); setDraftProfileId(null) }} className={buttonClass}>{t('automation.ai.reject')}</button>
                     {draftProfileId !== activeProfile?.id && <span className="text-[9px] text-app-warning">{t('automation.ai.profile_changed')}</span>}

@@ -48,6 +48,8 @@ const defaultConfig: AppConfig = {
   restoreMouseAfterMacro: true,
   onboardingComplete: false,
   tapHoldTimeoutMs: 200,
+  aiProviders: [],
+  activeAiProviderId: null,
 }
 
 const DEBOUNCED_CONFIG_KEYS = new Set<keyof AppConfig>(['scale', 'fontSize', 'rowPadding'])
