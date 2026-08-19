@@ -42,6 +42,9 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Frontend unit tests
+        run: pnpm test
+
       - name: TypeScript + Vite build
         run: pnpm build
 
