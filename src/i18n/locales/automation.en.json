@@ -166,6 +166,18 @@
     "pack_invalid_macro_shape": "Invalid macro structure in pack",
     "pack_invalid_layer_shape": "Invalid layer structure in pack",
     "pack_invalid_folder_shape": "Invalid folder structure in pack",
-    "pack_invalid_json": "Pack file contains invalid JSON"
+    "pack_invalid_json": "Pack file contains invalid JSON",
+    "ai_endpoint_invalid": "Invalid AI endpoint: {{detail}}",
+    "ai_endpoint_scheme": "AI endpoint must use http:// or https:// (received {{detail}})",
+    "ai_remote_http_forbidden": "Remote AI endpoints must use HTTPS. Plain HTTP is allowed only for localhost.",
+    "ai_messages_empty": "AI request contains no messages",
+    "ai_messages_too_many": "AI request contains too many messages: {{detail}}",
+    "ai_message_too_large": "An AI message exceeds the safe size limit ({{detail}} bytes)",
+    "ai_client_create_failed": "Could not create the AI HTTP client: {{detail}}",
+    "ai_provider_unavailable": "AI provider is unavailable: {{detail}}",
+    "ai_response_read_failed": "Could not read the AI provider response: {{detail}}",
+    "ai_provider_http": "AI provider returned an HTTP error: {{detail}}",
+    "ai_provider_invalid_json": "AI provider returned invalid JSON: {{detail}}",
+    "ai_provider_content_missing": "AI provider response is missing message content: {{detail}}"
   }
 }

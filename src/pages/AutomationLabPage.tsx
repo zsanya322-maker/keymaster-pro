@@ -38,6 +38,7 @@ import {
 import { invoke } from '../lib/ipc'
 import { triggerToast } from '../lib/toast'
 import { useProfileStore } from '../store/profileStore'
+import { useKeyMasterStore } from '../store/keyMasterStore'
 
 type LabTab = 'ai' | 'mcp' | 'hub'
 
@@ -99,7 +100,7 @@ export function AutomationLabPage() {
   const [packDescription, setPackDescription] = useState('')
   const [packAuthor, setPackAuthor] = useState('')
   const [pendingPack, setPendingPack] = useState<AutomationPack | null>(null)
-  const [lastInstall, setLastInstall] = useState<AutomationInstallReceipt | null>(null)
+  const { lastAutomationInstall: lastInstall, setLastAutomationInstall: setLastInstall } = useKeyMasterStore()
 
   const examples = t('automation.ai.examples', { returnObjects: true }) as string[]
   const packInspection = useMemo(

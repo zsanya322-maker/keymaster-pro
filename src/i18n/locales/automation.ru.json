@@ -166,6 +166,18 @@
     "pack_invalid_macro_shape": "Некорректная структура макроса в pack",
     "pack_invalid_layer_shape": "Некорректная структура слоя в pack",
     "pack_invalid_folder_shape": "Некорректная структура папки в pack",
-    "pack_invalid_json": "Файл pack содержит некорректный JSON"
+    "pack_invalid_json": "Файл pack содержит некорректный JSON",
+    "ai_endpoint_invalid": "Некорректный AI endpoint: {{detail}}",
+    "ai_endpoint_scheme": "AI endpoint должен использовать http:// или https:// (получено: {{detail}})",
+    "ai_remote_http_forbidden": "Удалённый AI endpoint обязан использовать HTTPS. Обычный HTTP разрешён только для localhost.",
+    "ai_messages_empty": "AI-запрос не содержит сообщений",
+    "ai_messages_too_many": "В AI-запросе слишком много сообщений: {{detail}}",
+    "ai_message_too_large": "AI-сообщение превышает безопасный лимит размера ({{detail}} байт)",
+    "ai_client_create_failed": "Не удалось создать AI HTTP client: {{detail}}",
+    "ai_provider_unavailable": "AI provider недоступен: {{detail}}",
+    "ai_response_read_failed": "Не удалось прочитать ответ AI provider: {{detail}}",
+    "ai_provider_http": "AI provider вернул HTTP-ошибку: {{detail}}",
+    "ai_provider_invalid_json": "AI provider вернул некорректный JSON: {{detail}}",
+    "ai_provider_content_missing": "В ответе AI provider отсутствует содержимое сообщения: {{detail}}"
   }
 }

@@ -25,6 +25,11 @@ fn default_temperature() -> f32 {
     0.15
 }
 
+fn ai_error(code: &str, detail: impl AsRef<str>) -> String {
+    let detail = detail.as_ref().replace(['\r', '\n'], " ");
+    format!("KEYMASTER_AI_ERROR|{code}|{detail}")
+}
+
 fn completion_url(endpoint: &str) -> Result<reqwest::Url, String> {
     let trimmed = endpoint.trim().trim_end_matches('/');
     let candidate = if trimmed.ends_with("/chat/completions") {
@@ -32,9 +37,10 @@ fn completion_url(endpoint: &str) -> Result<reqwest::Url, String> {
     } else {
         format!("{trimmed}/chat/completions")
     };
-    let url = reqwest::Url::parse(&candidate).map_err(|error| format!("Некорректный AI endpoint: {error}"))?;
+    let url = reqwest::Url::parse(&candidate)
+        .map_err(|error| ai_error("endpoint_invalid", error.to_string()))?;
     if !matches!(url.scheme(), "http" | "https") {
-        return Err("AI endpoint должен использовать http:// или https://".to_string());
+        return Err(ai_error("endpoint_scheme", url.scheme()));
     }
 
     if url.scheme() == "http" {
@@ -44,7 +50,7 @@ fn completion_url(endpoint: &str) -> Result<reqwest::Url, String> {
             || host == "::1"
             || host.ends_with(".localhost");
         if !local {
-            return Err("Удалённый AI endpoint без TLS запрещён. Используйте https://; http:// разрешён только для localhost.".to_string());
+            return Err(ai_error("remote_http_forbidden", ""));
         }
     }
 
@@ -60,7 +66,7 @@ fn extract_content(value: &Value) -> Result<String, String> {
         .and_then(|message| message.get("content"))
         .and_then(Value::as_str)
         .map(str::to_string)
-        .ok_or_else(|| "AI provider вернул ответ без choices[0].message.content".to_string())
+        .ok_or_else(|| ai_error("provider_content_missing", "choices[0].message.content"))
 }
 
 /// Provider-neutral OpenAI-compatible proxy.
@@ -71,16 +77,23 @@ fn extract_content(value: &Value) -> Result<String, String> {
 #[tauri::command]
 pub async fn ai_chat_completion(request: AiChatRequest) -> Result<Value, String> {
     if request.model.trim().is_empty() {
-        return Err("AI model не указан".to_string());
+        return Err(ai_error("model_missing", ""));
     }
     if request.messages.is_empty() {
-        return Err("AI messages пусты".to_string());
+        return Err(ai_error("messages_empty", ""));
     }
     if request.messages.len() > 32 {
-        return Err("Слишком много AI messages в одном запросе".to_string());
+        return Err(ai_error(
+            "messages_too_many",
+            request.messages.len().to_string(),
+        ));
     }
-    if request.messages.iter().any(|message| message.content.len() > 64_000) {
-        return Err("AI message превышает безопасный лимит размера".to_string());
+    if request
+        .messages
+        .iter()
+        .any(|message| message.content.len() > 64_000)
+    {
+        return Err(ai_error("message_too_large", "64000"));
     }
 
     let url = completion_url(&request.endpoint)?;
@@ -88,7 +101,7 @@ pub async fn ai_chat_completion(request: AiChatRequest) -> Result<Value, String>
         .connect_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(90))
         .build()
-        .map_err(|error| format!("Не удалось создать AI HTTP client: {error}"))?;
+        .map_err(|error| ai_error("client_create_failed", error.to_string()))?;
 
     let body = json!({
         "model": request.model.trim(),
@@ -108,20 +121,23 @@ pub async fn ai_chat_completion(request: AiChatRequest) -> Result<Value, String>
     let response = builder
         .send()
         .await
-        .map_err(|error| format!("AI provider недоступен: {error}"))?;
+        .map_err(|error| ai_error("provider_unavailable", error.to_string()))?;
     let status = response.status();
     let text = response
         .text()
         .await
-        .map_err(|error| format!("Не удалось прочитать AI response: {error}"))?;
+        .map_err(|error| ai_error("response_read_failed", error.to_string()))?;
 
     if !status.is_success() {
         let safe_excerpt: String = text.chars().take(1200).collect();
-        return Err(format!("AI provider HTTP {}: {}", status.as_u16(), safe_excerpt));
+        return Err(ai_error(
+            "provider_http",
+            format!("{}: {}", status.as_u16(), safe_excerpt),
+        ));
     }
 
     let value: Value = serde_json::from_str(&text)
-        .map_err(|error| format!("AI provider вернул не JSON: {error}"))?;
+        .map_err(|error| ai_error("provider_invalid_json", error.to_string()))?;
     let content = extract_content(&value)?;
     Ok(json!({ "content": content }))
 }

@@ -1,7 +1,7 @@
 import { invoke } from './ipc'
 import type { Profile } from './types'
 import { parseAutomationDraft, type AiAutomationDraft } from './innovation'
-import { automationError } from './automationErrors'
+import { AutomationError, automationError, type AutomationErrorCode } from './automationErrors'
 
 export interface AiProviderConfig {
   endpoint: string
@@ -95,6 +95,36 @@ function stripCodeFence(text: string): string {
     .trim()
 }
 
+const AI_BRIDGE_MARKER = 'KEYMASTER_AI_ERROR|'
+const aiBridgeCodes: Record<string, AutomationErrorCode> = {
+  endpoint_invalid: 'ai_endpoint_invalid',
+  endpoint_scheme: 'ai_endpoint_scheme',
+  remote_http_forbidden: 'ai_remote_http_forbidden',
+  model_missing: 'ai_model_missing',
+  messages_empty: 'ai_messages_empty',
+  messages_too_many: 'ai_messages_too_many',
+  message_too_large: 'ai_message_too_large',
+  client_create_failed: 'ai_client_create_failed',
+  provider_unavailable: 'ai_provider_unavailable',
+  response_read_failed: 'ai_response_read_failed',
+  provider_http: 'ai_provider_http',
+  provider_invalid_json: 'ai_provider_invalid_json',
+  provider_content_missing: 'ai_provider_content_missing',
+}
+
+export function decodeAiBridgeError(error: unknown): AutomationError | null {
+  const source = error instanceof Error ? error.message : String(error)
+  const markerIndex = source.indexOf(AI_BRIDGE_MARKER)
+  if (markerIndex < 0) return null
+  const payload = source.slice(markerIndex + AI_BRIDGE_MARKER.length)
+  const separator = payload.indexOf('|')
+  const bridgeCode = separator >= 0 ? payload.slice(0, separator) : payload
+  const detail = separator >= 0 ? payload.slice(separator + 1) : ''
+  const code = aiBridgeCodes[bridgeCode]
+  if (!code) return null
+  return new AutomationError(code, detail ? { detail } : {})
+}
+
 export async function requestAutomationDraft(
   provider: AiProviderConfig,
   profile: Profile,
@@ -106,18 +136,25 @@ export async function requestAutomationDraft(
   if (!model) automationError('ai_model_missing')
   if (!userPrompt.trim()) automationError('ai_prompt_missing')
 
-  const response = await invoke<AiChatResponse>('ai_chat_completion', {
-    request: {
-      endpoint,
-      model,
-      apiKey: provider.apiKey,
-      messages: [
-        { role: 'system', content: buildComposerSystemPrompt(profile) },
-        { role: 'user', content: userPrompt.trim() },
-      ],
-      temperature: 0.15,
-    },
-  })
+  let response: AiChatResponse
+  try {
+    response = await invoke<AiChatResponse>('ai_chat_completion', {
+      request: {
+        endpoint,
+        model,
+        apiKey: provider.apiKey,
+        messages: [
+          { role: 'system', content: buildComposerSystemPrompt(profile) },
+          { role: 'user', content: userPrompt.trim() },
+        ],
+        temperature: 0.15,
+      },
+    })
+  } catch (error) {
+    const decoded = decodeAiBridgeError(error)
+    if (decoded) throw decoded
+    throw error
+  }
 
   const raw = stripCodeFence(response.content)
   let parsed: unknown

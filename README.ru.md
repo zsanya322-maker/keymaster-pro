@@ -143,6 +143,61 @@ KeyMaster Pro — настольная Windows-утилита для перен�
 
 ---
 
+## Preview PR #4: Automation Lab (кандидат 0.5.0)
+
+В этой ветке добавлен первый доведённый вертикальный срез **AI Composer**, локального **MCP bridge** и переносимых пакетов **keymaster-pack v1**. PR намеренно остаётся draft до ручной проверки Windows UI на ветке.
+
+### AI Automation Composer
+
+- OpenAI-compatible endpoint, типизированный draft и обязательный preview/install вместо прямого исполнения ответа модели.
+- API key живёт только в поле UI и текущем запросе: KeyMaster **не сохраняет** его в профиль, config/store или логи.
+- Обычный `http://` разрешён только для localhost-провайдеров; удалённый endpoint обязан использовать `https://`.
+- Provider/network ошибки пересекают Rust boundary как стабильные коды и отображаются на выбранном языке UI.
+- Правила и макросы повторно десериализуются и валидируются Rust-daemon по runtime-типам профиля непосредственно перед сохранением.
+- Перед каждой установкой создаётся backup профиля; доступна кнопка **Undo install**, а устаревший Undo блокируется после более нового изменения профиля.
+
+### MCP bridge
+
+Локальный stdio MCP server запускается тем же установленным exe:
+
+- `KeyMaster-Pro.exe --mcp` — read-only: чтение профилей/status и валидация правила.
+- `KeyMaster-Pro.exe --mcp-write` — отдельный явный opt-in для активации профиля, запуска макроса и записи правила.
+
+Пример локальной stdio-конфигурации для Claude Desktop / Claude Code (по умолчанию используйте `--mcp`):
+
+```json
+{
+  "mcpServers": {
+    "keymaster": {
+      "command": "C:\\Program Files\\KeyMaster-Pro\\KeyMaster-Pro.exe",
+      "args": ["--mcp"]
+    }
+  }
+}
+```
+
+Для Claude Code тот же объект можно хранить в проектном `.mcp.json` либо передать через его MCP config options. Менять аргумент на `--mcp-write` следует только когда осознанно нужен write/execute доступ.
+
+**Граница ChatGPT:** этот PR не пытается подключить локальный stdio-процесс как ChatGPT app/connector. MCP-интеграции OpenAI используют доступный **remote MCP server URL/service connector**, поэтому HTTP transport, аутентификация, внешний доступ и отдельный threat review — самостоятельная задача.
+
+### `keymaster-pack` v1
+
+- переносимый JSON envelope: `format: "keymaster-pack"`, `version: 1`;
+- лимит импорта **2 MiB**, проверяемый до чтения файла и повторно после чтения/парсинга;
+- локальный inspection показывает permissions и опасные действия до установки;
+- UUID macro/layer/folder/rule при импорте генерируются заново, внутренние ссылки перепривязываются;
+- dangling references, duplicate IDs, folder cycles, пустые actions и повреждённый payload отклоняются;
+- финальный допуск выполняет тот же Rust automation validation/write boundary, что используется AI и MCP;
+- установка всегда backup-first и поддерживает Undo.
+
+### Что реально проверяет CI
+
+Windows CI PR #4 запускает frontend unit tests, TypeScript/Vite, Rust check/tests и ESLint, затем отдельный real-process MCP smoke. Smoke job собирает `KeyMaster-Pro.exe`, поднимает настоящий daemon с изолированным `%APPDATA%`, подключается официальным `@modelcontextprotocol/client`, проверяет оба MCP-режима, все семь tools write-режима, запись на диск, физический backup, Undo/stale-Undo protection и конкурентные изменения профиля.
+
+**Не входит в этот PR:** второй слой Hub (diff/conflict detector, каталог с подписями), marketplace/discovery и remote MCP hosting для ChatGPT. К ним не переходим, пока этот вертикальный срез не пройдёт ручной Windows UI QA.
+
+---
+
 ## Архитектура
 
 ```text

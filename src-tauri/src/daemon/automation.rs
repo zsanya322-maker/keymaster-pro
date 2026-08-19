@@ -303,7 +303,36 @@ pub fn validate_profile_automation(profile: &Profile) -> Result<(), String> {
     Ok(())
 }
 
-fn candidate_with_additions(mut profile: Profile, additions: AutomationAdditions) -> Profile {
+fn next_rule_order(profile: &Profile) -> i32 {
+    profile
+        .rules
+        .iter()
+        .map(|rule| rule.order)
+        .max()
+        .unwrap_or(-1)
+        .saturating_add(1)
+}
+
+fn next_folder_order(profile: &Profile) -> i32 {
+    profile
+        .folders
+        .iter()
+        .map(|folder| folder.order)
+        .max()
+        .unwrap_or(-1)
+        .saturating_add(1)
+}
+
+fn candidate_with_additions(mut profile: Profile, mut additions: AutomationAdditions) -> Profile {
+    let rule_start = next_rule_order(&profile);
+    for (index, rule) in additions.rules.iter_mut().enumerate() {
+        rule.order = rule_start.saturating_add(i32::try_from(index).unwrap_or(i32::MAX));
+    }
+    let folder_start = next_folder_order(&profile);
+    for (index, folder) in additions.folders.iter_mut().enumerate() {
+        folder.order = folder_start.saturating_add(i32::try_from(index).unwrap_or(i32::MAX));
+    }
+
     profile.rules.extend(additions.rules);
     profile.macros.extend(additions.macros);
     profile.layers.extend(additions.layers);
@@ -361,7 +390,7 @@ fn install_additions(request: AdditionsRequest, state: &DaemonStateRef) -> Resul
 fn append_rule(request: RuleRequest, state: &DaemonStateRef) -> Result<Value, String> {
     let profile_id = selected_profile_id(request.profile_id, state)?;
     let mut profile = crate::shared::persistence::load_profile_checked(&profile_id)?;
-    let rule = normalize_rule_value(request.rule, profile.rules.len() as i32)?;
+    let rule = normalize_rule_value(request.rule, next_rule_order(&profile))?;
     profile.rules.push(rule.clone());
     validate_profile_automation(&profile)?;
     crate::shared::persistence::save_profile(&profile)?;
@@ -380,7 +409,7 @@ fn append_rule(request: RuleRequest, state: &DaemonStateRef) -> Result<Value, St
 fn validate_rule(request: RuleRequest, state: &DaemonStateRef) -> Result<Value, String> {
     let profile_id = selected_profile_id(request.profile_id, state)?;
     let mut profile = crate::shared::persistence::load_profile_checked(&profile_id)?;
-    let rule = normalize_rule_value(request.rule, profile.rules.len() as i32)?;
+    let rule = normalize_rule_value(request.rule, next_rule_order(&profile))?;
     profile.rules.push(rule.clone());
     validate_profile_automation(&profile)?;
     serde_json::to_value(rule).map_err(|error| error.to_string())
@@ -567,5 +596,32 @@ mod tests {
                 .unwrap_err()
                 .contains("cycle")
         );
+    }
+    #[test]
+    fn additions_order_is_normalized_inside_write_boundary() {
+        let mut profile = base_profile();
+        profile.folders[0].order = 30;
+        let mut existing = valid_rule();
+        existing.id = "existing".into();
+        existing.order = 40;
+        profile.rules.push(existing);
+
+        let mut incoming = valid_rule();
+        incoming.id = "incoming".into();
+        incoming.order = -100;
+        let additions = AutomationAdditions {
+            rules: vec![incoming],
+            folders: vec![RuleFolder {
+                id: "new-folder".into(),
+                name: "New folder".into(),
+                parent_id: None,
+                order: -100,
+            }],
+            ..AutomationAdditions::default()
+        };
+
+        let candidate = candidate_with_additions(profile, additions);
+        assert_eq!(candidate.rules.last().unwrap().order, 41);
+        assert_eq!(candidate.folders.last().unwrap().order, 31);
     }
 }
