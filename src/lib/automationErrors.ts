@@ -11,7 +11,7 @@ export type AutomationErrorCode =
   | 'draft_macro_name_missing'
   | 'draft_macro_steps_invalid'
   | 'draft_rule_not_object'
-  | 'draft_rule_shape_invalid'
+  | 'draft_invalid_rule_shape'
   | 'draft_trigger_invalid'
   | 'draft_actions_empty'
   | 'draft_action_invalid'
