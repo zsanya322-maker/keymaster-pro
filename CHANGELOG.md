@@ -6,17 +6,46 @@ This file describes **shipped releases**. Planned work belongs in [`ROADMAP.md`]
 
 ## [Unreleased]
 
-### Fixed
-- **AI Provider Profiles:** save provider name/endpoint/model in KeyMaster settings and store API keys locally in Windows Credential Manager instead of asking on every visit.
-- Automation Lab keeps the current prompt and generated draft while navigating between application sections.
-- Generated automations are explicitly marked as drafts until installation is confirmed; successful install immediately opens Rules so the new rules are visible.
+No public changes recorded yet.
+
+---
+
+## [0.5.1] - 2026-08-19
+
+### AI provider profiles
+
+- Added persistent AI provider profiles in Settings with provider name, endpoint and model.
+- Added local API-key persistence through **Windows Credential Manager** instead of plaintext profile/config JSON.
+- Editing an existing provider with an empty key field now keeps the previously stored secret.
+- Automation Composer now uses the selected saved provider so users do not need to re-enter endpoint/model/key on every visit or after restarting the app.
+- Existing v0.5.0 configs remain compatible through defaulted provider fields.
+
+### Composer UX fixes
+
+- Automation Lab now keeps the current prompt and generated draft while navigating between application sections during the app session.
+- Generated AI output is explicitly marked as a **draft / not installed** until installation is confirmed.
+- Install action shows the number of rules about to be installed.
+- After successful AI installation KeyMaster reloads the profile and immediately opens **Rules** so the new rules are visible.
+- Added regression coverage for Automation → Rules → Automation navigation and internal Lab-tab changes.
+
+### Validation
+
+- Frontend unit test suite expanded to **27 tests**.
+- TypeScript/Vite build, Rust check/tests and ESLint pass on the v0.5.1 branch.
+- Real-process Windows MCP stdio smoke remains green, confirming the hotfix did not regress the v0.5.0 MCP boundary.
+
+---
+
+## [0.5.0] - 2026-08-19
 
 ### Automation Lab / AI Composer
 
 - Added the bilingual Automation Lab UI with provider-neutral OpenAI-compatible draft generation, permission inspection and explicit install.
-- API keys remain request-only and are never persisted; remote plaintext HTTP is rejected while localhost HTTP remains available for local model servers.
 - Added defensive TypeScript parsing for AI drafts/macro steps plus canonical Rust-side validation before profile writes.
-- Provider/network failures now cross the Rust/TypeScript boundary as stable codes so EN/RU UI errors do not depend on backend prose.
+- Plain remote `http://` endpoints are rejected while localhost HTTP remains available for local model servers.
+- Provider/network failures cross the Rust/TypeScript boundary as stable codes so EN/RU UI errors do not depend on backend prose.
+- Generated rules/macros are re-deserialized and validated by the Rust daemon immediately before profile writes.
+- Every install creates a backup and one-click Undo receipt; stale Undo is rejected after a newer profile mutation.
 
 ### MCP bridge
 
@@ -25,20 +54,19 @@ This file describes **shipped releases**. Planned work belongs in [`ROADMAP.md`]
 - Routed MCP validation/writes through the same Rust automation boundary used by GUI installs instead of a parallel validator.
 - Added a Windows real-process smoke test using the official `@modelcontextprotocol/client`, including legacy/modern initialization and both access modes.
 
-### keymaster-pack v1 and write safety
+### `keymaster-pack` v1 and write safety
 
 - Added portable `keymaster-pack` v1 import/export with UUID regeneration and reference rebinding.
 - Added 2 MiB import bounds, duplicate/dangling-reference/folder-cycle checks and permission/warning inspection.
-- Serialized all profile mutations across Named Pipe clients to eliminate GUI/MCP read-modify-write loss.
+- Serialized profile mutations across Named Pipe clients to eliminate GUI/MCP read-modify-write loss.
 - Added mandatory backup receipts, one-click Undo install and stale-Undo protection.
-- Undo receipt now survives Automation Lab navigation for the lifetime of the app process.
+- Undo receipt survives Automation Lab navigation for the lifetime of the app process.
 - Daemon normalizes incoming rule/folder ordering inside the serialized write transaction instead of trusting frontend order values.
 
 ### Validation and localization
 
-- Added Vitest coverage for draft/pack validation, real EN/RU language switching and AI bridge error decoding.
+- Added Vitest coverage for draft/pack validation, EN/RU language switching and AI bridge error decoding.
 - CI runs frontend tests, TypeScript/Vite, Rust check/tests, ESLint and a separate Windows MCP/safety smoke job.
-- Version advanced to 0.5.0 for this feature candidate; PR remains draft until manual Windows UI QA is complete.
 
 ---
 
