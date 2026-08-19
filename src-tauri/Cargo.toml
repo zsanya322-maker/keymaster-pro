@@ -33,7 +33,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 # Async runtime / provider HTTP
- tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 
 # Logging
@@ -63,8 +63,6 @@ windows = { version = "0.62", features = [
   "Win32_UI_Shell",
   "Win32_System_Com",
   "Win32_System_Threading",
-    "Win32_System_Com",
-    "Win32_Graphics_Gdi",
   "Win32_Security",
   "Win32_System_Pipes",
   "Win32_System_IO",
