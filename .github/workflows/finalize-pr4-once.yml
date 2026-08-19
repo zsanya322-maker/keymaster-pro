@@ -28,7 +28,9 @@ jobs:
         with:
           workspaces: './src-tauri -> target'
       - name: Apply deterministic finalization patch
-        run: python scripts/finalize-pr4.py
+        run: |
+          python scripts/finalize-pr4.py
+          python scripts/finalize-pr4-post.py
       - name: Refresh lockfile and format
         shell: pwsh
         run: |
