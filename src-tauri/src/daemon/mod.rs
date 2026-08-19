@@ -1,3 +1,4 @@
+pub mod automation;
 pub mod chord_output;
 pub mod compiler;
 pub mod engine;
