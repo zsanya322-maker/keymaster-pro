@@ -1,0 +1,66 @@
+name: Hardening Refresh
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'agent/ai-mcp-hub'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Patch daemon mutation serialization and automation routing
+        shell: pwsh
+        run: |
+          @'
+          from pathlib import Path
+          path = Path('src-tauri/src/daemon/ipc.rs')
+          text = path.read_text(encoding='utf-8')
+
+          marker = 'use super::ipc_types::*;\n'
+          insert = '''use super::ipc_types::*;\n\n// Profile mutations arrive over independent Named Pipe connections and may be\n// processed concurrently. Serialize only mutation requests so read/status IPC\n// remains concurrent while read-modify-write operations are atomic relative to\n// every existing GUI/profile mutation.\nstatic PROFILE_MUTATION_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());\n\nfn serializes_profile_mutation(method: &str) -> bool {\n    method.starts_with("automation.")\n        || (method.starts_with("profile.")\n            && !matches!(\n                method,\n                "profile.list" | "profile.runtime_status" | "profile.backups"\n            ))\n        || matches!(method, "set_active_profile" | "apply_onboarding_example")\n}\n'''
+          if 'static PROFILE_MUTATION_LOCK' not in text:
+              text = text.replace(marker, insert, 1)
+
+          old = '                    let response = route_request(req, &state).await;\n'
+          new = '''                    let mutation_guard = if serializes_profile_mutation(&req.method) {\n                        Some(PROFILE_MUTATION_LOCK.lock().await)\n                    } else {\n                        None\n                    };\n                    let response = route_request(req, &state).await;\n                    drop(mutation_guard);\n'''
+          if old in text:
+              text = text.replace(old, new, 1)
+
+          marker2 = '        // === Canonical router ===\n'
+          automation = '''        // === Automation write/validation boundary ===\n        method if method.starts_with("automation.") => {\n            match crate::daemon::automation::dispatch(method, req.params, state).await {\n                Ok(value) => Ok(value),\n                Err(message) => {\n                    warn!("Automation IPC error for {}: {}", method, message);\n                    Err(JsonRpcError {\n                        code: INTERNAL_ERROR,\n                        message,\n                        data: None,\n                    })\n                }\n            }\n        }\n\n'''
+          if 'Automation write/validation boundary' not in text:
+              text = text.replace(marker2, automation + marker2, 1)
+
+          path.write_text(text, encoding='utf-8')
+          '@ | python -
+      - name: Refresh pnpm lockfile
+        run: pnpm install --lockfile-only --no-frozen-lockfile
+      - name: Format Rust
+        working-directory: src-tauri
+        run: cargo fmt --all
+      - name: Commit generated and patched files
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pnpm-lock.yaml src-tauri/src/daemon/ipc.rs src-tauri/src/daemon/automation.rs src-tauri/src/daemon/mod.rs
+          git diff --cached --quiet
+          if ($LASTEXITCODE -eq 0) { exit 0 }
+          git commit -m "build: refresh hardening generated files"
+          git push origin HEAD:agent/ai-mcp-hub
