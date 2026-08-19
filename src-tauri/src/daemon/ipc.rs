@@ -13,6 +13,22 @@ use crate::shared::constants;
 
 use super::ipc_types::*;
 
+// Profile mutations arrive over independent Named Pipe connections and may be
+// processed concurrently. Serialize only mutation requests so read/status IPC
+// remains concurrent while read-modify-write operations are atomic relative to
+// every existing GUI/profile mutation.
+static PROFILE_MUTATION_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+fn serializes_profile_mutation(method: &str) -> bool {
+    method.starts_with("automation.")
+        || (method.starts_with("profile.")
+            && !matches!(
+                method,
+                "profile.list" | "profile.runtime_status" | "profile.backups"
+            ))
+        || matches!(method, "set_active_profile" | "apply_onboarding_example")
+}
+
 fn pipe_options(first_instance: bool) -> ServerOptions {
     let mut options = ServerOptions::new();
     options
@@ -150,7 +166,13 @@ async fn handle_client(pipe: NamedPipeServer, state: DaemonStateRef) -> Result<(
                     // before posting WM_QUIT. Otherwise a correct shutdown can look like
                     // a broken pipe to the GUI.
                     let shutdown_after_response = req.method == "shutdown";
+                    let mutation_guard = if serializes_profile_mutation(&req.method) {
+                        Some(PROFILE_MUTATION_LOCK.lock().await)
+                    } else {
+                        None
+                    };
                     let response = route_request(req, &state).await;
+                    drop(mutation_guard);
                     let mut response_bytes = serde_json::to_string(&response)
                         .map_err(|e| format!("Serialization error: {}", e))?;
                     response_bytes.push('\n');
@@ -223,6 +245,21 @@ async fn route_request(req: JsonRpcRequest, state: &DaemonStateRef) -> JsonRpcRe
         // === Legacy config aliases ===
         "get_config" => handle_get_config(state).await,
         "update_config" => handle_update_config(state, req.params).await,
+
+        // === Automation write/validation boundary ===
+        method if method.starts_with("automation.") => {
+            match crate::daemon::automation::dispatch(method, req.params, state).await {
+                Ok(value) => Ok(value),
+                Err(message) => {
+                    warn!("Automation IPC error for {}: {}", method, message);
+                    Err(JsonRpcError {
+                        code: INTERNAL_ERROR,
+                        message,
+                        data: None,
+                    })
+                }
+            }
+        }
 
         // === Canonical router ===
         _ => match crate::daemon::router::dispatch(req.method.as_str(), req.params, state).await {

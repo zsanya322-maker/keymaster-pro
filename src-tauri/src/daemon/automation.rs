@@ -45,7 +45,10 @@ struct UndoRequest {
     expected_revision: String,
 }
 
-fn selected_profile_id(requested: Option<String>, state: &DaemonStateRef) -> Result<String, String> {
+fn selected_profile_id(
+    requested: Option<String>,
+    state: &DaemonStateRef,
+) -> Result<String, String> {
     if let Some(id) = requested.filter(|id| !id.trim().is_empty()) {
         return Ok(id);
     }
@@ -61,7 +64,10 @@ fn profile_revision(profile: &Profile) -> Result<String, String> {
     let canonical = crate::shared::persistence::export_profile_value(profile)?;
     let serialized = serde_json::to_string(&canonical)
         .map_err(|error| format!("Failed to serialize profile revision: {error}"))?;
-    Ok(format!("{:016x}", crate::shared::calculate_hash(&serialized)))
+    Ok(format!(
+        "{:016x}",
+        crate::shared::calculate_hash(&serialized)
+    ))
 }
 
 fn refresh_active_runtime(profile: &Profile, state: &DaemonStateRef) -> Result<(), String> {
@@ -120,7 +126,10 @@ fn validate_folder_graph(profile: &Profile, folder_ids: &HashSet<String>) -> Res
         let mut current = Some(folder.id.as_str());
         while let Some(id) = current {
             if !seen.insert(id) {
-                return Err(format!("Folder cycle detected near folderId: {}", folder.id));
+                return Err(format!(
+                    "Folder cycle detected near folderId: {}",
+                    folder.id
+                ));
             }
             current = parents.get(id).copied().flatten();
         }
@@ -139,7 +148,9 @@ fn validate_action(
                 return Err(format!("Unknown macroId: {macro_id}"));
             }
             if !playback.speed.is_finite() || playback.speed <= 0.0 {
-                return Err(format!("Invalid macro playback speed for macroId: {macro_id}"));
+                return Err(format!(
+                    "Invalid macro playback speed for macroId: {macro_id}"
+                ));
             }
             if playback.repeat_count == 0 {
                 return Err(format!("repeatCount must be >= 1 for macroId: {macro_id}"));
@@ -245,7 +256,10 @@ fn validate_condition(
 pub fn validate_profile_automation(profile: &Profile) -> Result<(), String> {
     let macro_ids = collect_unique("macro", profile.macros.iter().map(|item| item.id.as_str()))?;
     let layer_ids = collect_unique("layer", profile.layers.iter().map(|item| item.id.as_str()))?;
-    let folder_ids = collect_unique("folder", profile.folders.iter().map(|item| item.id.as_str()))?;
+    let folder_ids = collect_unique(
+        "folder",
+        profile.folders.iter().map(|item| item.id.as_str()),
+    )?;
     collect_unique("rule", profile.rules.iter().map(|item| item.id.as_str()))?;
 
     for macro_definition in &profile.macros {
@@ -262,11 +276,17 @@ pub fn validate_profile_automation(profile: &Profile) -> Result<(), String> {
 
     for rule in &profile.rules {
         if rule.actions.is_empty() {
-            return Err(format!("Rule '{}' must contain at least one action", rule.id));
+            return Err(format!(
+                "Rule '{}' must contain at least one action",
+                rule.id
+            ));
         }
         if let Some(folder_id) = rule.folder_id.as_deref() {
             if !folder_ids.contains(folder_id) {
-                return Err(format!("Rule '{}' references missing folderId: {folder_id}", rule.id));
+                return Err(format!(
+                    "Rule '{}' references missing folderId: {folder_id}",
+                    rule.id
+                ));
             }
         }
         for action in rule
@@ -304,7 +324,9 @@ fn normalize_rule_value(mut value: Value, order: i32) -> Result<FrontendRule, St
     object.entry("priority".to_string()).or_insert(json!(10));
     object.entry("enabled".to_string()).or_insert(json!(true));
     object.entry("conditions".to_string()).or_insert(json!([]));
-    object.entry("holdActions".to_string()).or_insert(Value::Null);
+    object
+        .entry("holdActions".to_string())
+        .or_insert(Value::Null);
     object.entry("folderId".to_string()).or_insert(Value::Null);
     object.insert("order".to_string(), json!(order));
     serde_json::from_value(value)
@@ -315,13 +337,12 @@ fn latest_backup_name(profile_id: &str) -> Result<String, String> {
     crate::shared::persistence::list_profile_backups(profile_id)?
         .into_iter()
         .next()
-        .ok_or_else(|| format!("Mandatory backup for profile '{profile_id}' was not found after save"))
+        .ok_or_else(|| {
+            format!("Mandatory backup for profile '{profile_id}' was not found after save")
+        })
 }
 
-fn install_additions(
-    request: AdditionsRequest,
-    state: &DaemonStateRef,
-) -> Result<Value, String> {
+fn install_additions(request: AdditionsRequest, state: &DaemonStateRef) -> Result<Value, String> {
     let profile = crate::shared::persistence::load_profile_checked(&request.profile_id)?;
     let candidate = candidate_with_additions(profile, request.additions);
     validate_profile_automation(&candidate)?;
@@ -402,24 +423,21 @@ pub async fn dispatch(
         }
         "automation.install" => install_additions(parse_additions_request(params)?, state),
         "automation.validate_rule" => {
-            let request: RuleRequest = serde_json::from_value(
-                params.ok_or_else(|| "Missing parameters".to_string())?,
-            )
-            .map_err(|error| error.to_string())?;
+            let request: RuleRequest =
+                serde_json::from_value(params.ok_or_else(|| "Missing parameters".to_string())?)
+                    .map_err(|error| error.to_string())?;
             validate_rule(request, state)
         }
         "automation.append_rule" => {
-            let request: RuleRequest = serde_json::from_value(
-                params.ok_or_else(|| "Missing parameters".to_string())?,
-            )
-            .map_err(|error| error.to_string())?;
+            let request: RuleRequest =
+                serde_json::from_value(params.ok_or_else(|| "Missing parameters".to_string())?)
+                    .map_err(|error| error.to_string())?;
             append_rule(request, state)
         }
         "automation.undo_install" => {
-            let request: UndoRequest = serde_json::from_value(
-                params.ok_or_else(|| "Missing parameters".to_string())?,
-            )
-            .map_err(|error| error.to_string())?;
+            let request: UndoRequest =
+                serde_json::from_value(params.ok_or_else(|| "Missing parameters".to_string())?)
+                    .map_err(|error| error.to_string())?;
             undo_install(request, state)
         }
         _ => Err(format!("Unsupported automation method: {method}")),
@@ -495,9 +513,11 @@ mod tests {
         let mut rule = valid_rule();
         rule.actions.clear();
         profile.rules.push(rule);
-        assert!(validate_profile_automation(&profile)
-            .unwrap_err()
-            .contains("at least one action"));
+        assert!(
+            validate_profile_automation(&profile)
+                .unwrap_err()
+                .contains("at least one action")
+        );
     }
 
     #[test]
@@ -542,8 +562,10 @@ mod tests {
                 order: 1,
             },
         ];
-        assert!(validate_profile_automation(&profile)
-            .unwrap_err()
-            .contains("cycle"));
+        assert!(
+            validate_profile_automation(&profile)
+                .unwrap_err()
+                .contains("cycle")
+        );
     }
 }
